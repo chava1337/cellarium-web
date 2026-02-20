@@ -3,6 +3,8 @@
  * Maneja tanto QR de comensales como de invitaciones admin
  */
 
+import { supabase } from '../lib/supabase';
+
 export interface QrTokenData {
   type: 'guest' | 'admin';
   token: string;
@@ -28,10 +30,7 @@ export interface QrValidationResult {
  */
 export const validateQrToken = async (token: string): Promise<QrValidationResult> => {
   try {
-    // PRODUCCIÓN: Descomentar este código cuando tengas Supabase configurado
-    /*
-    import { supabase } from '../config/supabase';
-    
+    // PRODUCCIÓN: Usar Supabase real
     const { data: qrToken, error } = await supabase
       .from('qr_tokens')
       .select(`
@@ -61,8 +60,8 @@ export const validateQrToken = async (token: string): Promise<QrValidationResult
       };
     }
 
-    // Verificar si ya fue usado (solo para admin)
-    if (qrToken.type === 'admin' && qrToken.used) {
+    // Verificar si ya fue usado (solo para admin_invite)
+    if (qrToken.type === 'admin_invite' && qrToken.used) {
       return {
         valid: false,
         error: 'Este código de invitación ya fue utilizado.',
@@ -88,15 +87,15 @@ export const validateQrToken = async (token: string): Promise<QrValidationResult
       .from('qr_tokens')
       .update({ 
         current_uses: qrToken.current_uses + 1,
-        used: qrToken.type === 'admin' ? true : qrToken.used,
-        used_at: qrToken.type === 'admin' ? new Date().toISOString() : qrToken.used_at,
+        used: qrToken.type === 'admin_invite' ? true : qrToken.used,
+        used_at: qrToken.type === 'admin_invite' ? new Date().toISOString() : qrToken.used_at,
       })
       .eq('id', qrToken.id);
 
     return {
       valid: true,
       data: {
-        type: qrToken.type,
+        type: qrToken.type === 'admin_invite' ? 'admin' : 'guest',
         token: qrToken.token,
         branchId: qrToken.branch_id,
         branchName: qrToken.branches.name,
@@ -108,63 +107,7 @@ export const validateQrToken = async (token: string): Promise<QrValidationResult
         address: qrToken.branches.address,
       },
     };
-    */
 
-    // DESARROLLO: Código mock (eliminar en producción)
-    // Simular delay de red
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    // Mock de sucursales
-    const mockBranches = [
-      { id: '1', name: 'Restaurante Principal', address: 'Av. Principal 123' },
-      { id: '2', name: 'Sucursal Centro', address: 'Calle Central 456' },
-      { id: '3', name: 'Sucursal Norte', address: 'Blvd. Norte 789' },
-    ];
-
-    // Extraer datos del token (en producción vendría de Supabase)
-    // Por ahora, parseamos si es JSON o generamos mock
-    let tokenData: QrTokenData;
-    
-    try {
-      // Intentar parsear como JSON (si viene de QRCode component)
-      tokenData = JSON.parse(token);
-    } catch {
-      // Si no es JSON, es un token simple, generar mock
-      tokenData = {
-        type: 'guest',
-        token: token,
-        branchId: '1',
-        branchName: 'Restaurante Principal',
-      };
-    }
-
-    // Verificar expiración
-    if (tokenData.expiresAt) {
-      const expirationDate = new Date(tokenData.expiresAt);
-      if (expirationDate < new Date()) {
-        return {
-          valid: false,
-          error: 'El código QR ha expirado. Solicita uno nuevo al restaurante.',
-        };
-      }
-    }
-
-    // Buscar información de la sucursal
-    const branch = mockBranches.find(b => b.id === tokenData.branchId);
-    
-    if (!branch) {
-      return {
-        valid: false,
-        error: 'Sucursal no encontrada',
-      };
-    }
-
-    // Token válido
-    return {
-      valid: true,
-      data: tokenData,
-      branch: branch,
-    };
 
   } catch (error) {
     console.error('Error validating QR token:', error);
@@ -184,7 +127,8 @@ export const generateUniversalQrUrl = (qrData: QrTokenData): string => {
   const encodedData = encodeURIComponent(JSON.stringify(qrData));
   
   // URL universal que funciona en web y redirige a stores si no hay app
-  const universalUrl = `https://cellarium.app/qr?data=${encodedData}`;
+  // Mantener formato de query parameter para compatibilidad con sitio Vercel
+  const universalUrl = `https://cellarium-visualizador-web.vercel.app/qr?data=${encodedData}`;
   
   return universalUrl;
 };
@@ -195,7 +139,8 @@ export const generateUniversalQrUrl = (qrData: QrTokenData): string => {
  */
 export const generateDeepLink = (qrData: QrTokenData): string => {
   const encodedData = encodeURIComponent(JSON.stringify(qrData));
-  return `cellarium://qr?data=${encodedData}`;
+  // Usar formato de ruta para que el parser funcione correctamente
+  return `cellarium://qr/${encodedData}`;
 };
 
 /**
@@ -218,14 +163,15 @@ export const isAdminInviteQr = (qrData: QrTokenData): boolean => {
  */
 export const markQrAsUsed = async (token: string): Promise<boolean> => {
   try {
-    // En producción:
-    // await supabase
-    //   .from('qr_tokens')
-    //   .update({ 
-    //     used: true, 
-    //     used_at: new Date().toISOString() 
-    //   })
-    //   .eq('token', token);
+    const { supabase } = await import('../config/supabase');
+    
+    await supabase
+      .from('qr_tokens')
+      .update({ 
+        used: true, 
+        used_at: new Date().toISOString() 
+      })
+      .eq('token', token);
     
     console.log(`QR token ${token} marked as used`);
     return true;

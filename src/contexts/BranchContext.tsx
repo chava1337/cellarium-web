@@ -1,11 +1,15 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Branch } from '../types';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { Branch, User } from '../types';
+import { useAuth } from './AuthContext';
+import { supabase } from '../lib/supabase';
 
 interface BranchContextType {
   currentBranch: Branch | null;
   setCurrentBranch: (branch: Branch) => void;
   availableBranches: Branch[];
   setAvailableBranches: (branches: Branch[]) => void;
+  refreshBranches: () => Promise<void>;
+  isInitialized: boolean;
 }
 
 const BranchContext = createContext<BranchContextType | undefined>(undefined);
@@ -22,46 +26,72 @@ interface BranchProviderProps {
   children: React.ReactNode;
 }
 
-// Sucursales de prueba
-const mockBranches: Branch[] = [
-  {
-    id: '1',
-    name: 'Restaurante Principal',
-    address: 'Av. Principal 123, Ciudad',
-    phone: '+1-555-0123',
-    email: 'info@restaurante.com',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    name: 'Sucursal Centro',
-    address: 'Calle Centro 456, Ciudad',
-    phone: '+1-555-0124',
-    email: 'centro@restaurante.com',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: '3',
-    name: 'Sucursal Norte',
-    address: 'Av. Norte 789, Ciudad',
-    phone: '+1-555-0125',
-    email: 'norte@restaurante.com',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
-
 export const BranchProvider: React.FC<BranchProviderProps> = ({ children }) => {
-  const [currentBranch, setCurrentBranch] = useState<Branch | null>(mockBranches[0]);
-  const [availableBranches, setAvailableBranches] = useState<Branch[]>(mockBranches);
+  const { user, profileReady } = useAuth();
+  const [currentBranch, setCurrentBranch] = useState<Branch | null>(null);
+  const [availableBranches, setAvailableBranches] = useState<Branch[]>([]);
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  const loadBranchesFromDB = useCallback(async (ownerUser: User) => {
+    try {
+      const ownerId = ownerUser.owner_id || ownerUser.id;
+      const { data: branches, error } = await supabase
+        .from('branches')
+        .select('*')
+        .eq('owner_id', ownerId)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('Error cargando sucursales:', error);
+        throw error;
+      }
+
+      let filteredBranches: Branch[] = [];
+      if (ownerUser.role === 'owner') {
+        filteredBranches = branches || [];
+      } else {
+        filteredBranches = (branches || []).filter(
+          branch => branch.id === ownerUser.branch_id
+        );
+      }
+      setAvailableBranches(filteredBranches);
+      if (filteredBranches.length > 0) {
+        if (ownerUser.role === 'owner') {
+          setCurrentBranch(filteredBranches[0]);
+        } else {
+          const assignedBranch = filteredBranches.find(b => b.id === ownerUser.branch_id);
+          setCurrentBranch(assignedBranch || filteredBranches[0]);
+        }
+      }
+      setIsInitialized(true);
+    } catch (error) {
+      setAvailableBranches([]);
+      setCurrentBranch(null);
+      setIsInitialized(true);
+    }
+  }, []);
+
+  const refreshBranches = useCallback(async () => {
+    if (user) await loadBranchesFromDB(user);
+  }, [user, loadBranchesFromDB]);
+
+  useEffect(() => {
+    if (user && profileReady) {
+      loadBranchesFromDB(user as User);
+    } else if (!user) {
+      setAvailableBranches([]);
+      setCurrentBranch(null);
+      setIsInitialized(true);
+    }
+  }, [user, profileReady, loadBranchesFromDB]);
 
   const value: BranchContextType = {
     currentBranch,
     setCurrentBranch,
     availableBranches,
     setAvailableBranches,
+    refreshBranches,
+    isInitialized,
   };
 
   return (

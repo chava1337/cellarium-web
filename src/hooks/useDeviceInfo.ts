@@ -15,7 +15,13 @@ export interface DeviceInfo {
 export const useDeviceInfo = (): DeviceInfo => {
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo>(() => {
     const { width, height } = Dimensions.get('window');
-    const isTablet = width >= 768 || height >= 768; // iPad/Android tablet threshold
+    // Detección más estricta: ambos lados deben ser >= 600px para considerar tablet
+    // Esto evita que smartphones grandes sean detectados como tablets
+    const minDimension = Math.min(width, height);
+    const maxDimension = Math.max(width, height);
+    const screenArea = width * height;
+    // Tablet si: mínimo >= 600px Y máximo >= 800px Y área >= 600,000px²
+    const isTablet = minDimension >= 600 && maxDimension >= 800 && screenArea >= 600000;
     const isPhone = !isTablet;
     const orientation = width > height ? 'landscape' : 'portrait';
     
@@ -33,7 +39,12 @@ export const useDeviceInfo = (): DeviceInfo => {
   useEffect(() => {
     const updateDeviceInfo = () => {
       const { width, height } = Dimensions.get('window');
-      const isTablet = width >= 768 || height >= 768;
+      // Detección más estricta: ambos lados deben ser >= 600px para considerar tablet
+      const minDimension = Math.min(width, height);
+      const maxDimension = Math.max(width, height);
+      const screenArea = width * height;
+      // Tablet si: mínimo >= 600px Y máximo >= 800px Y área >= 600,000px²
+      const isTablet = minDimension >= 600 && maxDimension >= 800 && screenArea >= 600000;
       const isPhone = !isTablet;
       const orientation = width > height ? 'landscape' : 'portrait';
       
@@ -92,6 +103,3 @@ export const getRecommendedLayout = (deviceInfo: DeviceInfo) => {
     };
   }
 };
-
-
-

@@ -1,27 +1,11 @@
 /**
  * Configuración de Supabase
- * Conexión al backend para autenticación, base de datos y storage
+ * Re-exporta el cliente único desde lib/supabase para evitar múltiples instancias.
  */
 
-import { createClient } from '@supabase/supabase-js';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../lib/supabase';
 
-// IMPORTANTE: Reemplazar con tus credenciales reales de Supabase
-// Obtener de: https://supabase.com/dashboard/project/YOUR_PROJECT/settings/api
-
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://your-project.supabase.co';
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'your-anon-key';
-
-// Crear cliente de Supabase con configuración para React Native
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: {
-    // Usar AsyncStorage para persistir sesiones
-    storage: AsyncStorage,
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
-  },
-});
+export { supabase };
 
 // Helper para obtener el usuario actual
 export const getCurrentUser = async () => {
@@ -41,4 +25,3 @@ export const signOut = async () => {
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
 };
-

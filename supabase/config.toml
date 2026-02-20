@@ -1,0 +1,12 @@
+# Supabase project config (Edge Functions verify_jwt)
+# Evita que el Dashboard reactive "Verify JWT with legacy secret" tras deploy.
+# Ref: https://supabase.com/docs/guides/functions/function-configuration
+
+[functions.update-subscription]
+verify_jwt = false
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.get-addon-price]
+verify_jwt = false

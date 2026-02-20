@@ -1,0 +1,13 @@
+-- Optional P2: Add auth.uid() check to delete_user_account (defense in depth).
+-- Edge Function only calls with user.id from token; this blocks direct RPC abuse.
+
+-- Add at start of function body (after DECLARE, before first SELECT):
+--
+-- IF p_user_id IS NULL THEN
+--   RAISE EXCEPTION 'p_user_id is required';
+-- END IF;
+-- IF p_user_id != auth.uid() AND NOT (
+--   SELECT (owner_id = auth.uid()) FROM public.users WHERE id = p_user_id LIMIT 1
+-- ) THEN
+--   RAISE EXCEPTION 'Not authorized to delete this user';
+-- END IF;

@@ -8,19 +8,33 @@ import {
   TextInput,
   Alert,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList, Branch } from '../types';
 import { useBranch } from '../contexts/BranchContext';
+import { useAuth } from '../contexts/AuthContext';
+import { useAdminGuard } from '../hooks/useAdminGuard';
+import { PendingApprovalMessage } from '../components/PendingApprovalMessage';
+import { useLanguage } from '../contexts/LanguageContext';
+import { supabase } from '../lib/supabase';
+import { mapSupabaseErrorToUi } from '../utils/supabaseErrorMapper';
+import { getBranchLimit, canCreateBranch } from '../utils/branchLimit';
 
 type BranchManagementScreenNavigationProp = StackNavigationProp<RootStackParamList, 'BranchManagement'>;
+type BranchManagementScreenRouteProp = RouteProp<RootStackParamList, 'BranchManagement'>;
 
 interface Props {
   navigation: BranchManagementScreenNavigationProp;
+  route: BranchManagementScreenRouteProp;
 }
 
-const BranchManagementScreen: React.FC<Props> = ({ navigation }) => {
-  const { availableBranches, setAvailableBranches } = useBranch();
+const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
+  const { status: guardStatus } = useAdminGuard({ navigation, route });
+  const { availableBranches, setAvailableBranches, refreshBranches, setCurrentBranch } = useBranch();
+  const { user } = useAuth();
+  const { t } = useLanguage();
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
   const [formData, setFormData] = useState({
@@ -29,6 +43,23 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation }) => {
     phone: '',
     email: '',
   });
+
+  if (guardStatus === 'loading' || guardStatus === 'profile_loading') {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
+        <ActivityIndicator size="large" color="#8B0000" />
+        <Text style={{ marginTop: 12, color: '#666' }}>{guardStatus === 'profile_loading' ? (t('msg.loading') || 'Cargando perfil…') : ''}</Text>
+      </View>
+    );
+  }
+  if (guardStatus === 'pending') {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#f8f9fa' }}>
+        <PendingApprovalMessage />
+      </View>
+    );
+  }
+  if (guardStatus === 'denied') return null;
 
   const handleEditBranch = (branch: Branch) => {
     setEditingBranch(branch);
@@ -41,40 +72,95 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation }) => {
     setIsEditModalVisible(true);
   };
 
-  const handleSaveBranch = () => {
-    if (!formData.name || !formData.address) {
-      Alert.alert('Error', 'Nombre y dirección son obligatorios');
+  const handleSaveBranch = async () => {
+    if (!formData.name.trim()) {
+      Alert.alert(t('msg.error'), t('branches.name_required'));
       return;
     }
 
-    if (editingBranch) {
-      // Actualizar sucursal existente
-      const updatedBranches = availableBranches.map(branch =>
-        branch.id === editingBranch.id
-          ? {
-              ...branch,
-              ...formData,
-              updated_at: new Date().toISOString(),
-            }
-          : branch
-      );
-      setAvailableBranches(updatedBranches);
-      Alert.alert('Éxito', `Sucursal ${formData.name} actualizada correctamente`);
-    } else {
-      // Crear nueva sucursal
-      const newBranch: Branch = {
-        id: Date.now().toString(),
-        ...formData,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      setAvailableBranches([...availableBranches, newBranch]);
-      Alert.alert('Éxito', `Sucursal ${formData.name} creada correctamente`);
+    if (!user) {
+      Alert.alert(t('msg.error'), t('branches.auth_required'));
+      return;
     }
 
-    setIsEditModalVisible(false);
-    setEditingBranch(null);
-    setFormData({ name: '', address: '', phone: '', email: '' });
+    try {
+      if (editingBranch) {
+        // Actualizar sucursal existente en Supabase (solo nombre)
+        const { data, error } = await supabase
+          .from('branches')
+          .update({
+            name: formData.name.trim(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', editingBranch.id)
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        // Actualizar estado local
+        const updatedBranches = availableBranches.map(branch =>
+          branch.id === editingBranch.id ? data : branch
+        );
+        setAvailableBranches(updatedBranches);
+        Alert.alert('Éxito', `Sucursal ${formData.name} actualizada correctamente`);
+      } else {
+        const currentCount = availableBranches.length;
+        const { limit } = getBranchLimit(user);
+        if (!canCreateBranch(user, currentCount)) {
+          const message = t('subscription.limit_branches_message')
+            .replace('{current}', String(currentCount))
+            .replace('{limit}', String(limit));
+          Alert.alert(
+            t('subscription.limit_title'),
+            message,
+            [
+              { text: t('btn.close'), style: 'cancel' },
+              { text: t('subscription.view_plans'), onPress: () => navigation.navigate('Subscriptions') },
+            ]
+          );
+          return;
+        }
+
+        const ownerId = user.owner_id || user.id;
+        const { data, error } = await supabase
+          .from('branches')
+          .insert({
+            name: formData.name.trim(),
+            owner_id: ownerId,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        await refreshBranches();
+        if (data) setCurrentBranch(data);
+        Alert.alert(t('msg.success'), `${t('branches.title')} ${formData.name} ${t('branches.create_success')}`);
+      }
+
+      setIsEditModalVisible(false);
+      setEditingBranch(null);
+      setFormData({ name: '', address: '', phone: '', email: '' });
+    } catch (error: any) {
+      console.error('Error guardando sucursal:', error);
+      
+      // Mapear error de Supabase a UI amigable
+      const errorUi = mapSupabaseErrorToUi(error, t);
+      
+      // Mostrar Alert con CTA si aplica
+      const alertButtons: any[] = [{ text: t('btn.close') }];
+      if (errorUi.ctaAction === 'subscriptions' && errorUi.ctaLabel) {
+        alertButtons.push({
+          text: errorUi.ctaLabel,
+          onPress: () => navigation.navigate('Subscriptions'),
+        });
+      }
+      
+      Alert.alert(errorUi.title, errorUi.message, alertButtons);
+    }
   };
 
   const handleCreateBranch = () => {
@@ -85,8 +171,8 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleGeneratePdfBackup = (branch: Branch) => {
     Alert.alert(
-      'Generando PDF',
-      `Se está generando el catálogo de vinos de ${branch.name}...\n\nEsto puede tardar unos momentos.`,
+      t('branches.generate_pdf'),
+      `${t('branches.pdf_generating')} ${branch.name}...\n\n${t('branches.pdf_generating_note')}`,
       [
         {
           text: 'OK',
@@ -94,16 +180,16 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation }) => {
             // Simular generación de PDF
             setTimeout(() => {
               Alert.alert(
-                'PDF Generado',
-                `Catálogo de ${branch.name} exportado exitosamente.\n\nArchivo: Catalogo_${branch.name.replace(/\s+/g, '_')}.pdf`,
+                t('branches.pdf_generated'),
+                `${t('branches.pdf_exported')} ${branch.name} ${t('branches.pdf_exported_success')}\n\nArchivo: Catalogo_${branch.name.replace(/\s+/g, '_')}.pdf`,
                 [
                   {
-                    text: 'Continuar con eliminación',
+                    text: t('branches.continue_deletion'),
                     style: 'destructive',
                     onPress: () => confirmDeleteBranch(branch)
                   },
                   {
-                    text: 'Cancelar eliminación',
+                    text: t('branches.cancel_deletion'),
                     style: 'cancel'
                   }
                 ]
@@ -115,21 +201,35 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation }) => {
     );
   };
 
-  const confirmDeleteBranch = (branch: Branch) => {
+  const confirmDeleteBranch = async (branch: Branch) => {
     Alert.alert(
-      '⚠️ CONFIRMACIÓN FINAL',
-      `ÚLTIMA ADVERTENCIA:\n\nAl eliminar "${branch.name}" se eliminarán:\n\n• Todo el catálogo de vinos\n• Inventario y stock\n• Personal registrado\n• Historial de ventas\n• Configuraciones\n• Tokens QR activos\n\n¿CONFIRMAS LA ELIMINACIÓN DEFINITIVA?`,
+      t('branches.delete_confirm'),
+      `${t('branches.delete_confirm_details')} "${branch.name}" ${t('branches.delete_confirm_list')}\n\n${t('branches.delete_confirm_question')}`,
       [
-        { text: 'NO, Cancelar', style: 'cancel' },
+        { text: `NO, ${t('btn.cancel')}`, style: 'cancel' },
         {
-          text: 'SÍ, Eliminar Todo',
+          text: `SÍ, ${t('btn.delete')} Todo`,
           style: 'destructive',
-          onPress: () => {
-            setAvailableBranches(availableBranches.filter(b => b.id !== branch.id));
-            Alert.alert(
-              'Sucursal Eliminada', 
-              `${branch.name} y todos sus datos han sido eliminados permanentemente.`
-            );
+          onPress: async () => {
+            try {
+              // Eliminar de Supabase
+              const { error } = await supabase
+                .from('branches')
+                .delete()
+                .eq('id', branch.id);
+
+              if (error) throw error;
+
+              // Actualizar estado local
+              setAvailableBranches(availableBranches.filter(b => b.id !== branch.id));
+              Alert.alert(
+                t('branches.delete_success'), 
+                `${branch.name} ${t('branches.delete_success_details')}`
+              );
+            } catch (error: any) {
+              console.error('Error eliminando sucursal:', error);
+              Alert.alert(t('msg.error'), error.message || t('branches.delete_error'));
+            }
           }
         }
       ]
@@ -138,16 +238,16 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleDeleteBranch = (branch: Branch) => {
     Alert.alert(
-      '⚠️ Eliminar Sucursal',
-      `Estás a punto de eliminar: ${branch.name}\n\n🚨 ADVERTENCIA:\nSe eliminará:\n\n• Catálogo de vinos completo\n• Inventario y stock\n• Personal registrado\n• Historial y reportes\n• Configuraciones\n\n¿Deseas generar un PDF del catálogo antes de eliminar?`,
+      `⚠️ ${t('branches.delete')}`,
+      `${t('branches.delete_warning')} ${branch.name}\n\n${t('branches.delete_warning_details')}\n\n¿Deseas generar un PDF del catálogo antes de eliminar?`,
       [
-        { text: 'Cancelar', style: 'cancel' },
+        { text: t('btn.cancel'), style: 'cancel' },
         {
-          text: 'Generar PDF y continuar',
+          text: t('branches.generate_pdf_continue'),
           onPress: () => handleGeneratePdfBackup(branch)
         },
         {
-          text: 'Eliminar sin PDF',
+          text: t('branches.delete_without_pdf'),
           style: 'destructive',
           onPress: () => confirmDeleteBranch(branch)
         }
@@ -158,8 +258,8 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Gestión de Sucursales</Text>
-        <Text style={styles.subtitle}>Administrar ubicaciones del restaurante</Text>
+        <Text style={styles.title}>{t('branches.title')}</Text>
+        <Text style={styles.subtitle}>{t('branches.subtitle')}</Text>
       </View>
 
       <View style={styles.createButtonContainer}>
@@ -167,22 +267,22 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation }) => {
           style={styles.createButton}
           onPress={handleCreateBranch}
         >
-          <Text style={styles.createButtonText}>➕ Crear Nueva Sucursal</Text>
+          <Text style={styles.createButtonText}>➕ {t('branches.create_branch')}</Text>
         </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.sectionTitle}>
-          Sucursales Registradas ({availableBranches.length})
+          {t('branches.registered')} ({availableBranches.length})
         </Text>
 
         {availableBranches.map((branch) => (
           <View key={branch.id} style={styles.branchCard}>
             <View style={styles.branchInfo}>
-              <Text style={styles.branchName}>{branch.name}</Text>
-              <Text style={styles.branchAddress}>📍 {branch.address}</Text>
-              <Text style={styles.branchContact}>📞 {branch.phone}</Text>
-              <Text style={styles.branchContact}>✉️ {branch.email}</Text>
+              <Text style={styles.branchName}>
+                {branch.name}
+                {branch.is_main && <Text style={styles.mainBadge}> {' ⭐ Principal'}</Text>}
+              </Text>
             </View>
             <View style={styles.branchActions}>
               <TouchableOpacity
@@ -191,12 +291,14 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation }) => {
               >
                 <Text style={styles.editButtonText}>✏️ Editar</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.deleteButton}
-                onPress={() => handleDeleteBranch(branch)}
-              >
-                <Text style={styles.deleteButtonText}>🗑️ Eliminar</Text>
-              </TouchableOpacity>
+              {!branch.is_main && (
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={() => handleDeleteBranch(branch)}
+                >
+                  <Text style={styles.deleteButtonText}>🗑️ Eliminar</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         ))}
@@ -212,52 +314,18 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <Text style={styles.modalTitle}>
-              {editingBranch ? 'Editar Sucursal' : 'Nueva Sucursal'}
+              {editingBranch ? t('branches.edit_branch') : t('branches.add_branch')}
             </Text>
 
             <ScrollView showsVerticalScrollIndicator={false}>
               <View style={styles.inputContainer}>
-                <Text style={styles.label}>Nombre *</Text>
+                <Text style={styles.label}>{t('branches.name')} *</Text>
                 <TextInput
                   style={styles.input}
                   value={formData.name}
                   onChangeText={(text) => setFormData({ ...formData, name: text })}
-                  placeholder="Nombre de la sucursal"
-                />
-              </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Dirección *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.address}
-                  onChangeText={(text) => setFormData({ ...formData, address: text })}
-                  placeholder="Dirección completa"
-                  multiline
-                  numberOfLines={2}
-                />
-              </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Teléfono</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.phone}
-                  onChangeText={(text) => setFormData({ ...formData, phone: text })}
-                  placeholder="+1-555-0123"
-                  keyboardType="phone-pad"
-                />
-              </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Email</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.email}
-                  onChangeText={(text) => setFormData({ ...formData, email: text })}
-                  placeholder="sucursal@restaurante.com"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
+                  placeholder={`Ej: ${t('branches.main')}`}
+                  autoFocus={true}
                 />
               </View>
             </ScrollView>
@@ -267,14 +335,14 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation }) => {
                 style={styles.cancelButton}
                 onPress={() => setIsEditModalVisible(false)}
               >
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
+                <Text style={styles.cancelButtonText}>{t('btn.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.saveButton}
                 onPress={handleSaveBranch}
               >
                 <Text style={styles.saveButtonText}>
-                  {editingBranch ? 'Guardar' : 'Crear'}
+                  {editingBranch ? t('btn.save') : t('btn.add')}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -352,6 +420,11 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 8,
+  },
+  mainBadge: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFA500',
   },
   branchAddress: {
     fontSize: 14,

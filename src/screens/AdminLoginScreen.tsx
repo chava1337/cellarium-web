@@ -11,16 +11,22 @@ import {
   ScrollView,
 } from 'react-native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { useAdminGuard } from '../hooks/useAdminGuard';
 
 type AdminLoginScreenNavigationProp = StackNavigationProp<RootStackParamList, 'AdminLogin'>;
+type AdminLoginScreenRouteProp = RouteProp<RootStackParamList, 'AdminLogin'>;
 
 interface Props {
   navigation: AdminLoginScreenNavigationProp;
+  route: AdminLoginScreenRouteProp;
 }
 
-const AdminLoginScreen: React.FC<Props> = ({ navigation }) => {
+const AdminLoginScreen: React.FC<Props> = ({ navigation, route }) => {
+  // Guard de navegación: bloquear acceso de guests (pero permitir acceso sin auth para login)
+  useAdminGuard({ navigation, route, requireAuth: false });
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [username, setUsername] = useState('');

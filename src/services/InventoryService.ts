@@ -1,389 +1,352 @@
 import { supabase } from './supabase';
-import { WineStock, InventoryMovement, BranchStats } from '../types';
+
+export interface InventoryItem {
+  id: string;
+  wine_id: string;
+  branch_id: string;
+  stock_quantity: number;
+  price_by_glass: number | null;
+  price_by_bottle: number | null;
+  created_at: string;
+  updated_at: string;
+  wines: {
+    id: string;
+    name: string;
+    grape_variety: string;
+    region: string;
+    country: string;
+    vintage: number;
+    image_url: string | null;
+  };
+}
+
+export interface InventoryMovement {
+  id?: string;
+  wine_id: string;
+  branch_id: string;
+  movement_type: 'entrada' | 'salida' | 'ajuste' | 'venta';
+  quantity: number;
+  reason: string;
+  user_id: string;
+  previous_quantity: number;
+  new_quantity: number;
+  created_at?: string;
+}
+
+export interface InventoryStats {
+  totalWines: number;
+  totalBottles: number;
+  totalValue: number;
+  lowStockCount: number;
+}
 
 export class InventoryService {
-  // Obtener stock de vinos por sucursal
-  static async getStockByBranch(branchId: string): Promise<WineStock[]> {
+  /**
+   * Obtener todo el inventario de una sucursal
+   */
+  static async getInventoryByBranch(branchId: string, ownerId: string): Promise<InventoryItem[]> {
     try {
+      console.log(`📦 InventoryService: Obteniendo inventario para branch ${branchId}, owner ${ownerId}`);
+      
       const { data, error } = await supabase
         .from('wine_branch_stock')
         .select(`
           id,
           wine_id,
           branch_id,
-          quantity,
-          min_stock,
+          stock_quantity,
+          price_by_glass,
+          price_by_bottle,
           created_at,
           updated_at,
           wines (
+            id,
+            name,
+            winery,
+            grape_variety,
+            region,
+            country,
+            vintage,
+            description,
+            tasting_notes,
+            image_url,
+            owner_id
+          )
+        `)
+        .eq('branch_id', branchId)
+        .eq('wines.owner_id', ownerId) // FILTRO POR OWNER
+        .order('wines(name)', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching inventory:', error);
+        throw error;
+      }
+
+      console.log(`📦 InventoryService: Registros obtenidos:`, data?.length || 0);
+      console.log(`📦 InventoryService: Detalle:`, data?.map(item => ({
+        stock_id: item.id,
+        wine_id: item.wine_id,
+        wine_name: item.wines?.name || 'SIN DATOS',
+        wine_owner_id: item.wines?.owner_id || 'SIN OWNER',
+        stock_quantity: item.stock_quantity
+      })));
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getInventoryByBranch:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Actualizar cantidad de stock (entrada o salida)
+   */
+  static async updateStock(
+    stockId: string,
+    wineId: string,
+    branchId: string,
+    quantityChange: number,
+    movementType: 'entrada' | 'salida' | 'ajuste' | 'venta',
+    reason: string,
+    userId: string,
+    ownerId: string
+  ): Promise<InventoryItem> {
+    try {
+      // 1. Obtener stock actual y VERIFICAR que pertenece al owner
+      const { data: currentStock, error: fetchError } = await supabase
+        .from('wine_branch_stock')
+        .select(`
+          stock_quantity,
+          wine_id,
+          wines!inner(owner_id)
+        `)
+        .eq('id', stockId)
+        .eq('wines.owner_id', ownerId) // SEGURIDAD: Solo del owner
+        .single();
+
+      if (fetchError || !currentStock) {
+        console.error('Error fetching current stock:', fetchError);
+        throw new Error('Stock no encontrado o no tienes permisos');
+      }
+
+      // VERIFICACIÓN ADICIONAL: Asegurar que el wine pertenece al owner
+      const wineOwnerId = (currentStock.wines as any)?.owner_id;
+      if (wineOwnerId !== ownerId) {
+        throw new Error('No tienes permisos para modificar este stock');
+      }
+
+      const previousQuantity = currentStock.stock_quantity;
+      const newQuantity = Math.max(0, previousQuantity + quantityChange);
+
+      // 2. Actualizar stock (solo si pertenece al owner)
+      const { data: updatedStock, error: updateError } = await supabase
+        .from('wine_branch_stock')
+        .update({
+          stock_quantity: newQuantity,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', stockId)
+        .eq('wine_id', wineId) // SEGURIDAD: Verificar wine_id también
+        .select(`
+          id,
+          wine_id,
+          branch_id,
+          stock_quantity,
+          price_by_glass,
+          price_by_bottle,
+          created_at,
+          updated_at,
+          wines!inner (
             id,
             name,
             grape_variety,
             region,
             country,
             vintage,
-            alcohol_content,
-            description,
-            price,
             image_url,
-            created_at,
-            updated_at
+            owner_id
           )
         `)
-        .eq('branch_id', branchId);
-
-      if (error) {
-        throw error;
-      }
-
-      return data || [];
-    } catch (error) {
-      console.error('Error fetching stock by branch:', error);
-      throw error;
-    }
-  }
-
-  // Actualizar stock de un vino
-  static async updateStock(
-    wineId: string,
-    branchId: string,
-    newQuantity: number,
-    reason: string = 'Ajuste manual'
-  ): Promise<void> {
-    try {
-      // Obtener stock actual
-      const { data: currentStock, error: stockError } = await supabase
-        .from('wine_branch_stock')
-        .select('quantity')
-        .eq('wine_id', wineId)
-        .eq('branch_id', branchId)
+        .eq('wines.owner_id', ownerId) // SEGURIDAD: Solo del owner
         .single();
 
-      if (stockError) {
-        throw stockError;
-      }
-
-      const currentQuantity = currentStock?.quantity || 0;
-      const quantityDifference = newQuantity - currentQuantity;
-
-      // Actualizar stock
-      const { error: updateError } = await supabase
-        .from('wine_branch_stock')
-        .update({
-          quantity: newQuantity,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('wine_id', wineId)
-        .eq('branch_id', branchId);
-
       if (updateError) {
+        console.error('Error updating stock:', updateError);
         throw updateError;
       }
 
-      // Registrar movimiento de inventario
-      const movementType = quantityDifference > 0 ? 'in' : quantityDifference < 0 ? 'out' : 'adjustment';
-      
-      const { error: movementError } = await supabase
-        .from('inventory_movements')
-        .insert({
+      // 3. Registrar movimiento (opcional - si la tabla existe)
+      try {
+        await this.recordMovement({
           wine_id: wineId,
           branch_id: branchId,
           movement_type: movementType,
-          quantity: Math.abs(quantityDifference),
-          reason: reason,
-          created_at: new Date().toISOString(),
-        });
-
-      if (movementError) {
-        console.error('Error recording inventory movement:', movementError);
-        // No lanzamos error aquí porque el stock ya se actualizó
-      }
-    } catch (error) {
-      console.error('Error updating stock:', error);
-      throw error;
-    }
-  }
-
-  // Agregar stock a un vino
-  static async addStock(
-    wineId: string,
-    branchId: string,
-    quantity: number,
-    reason: string = 'Entrada de stock'
-  ): Promise<void> {
-    try {
-      // Obtener stock actual
-      const { data: currentStock, error: stockError } = await supabase
-        .from('wine_branch_stock')
-        .select('quantity')
-        .eq('wine_id', wineId)
-        .eq('branch_id', branchId)
-        .single();
-
-      if (stockError) {
-        throw stockError;
-      }
-
-      const currentQuantity = currentStock?.quantity || 0;
-      const newQuantity = currentQuantity + quantity;
-
-      // Actualizar stock
-      const { error: updateError } = await supabase
-        .from('wine_branch_stock')
-        .update({
-          quantity: newQuantity,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('wine_id', wineId)
-        .eq('branch_id', branchId);
-
-      if (updateError) {
-        throw updateError;
-      }
-
-      // Registrar movimiento de inventario
-      const { error: movementError } = await supabase
-        .from('inventory_movements')
-        .insert({
-          wine_id: wineId,
-          branch_id: branchId,
-          movement_type: 'in',
-          quantity: quantity,
-          reason: reason,
-          created_at: new Date().toISOString(),
-        });
-
-      if (movementError) {
-        console.error('Error recording inventory movement:', movementError);
-      }
-    } catch (error) {
-      console.error('Error adding stock:', error);
-      throw error;
-    }
-  }
-
-  // Reducir stock de un vino
-  static async reduceStock(
-    wineId: string,
-    branchId: string,
-    quantity: number,
-    reason: string = 'Salida de stock'
-  ): Promise<void> {
-    try {
-      // Obtener stock actual
-      const { data: currentStock, error: stockError } = await supabase
-        .from('wine_branch_stock')
-        .select('quantity')
-        .eq('wine_id', wineId)
-        .eq('branch_id', branchId)
-        .single();
-
-      if (stockError) {
-        throw stockError;
-      }
-
-      const currentQuantity = currentStock?.quantity || 0;
-      
-      if (currentQuantity < quantity) {
-        throw new Error('Stock insuficiente');
-      }
-
-      const newQuantity = currentQuantity - quantity;
-
-      // Actualizar stock
-      const { error: updateError } = await supabase
-        .from('wine_branch_stock')
-        .update({
-          quantity: newQuantity,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('wine_id', wineId)
-        .eq('branch_id', branchId);
-
-      if (updateError) {
-        throw updateError;
-      }
-
-      // Registrar movimiento de inventario
-      const { error: movementError } = await supabase
-        .from('inventory_movements')
-        .insert({
-          wine_id: wineId,
-          branch_id: branchId,
-          movement_type: 'out',
-          quantity: quantity,
-          reason: reason,
-          created_at: new Date().toISOString(),
-        });
-
-      if (movementError) {
-        console.error('Error recording inventory movement:', movementError);
-      }
-    } catch (error) {
-      console.error('Error reducing stock:', error);
-      throw error;
-    }
-  }
-
-  // Obtener vinos con stock bajo
-  static async getLowStockWines(branchId: string): Promise<WineStock[]> {
-    try {
-      const { data, error } = await supabase
-        .from('wine_branch_stock')
-        .select(`
-          id,
-          wine_id,
-          branch_id,
-          quantity,
-          min_stock,
-          created_at,
-          updated_at,
-          wines (
-            id,
-            name,
-            grape_variety,
-            region,
-            country,
-            vintage,
-            alcohol_content,
-            description,
-            price,
-            image_url,
-            created_at,
-            updated_at
-          )
-        `)
-        .eq('branch_id', branchId)
-        .lte('quantity', 'min_stock');
-
-      if (error) {
-        throw error;
-      }
-
-      return data || [];
-    } catch (error) {
-      console.error('Error fetching low stock wines:', error);
-      throw error;
-    }
-  }
-
-  // Obtener movimientos de inventario
-  static async getInventoryMovements(
-    branchId: string,
-    wineId?: string,
-    limit: number = 50
-  ): Promise<InventoryMovement[]> {
-    try {
-      let query = supabase
-        .from('inventory_movements')
-        .select(`
-          id,
-          wine_id,
-          branch_id,
-          movement_type,
-          quantity,
+          quantity: Math.abs(quantityChange),
           reason,
-          created_at,
-          wines (
-            id,
-            name
-          )
-        `)
-        .eq('branch_id', branchId)
-        .order('created_at', { ascending: false })
-        .limit(limit);
-
-      if (wineId) {
-        query = query.eq('wine_id', wineId);
+          user_id: userId,
+          previous_quantity: previousQuantity,
+          new_quantity: newQuantity,
+        }, ownerId);
+      } catch (movementError: any) {
+        // Si la tabla no existe, solo logueamos pero no fallamos
+        if (movementError?.code === 'PGRST205' && movementError?.message?.includes('inventory_movements')) {
+          console.log('⚠️ Tabla inventory_movements no existe, continuando sin registrar movimiento');
+        } else {
+          // Re-lanzar otros errores
+          throw movementError;
+        }
       }
 
-      const { data, error } = await query;
+      console.log(`✅ Stock actualizado: ${previousQuantity} → ${newQuantity}`);
+      return updatedStock;
+    } catch (error) {
+      console.error('Error in updateStock:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Registrar movimiento de inventario
+   */
+  static async recordMovement(movement: InventoryMovement, ownerId: string): Promise<void> {
+    try {
+      // Asegurar que la sesión esté activa antes de insertar
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        console.warn('⚠️ No hay sesión activa, intentando refrescar...');
+        // Intentar refrescar la sesión
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        if (userError || !user) {
+          console.error('❌ No se pudo obtener usuario autenticado:', userError);
+          // Continuar de todas formas - el movimiento puede no registrarse pero el stock se actualizó
+          console.warn('⚠️ Continuando sin registrar movimiento debido a falta de sesión');
+          return;
+        }
+      }
+
+      // Debug: obtener auth.uid() para comparar
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      console.log('🔍 Debug recordMovement:', {
+        ownerId_passed: ownerId,
+        auth_uid: authUser?.id,
+        movement_type: movement.movement_type,
+        wine_id: movement.wine_id,
+        branch_id: movement.branch_id,
+      });
+
+      const { error } = await supabase
+        .from('inventory_movements')
+        .insert({
+          ...movement,
+          owner_id: ownerId, // AGREGAR owner_id
+          created_at: new Date().toISOString(),
+        });
 
       if (error) {
+        console.error('Error recording movement:', error);
+        console.error('🔍 Debug: ownerId enviado:', ownerId, 'vs auth.uid():', authUser?.id);
+        // Si es error RLS, solo logueamos pero no fallamos (el stock ya se actualizó)
+        if (error.code === '42501') {
+          console.warn('⚠️ Error RLS al registrar movimiento, continuando...');
+          return; // No lanzar error para que el stock update sea exitoso
+        }
+        throw error;
+      }
+
+      console.log(`📝 Movimiento registrado: ${movement.movement_type} - ${movement.quantity} unidades`);
+    } catch (error) {
+      console.error('Error in recordMovement:', error);
+      // No lanzar error para que el stock update sea exitoso
+      // El movimiento es opcional, el stock ya se actualizó
+      console.warn('⚠️ No se pudo registrar movimiento, pero el stock se actualizó correctamente');
+    }
+  }
+
+  /**
+   * Obtener historial de movimientos de un vino
+   */
+  static async getMovementHistory(wineId: string, branchId: string, ownerId: string): Promise<InventoryMovement[]> {
+    try {
+      const { data, error } = await supabase
+        .from('inventory_movements')
+        .select('*')
+        .eq('wine_id', wineId)
+        .eq('branch_id', branchId)
+        .eq('owner_id', ownerId) // FILTRO POR OWNER
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) {
+        console.error('Error fetching movement history:', error);
         throw error;
       }
 
       return data || [];
     } catch (error) {
-      console.error('Error fetching inventory movements:', error);
+      console.error('Error in getMovementHistory:', error);
       throw error;
     }
   }
 
-  // Obtener estadísticas de inventario por sucursal
-  static async getBranchStats(branchId: string): Promise<BranchStats> {
+  /**
+   * Obtener estadísticas del inventario
+   */
+  static async getInventoryStats(branchId: string, ownerId: string): Promise<InventoryStats> {
     try {
-      const { data, error } = await supabase
-        .from('wine_branch_stock')
-        .select(`
-          quantity,
-          min_stock,
-          wines (
-            price
-          )
-        `)
-        .eq('branch_id', branchId);
+      const inventory = await this.getInventoryByBranch(branchId, ownerId);
 
-      if (error) {
-        throw error;
-      }
-
-      const stats: BranchStats = {
-        branch_id: branchId,
-        branch_name: '', // Se puede obtener por separado
-        total_wines: data?.length || 0,
-        total_stock: data?.reduce((sum, item) => sum + item.quantity, 0) || 0,
-        low_stock_wines: data?.filter(item => item.quantity <= item.min_stock).length || 0,
-        total_value: data?.reduce((sum, item) => sum + (item.quantity * ((item.wines as any)?.price || 0)), 0) || 0,
+      const stats: InventoryStats = {
+        totalWines: inventory.length,
+        totalBottles: inventory.reduce((sum, item) => sum + item.stock_quantity, 0),
+        totalValue: inventory.reduce((sum, item) => sum + (item.stock_quantity * (item.price_by_bottle || 0)), 0),
+        lowStockCount: 0, // Stock mínimo removido según solicitud del usuario
       };
 
       return stats;
     } catch (error) {
-      console.error('Error fetching branch stats:', error);
+      console.error('Error in getInventoryStats:', error);
       throw error;
     }
   }
 
-  // Crear stock inicial para un vino en una sucursal
-  static async createInitialStock(
+  /**
+   * Obtener vinos con stock bajo (función deshabilitada - stock mínimo removido)
+   */
+  static async getLowStockWines(branchId: string, ownerId: string): Promise<InventoryItem[]> {
+    try {
+      const inventory = await this.getInventoryByBranch(branchId, ownerId);
+      return []; // Retornar array vacío ya que el stock mínimo fue removido
+    } catch (error) {
+      console.error('Error in getLowStockWines:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Procesar venta (reduce stock automáticamente)
+   */
+  static async processSale(
+    stockId: string,
     wineId: string,
     branchId: string,
     quantity: number,
-    minStock: number = 5
-  ): Promise<void> {
+    userId: string,
+    ownerId: string,
+    saleDetails: string
+  ): Promise<InventoryItem> {
     try {
-      const { error } = await supabase
-        .from('wine_branch_stock')
-        .insert({
-          wine_id: wineId,
-          branch_id: branchId,
-          quantity: quantity,
-          min_stock: minStock,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
-
-      if (error) {
-        throw error;
-      }
-
-      // Registrar movimiento inicial
-      const { error: movementError } = await supabase
-        .from('inventory_movements')
-        .insert({
-          wine_id: wineId,
-          branch_id: branchId,
-          movement_type: 'in',
-          quantity: quantity,
-          reason: 'Stock inicial',
-          created_at: new Date().toISOString(),
-        });
-
-      if (movementError) {
-        console.error('Error recording initial stock movement:', movementError);
-      }
+      return await this.updateStock(
+        stockId,
+        wineId,
+        branchId,
+        -quantity, // Cantidad negativa para reducir stock
+        'venta',
+        saleDetails,
+        userId,
+        ownerId
+      );
     } catch (error) {
-      console.error('Error creating initial stock:', error);
+      console.error('Error in processSale:', error);
       throw error;
     }
   }

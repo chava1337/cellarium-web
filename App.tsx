@@ -3,23 +3,27 @@ import { NavigationContainer, LinkingOptions } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from './src/contexts/AuthContext';
 import { GuestProvider } from './src/contexts/GuestContext';
 import { BranchProvider } from './src/contexts/BranchContext';
+import { LanguageProvider } from './src/contexts/LanguageContext';
 import { RootStackParamList } from './src/types';
 import { useDeviceInfo, configureOrientation } from './src/hooks/useDeviceInfo';
 
 // Importar pantallas
-import LoginScreen from './src/screens/LoginScreen';
-import WineCatalogScreen from './src/screens/WineCatalogScreen';
-import AdminLoginScreen from './src/screens/AdminLoginScreen';
-import AdminDashboardScreen from './src/screens/AdminDashboardScreen';
-import UserManagementScreen from './src/screens/UserManagementScreen';
-import TastingNotesScreen from './src/screens/TastingNotesScreen';
-import QrGenerationScreen from './src/screens/QrGenerationScreen';
-import BranchManagementScreen from './src/screens/BranchManagementScreen';
+import BootstrapScreen from './src/screens/BootstrapScreen';
+import AppAuthWrapper from './src/screens/AppAuthWrapper';
+import AppNavigator from './src/screens/AppNavigator';
+import WelcomeScreen from './src/screens/WelcomeScreen';
 import AdminRegistrationScreen from './src/screens/AdminRegistrationScreen';
 import QrProcessorScreen from './src/screens/QrProcessorScreen';
+import SubscriptionsScreen from './src/screens/SubscriptionsScreen';
+// Pantallas de desarrollo - comentadas (no necesarias con usuarios reales)
+// import OwnerRegistrationScreen from './src/screens/OwnerRegistrationScreen';
+// import LoginScreen from './src/screens/LoginScreen';
+// import RegistrationScreen from './src/screens/RegistrationScreen';
+// import AdminLoginScreen from './src/screens/AdminLoginScreen';
 
 const Stack = createStackNavigator<RootStackParamList>();
 
@@ -38,15 +42,6 @@ const linking: LinkingOptions<RootStackParamList> = {
       Login: 'login',
       QrProcessor: {
         path: 'qr',
-        parse: {
-          qrData: (qrData: string) => {
-            try {
-              return JSON.parse(decodeURIComponent(qrData));
-            } catch {
-              return qrData;
-            }
-          },
-        },
       },
       WineCatalog: 'catalog',
       AdminLogin: 'admin/login',
@@ -73,7 +68,7 @@ const AppContent: React.FC = () => {
     <NavigationContainer linking={linking}>
       <StatusBar style="auto" />
       <Stack.Navigator
-        initialRouteName="Login"
+        initialRouteName="Bootstrap"
         screenOptions={{
           headerStyle: {
             backgroundColor: '#8B0000', // Color vino tinto
@@ -82,71 +77,82 @@ const AppContent: React.FC = () => {
           headerTitleStyle: {
             fontWeight: 'bold',
           },
+          cardStyle: {
+            backgroundColor: '#FFFFFF',
+          },
         }}
       >
-            <Stack.Screen 
-              name="Login" 
-              component={LoginScreen}
-              options={{ title: 'Cellarium - Iniciar Sesión' }}
-            />
-            <Stack.Screen 
-              name="QrProcessor" 
-              component={QrProcessorScreen}
-              options={{ headerShown: false }}
-            />
-            <Stack.Screen 
-              name="WineCatalog" 
-              component={WineCatalogScreen}
-              options={{ title: 'Catálogo de Vinos' }}
-            />
-            <Stack.Screen 
-              name="AdminLogin" 
-              component={AdminLoginScreen}
-              options={{ title: 'Acceso Administrativo' }}
-            />
-            <Stack.Screen 
-              name="AdminRegistration" 
-              component={AdminRegistrationScreen}
-              options={{ title: 'Registro de Admin' }}
-            />
-            <Stack.Screen 
-              name="AdminDashboard" 
-              component={AdminDashboardScreen}
-              options={{ title: 'Panel de Administración' }}
-            />
-            <Stack.Screen 
-              name="UserManagement" 
-              component={UserManagementScreen}
-              options={{ title: 'Gestión de Usuarios' }}
-            />
-            <Stack.Screen 
-              name="TastingNotes" 
-              component={TastingNotesScreen}
-              options={{ title: 'Catas y Degustaciones' }}
-            />
-            <Stack.Screen 
-              name="QrGeneration" 
-              component={QrGenerationScreen}
-              options={{ title: 'Generación de QR' }}
-            />
-            <Stack.Screen 
-              name="BranchManagement" 
-              component={BranchManagementScreen}
-              options={{ title: 'Gestión de Sucursales' }}
-            />
-          </Stack.Navigator>
-        </NavigationContainer>
-      );
-    };
+        <Stack.Screen 
+          name="Bootstrap" 
+          component={BootstrapScreen}
+          options={{ 
+            headerShown: false,
+            cardStyle: { backgroundColor: '#FFFFFF' },
+          }}
+        />
+        <Stack.Screen 
+          name="Welcome" 
+          component={WelcomeScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="AdminRegistration" 
+          component={AdminRegistrationScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="QrProcessor" 
+          component={QrProcessorScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="Subscriptions" 
+          component={SubscriptionsScreen}
+          options={{ title: 'Suscripciones' }}
+        />
+        {/* Pantallas de desarrollo - comentadas (no necesarias con usuarios reales) */}
+        {/* <Stack.Screen 
+          name="OwnerRegistration" 
+          component={OwnerRegistrationScreen}
+          options={{ title: 'Registro de Owner' }}
+        />
+        <Stack.Screen 
+          name="Login" 
+          component={LoginScreen}
+          options={{ title: 'Cellarium - Iniciar Sesión' }}
+        />
+        <Stack.Screen 
+          name="AdminLogin" 
+          component={AdminLoginScreen}
+          options={{ title: 'Acceso Administrativo' }}
+        /> */}
+        <Stack.Screen 
+          name="AppAuth" 
+          component={AppAuthWrapper}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="AppNavigator" 
+          component={AppNavigator}
+          options={{ headerShown: false }}
+        />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+};
 
-    export default function App() {
-      return (
-        <BranchProvider>
-          <AuthProvider>
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <LanguageProvider>
+        <AuthProvider>
+          <BranchProvider>
             <GuestProvider>
               <AppContent />
             </GuestProvider>
-          </AuthProvider>
-        </BranchProvider>
-      );
-    }
+          </BranchProvider>
+        </AuthProvider>
+      </LanguageProvider>
+    </SafeAreaProvider>
+  );
+}

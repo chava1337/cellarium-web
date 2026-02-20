@@ -10,9 +10,11 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { RootStackParamList } from '../types';
 import { StackNavigationProp } from '@react-navigation/stack';
+import RoleSelector, { RoleOption } from '../components/RoleSelector';
 
 type LoginScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Login'>;
 
@@ -46,28 +48,40 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
-  const handleDevelopmentMode = () => {
-    // Botón de desarrollo - navegar directamente al catálogo
-    // Simula admin autenticado
-    navigation.navigate('WineCatalog');
+  const handleRoleSelected = async (role: RoleOption) => {
+    // Autenticar con el rol seleccionado
+    try {
+      setLoading(true);
+      
+      // Usar la función signIn del AuthContext para autenticar usuario con rol específico
+      await signIn(role.email, 'password123', role);
+      
+      // Navegar al catálogo de vinos después del login exitoso
+      navigation.navigate('WineCatalog');
+    } catch (error: any) {
+      Alert.alert('Error', `No se pudo autenticar como ${role.displayName}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView 
+        style={styles.keyboardContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContainer}>
         <View style={styles.header}>
           <Text style={styles.title}>🍷 Cellarium</Text>
           <Text style={styles.subtitle}>Catálogo de Vinos</Text>
         </View>
 
-        <View style={styles.formContainer}>
-          <Text style={styles.formTitle}>Iniciar Sesión como Administrador</Text>
-          <Text style={styles.formSubtitle}>
-            Accede al catálogo y panel de administración
-          </Text>
+                 <View style={styles.formContainer}>
+                   <Text style={styles.formTitle}>Iniciar Sesión como Owner</Text>
+                   <Text style={styles.formSubtitle}>
+                     Para Owners registrados - Acceso completo al sistema
+                   </Text>
           
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Email o Usuario</Text>
@@ -110,25 +124,36 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
             <View style={styles.dividerLine} />
           </View>
 
-          <TouchableOpacity
-            style={styles.devButton}
-            onPress={handleDevelopmentMode}
-          >
-            <Text style={styles.devButtonText}>🚀 Modo Desarrollo</Text>
-            <Text style={styles.devButtonSubtext}>Saltar autenticación</Text>
-          </TouchableOpacity>
+          <RoleSelector
+            onRoleSelected={handleRoleSelected}
+            disabled={loading}
+          />
         </View>
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>
             Sistema de gestión de catálogo de vinos para restaurantes
           </Text>
-          <Text style={styles.footerSubtext}>
-            ¿Eres nuevo? Solicita tu código QR de invitación a un administrador
-          </Text>
+          
+                 <View style={styles.registrationSection}>
+                   <Text style={styles.footerSubtext}>
+                     ¿Eres nuevo Owner?
+                   </Text>
+                   <TouchableOpacity
+                     style={styles.registerButton}
+                     onPress={() => navigation.navigate('OwnerRegistration')}
+                   >
+                     <Text style={styles.registerButtonText}>Registrarse como Owner</Text>
+                   </TouchableOpacity>
+                 </View>
+
+                 <Text style={styles.footerSubtext}>
+                   ¿Trabajas en un restaurante? Escanea el QR que te proporcionaron
+                 </Text>
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 
@@ -136,6 +161,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+  },
+  keyboardContainer: {
+    flex: 1,
   },
   scrollContainer: {
     flexGrow: 1,
@@ -257,6 +285,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
     marginBottom: 8,
+  },
+  registrationSection: {
+    alignItems: 'center',
+    marginVertical: 16,
+  },
+  registerButton: {
+    backgroundColor: '#8B0000',
+    borderRadius: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 8,
+    marginTop: 8,
+  },
+  registerButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   footerSubtext: {
     color: '#999',

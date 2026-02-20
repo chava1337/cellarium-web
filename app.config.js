@@ -15,6 +15,14 @@ export default {
       "applinks:www.cellarium.app"
     ],
     
+    // Configuración para manejar OAuth callbacks
+    linking: {
+      prefixes: [
+        "exp://192.168.1.100:8081",
+        "cellarium://"
+      ]
+    },
+    
     updates: {
       enabled: false
     },
@@ -34,7 +42,11 @@ export default {
       associatedDomains: [
         "applinks:cellarium.app",
         "applinks:www.cellarium.app"
-      ]
+      ],
+      infoPlist: {
+        NSCameraUsageDescription: "Esta app necesita acceso a la cámara para capturar etiquetas de vino.",
+        NSMicrophoneUsageDescription: "Esta app necesita acceso al micrófono para grabar videos."
+      }
     },
     
     // Configuración específica para Android
@@ -42,6 +54,12 @@ export default {
       supportsTablet: true,
       orientation: "default",
       package: "com.cellarium.winecatalog",
+      permissions: [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_EXTERNAL_STORAGE"
+      ],
       intentFilters: [
         {
           action: "VIEW",
@@ -59,6 +77,11 @@ export default {
             }
           ],
           category: ["BROWSABLE", "DEFAULT"]
+        },
+        {
+          action: "VIEW",
+          category: ["BROWSABLE", "DEFAULT"],
+          data: [{ scheme: "cellarium" }]
         }
       ]
     },
@@ -66,7 +89,10 @@ export default {
     // App Store / Play Store URLs
     extra: {
       appStoreUrl: "https://apps.apple.com/app/cellarium/id123456789",
-      playStoreUrl: "https://play.google.com/store/apps/details?id=com.cellarium.winecatalog"
+      playStoreUrl: "https://play.google.com/store/apps/details?id=com.cellarium.winecatalog",
+      eas: {
+        projectId: "d69705be-f13a-4241-be49-0cbe7a34d8d9"
+      }
     }
   }
 };

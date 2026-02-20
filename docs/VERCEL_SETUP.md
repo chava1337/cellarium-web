@@ -88,7 +88,7 @@ Archivo: `vercel-site/public/.well-known/assetlinks.json`
 
 ### 2.3 Página de redirección
 
-Archivo: `vercel-site/public/qr.html`
+Ruta en el sitio web: `/qr` (App Router; antes `vercel-site/public/qr.html`)
 
 ```html
 <!DOCTYPE html>
@@ -335,8 +335,8 @@ Archivo: `vercel-site/vercel.json`
   ],
   "redirects": [
     {
-      "source": "/qr",
-      "destination": "/qr.html"
+      "source": "/qr.html",
+      "destination": "/qr"
     }
   ]
 }

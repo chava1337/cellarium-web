@@ -10,9 +10,11 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
+import { supabase } from '../lib/supabase';
 
 type AdminRegistrationScreenNavigationProp = StackNavigationProp<RootStackParamList, 'AdminRegistration'>;
 type AdminRegistrationScreenRouteProp = RouteProp<RootStackParamList, 'AdminRegistration'>;
@@ -27,23 +29,42 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   // Obtener datos del QR
   const qrToken = route.params?.qrToken;
   const branchName = route.params?.branchName;
+  const branchId = route.params?.branchId;
 
-  const handleRegister = async () => {
+  const handleUsernameRegister = async () => {
+    // Prevenir doble submit
+    if (loading) {
+      console.log('⚠️ Registro ya en progreso, ignorando...');
+      return;
+    }
+
     if (!username || !password || !confirmPassword) {
       Alert.alert('Error', 'Por favor completa todos los campos');
       return;
     }
 
-    if (password !== confirmPassword) {
+    // Validar username: mínimo 6 caracteres, solo letras, números y guiones bajos
+    const usernameRegex = /^[a-zA-Z0-9_]{6,}$/;
+    if (!usernameRegex.test(username)) {
+      Alert.alert('Error', 'El nombre de usuario debe tener al menos 6 caracteres y solo puede contener letras, números y guiones bajos (_)');
+      return;
+    }
+
+    // Normalizar contraseñas para comparación
+    const normalizedPassword = password.trim();
+    const normalizedConfirmPassword = confirmPassword.trim();
+
+    if (normalizedPassword !== normalizedConfirmPassword) {
       Alert.alert('Error', 'Las contraseñas no coinciden');
       return;
     }
 
-    if (password.length < 6) {
+    if (normalizedPassword.length < 6) {
       Alert.alert('Error', 'La contraseña debe tener al menos 6 caracteres');
       return;
     }
@@ -51,26 +72,441 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
     try {
       setLoading(true);
       
-      // En producción: registrar en Supabase con el token del QR
-      // Crear usuario con status 'pending' vinculado a la sucursal
+      console.log('📝 ==================== INICIO REGISTRO CON QR ====================');
+      console.log('📝 Username:', username);
+      console.log('📝 QR Token:', qrToken);
+      console.log('📝 Branch ID:', branchId);
+      console.log('📝 Branch Name:', branchName);
       
+      // Obtener owner_id del QR token para generar email único
+      console.log('📝 Obteniendo owner_id del QR token...');
+      const { data: qrData, error: qrError } = await supabase
+        .from('qr_tokens')
+        .select('owner_id')
+        .eq('token', qrToken)
+        .single();
+      
+      if (qrError || !qrData) {
+        console.error('❌ Error obteniendo QR token:', qrError);
+        Alert.alert('Error', 'Token QR inválido o expirado');
+        setLoading(false);
+        return;
+      }
+      
+      const ownerId = qrData.owner_id;
+      console.log('📝 Owner ID:', ownerId);
+      
+      // Generar email ficticio único: username_ownerid@placeholder.com
+      // Usar placeholder.com que es un dominio estándar para testing y Supabase lo acepta
+      // Usar solo los primeros 8 caracteres del owner_id para evitar emails muy largos
+      const ownerIdShort = ownerId.substring(0, 8).replace(/-/g, '');
+      const fakeEmail = `${username}_${ownerIdShort}@placeholder.com`;
+      console.log('📝 Email ficticio generado:', fakeEmail);
+      
+      // 1. Verificar rate limit ANTES de intentar registro
+      console.log('📝 Verificando rate limit para registro...');
+      const { data: rateLimitData, error: rateLimitError } = await supabase.functions.invoke('rate-limiter', {
+        body: {
+          action: 'register',
+          identifier: fakeEmail // Usar email ficticio como identificador
+        }
+      });
+      
+      console.log('📝 Rate limit response:');
+      console.log('📝 - Allowed:', rateLimitData?.allowed);
+      console.log('📝 - Remaining:', rateLimitData?.remaining);
+      console.log('📝 - Reset at:', rateLimitData?.resetAt);
+      
+      if (rateLimitError) {
+        console.error('❌ Error en rate limiter:', rateLimitError);
+        // En caso de error, permitir intento (fail open)
+        console.log('⚠️ Rate limiter error, permitiendo intento...');
+      } else if (!rateLimitData?.allowed) {
+        const resetMinutes = rateLimitData?.resetAt 
+          ? Math.ceil((rateLimitData.resetAt - Date.now()) / 1000 / 60)
+          : 60;
+        
+        console.error('❌ Rate limit excedido para registro');
+        Alert.alert(
+          'Límite alcanzado',
+          `Has intentado registrarte demasiadas veces. Por seguridad, debes esperar ${resetMinutes} minutos antes de intentar nuevamente.`
+        );
+        setLoading(false);
+        return;
+      }
+      
+      console.log('✅ Rate limit OK, intentos restantes:', rateLimitData?.remaining || 'N/A');
+      
+      // Registrar en Supabase con el email ficticio
+      // Staff invitados NO requieren confirmación por email (serán aprobados por el owner)
+      console.log('📝 Llamando a supabase.auth.signUp...');
+      console.log('📝 Password original length:', password.length);
+      console.log('📝 Password normalizada length:', normalizedPassword.length);
+      console.log('📝 Password tiene espacios:', password !== normalizedPassword);
+      
+      const { data, error } = await supabase.auth.signUp({
+        email: fakeEmail,
+        password: normalizedPassword, // Usar password normalizado
+        options: {
+          data: {
+            qrToken,
+            branchId,
+            branchName,
+            invitationType: 'admin_invite',
+            username: username, // Guardar el username real en metadata
+          },
+        },
+      });
+
+      console.log('📝 Respuesta de signUp:');
+      console.log('📝 - Error:', error ? JSON.stringify(error, null, 2) : 'null');
+      console.log('📝 - User ID:', data?.user?.id || 'null');
+      console.log('📝 - User Email:', data?.user?.email || 'null');
+      console.log('📝 - Session:', data?.session ? 'EXISTE' : 'null');
+      console.log('📝 - Email Confirmed:', data?.user?.email_confirmed_at ? 'SI' : 'NO');
+      console.log('📝 - User Metadata:', JSON.stringify(data?.user?.user_metadata, null, 2));
+
+      if (error) {
+        console.error('❌ Error en signUp:', error);
+        throw error;
+      }
+
+      // ✅ ESPERAR a que la sesión esté activa antes de invocar Edge Function
+      if (data.session) {
+        // Usuario autenticado inmediatamente, invocar Edge Function
+        console.log('📝 ✅ Sesión activa - Usuario autenticado inmediatamente');
+        console.log('📝 User ID:', data.user!.id);
+        console.log('📝 Session token (primeros 20):', data.session.access_token?.substring(0, 20) + '...');
+        console.log('📝 Invocando Edge Function user-created...');
+        
+        try {
+          // Esperar un momento para asegurar que la sesión esté completamente establecida
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          const { data: functionData, error: functionError } = await supabase.functions.invoke('user-created', {
+            body: {
+              qrToken,
+              invitationType: 'admin_invite',
+              branchId,
+              name: username, // Usar el username real
+              username: username, // Pasar el username explícitamente
+            },
+          });
+
+          console.log('📝 Respuesta de Edge Function:');
+          console.log('📝 - Error:', functionError ? JSON.stringify(functionError, null, 2) : 'null');
+          console.log('📝 - Data:', functionData ? JSON.stringify(functionData, null, 2) : 'null');
+          console.log('📝 - Success:', functionData?.success ? 'SI' : 'NO');
+
+          if (functionError) {
+            console.error('❌ Error en Edge Function:', functionError);
+            console.error('❌ Error message:', functionError.message);
+            console.error('❌ Error code:', functionError.status || functionError.code);
+            
+            // Intentar crear usuario via RPC como fallback
+            console.log('📝 Intentando crear usuario via RPC como fallback...');
+            try {
+              // Intentar primero con username (si la migración ya se ejecutó)
+              let rpcData, rpcError;
+              try {
+                const result = await supabase.rpc('create_staff_user', {
+                  p_user_id: data.user!.id,
+                  p_email: fakeEmail,
+                  p_name: username,
+                  p_username: username,
+                  p_qr_token: qrToken,
+                });
+                rpcData = result.data;
+                rpcError = result.error;
+              } catch (e: any) {
+                // Si falla, intentar sin username (función antigua)
+                console.log('📝 Función RPC no acepta p_username, intentando sin él...');
+                const result = await supabase.rpc('create_staff_user', {
+                  p_user_id: data.user!.id,
+                  p_email: fakeEmail,
+                  p_name: username,
+                  p_qr_token: qrToken,
+                });
+                rpcData = result.data;
+                rpcError = result.error;
+                
+                // Si se creó sin username, actualizar username manualmente
+                if (rpcData?.success && !rpcError) {
+                  console.log('📝 Usuario creado sin username, actualizando username...');
+                  const { error: updateError } = await supabase
+                    .from('users')
+                    .update({ username: username })
+                    .eq('id', data.user!.id);
+                  
+                  if (updateError) {
+                    console.error('❌ Error actualizando username:', updateError);
+                  } else {
+                    console.log('✅ Username actualizado correctamente');
+                  }
+                }
+              }
+              
+              if (rpcError) {
+                console.error('❌ Error en RPC fallback:', rpcError);
+              } else if (rpcData?.success) {
+                console.log('✅ Usuario creado via RPC fallback:', rpcData);
+              }
+            } catch (rpcErr) {
+              console.error('❌ Error en RPC fallback:', rpcErr);
+            }
+            
+            Alert.alert(
+              'Advertencia',
+              'Tu cuenta fue creada pero hubo un problema al completar el perfil. Contacta al administrador.'
+            );
+          } else {
+            console.log('✅ Usuario staff creado via Edge Function:', functionData);
+            
+            // Esperar un momento antes de verificar
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Verificar que el usuario se creó en la BD
+            console.log('📝 Verificando creación del usuario en BD...');
+            const { data: verifyUser, error: verifyError } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', data.user!.id)
+              .single();
+            
+            if (verifyError) {
+              console.error('❌ Error verificando usuario:', verifyError);
+              console.error('❌ Error code:', verifyError.code);
+              console.error('❌ Error message:', verifyError.message);
+              console.error('❌ Error details:', verifyError.details);
+            } else if (verifyUser) {
+              console.log('✅ Usuario verificado en BD:');
+              console.log('✅ - ID:', verifyUser.id);
+              console.log('✅ - Email:', verifyUser.email);
+              console.log('✅ - Role:', verifyUser.role);
+              console.log('✅ - Status:', verifyUser.status);
+              console.log('✅ - Owner ID:', verifyUser.owner_id);
+              console.log('✅ - Branch ID:', verifyUser.branch_id);
+            } else {
+              console.error('❌ Usuario NO encontrado en BD después de Edge Function');
+              console.error('❌ Esto significa que el usuario NO podrá hacer login hasta que se cree en public.users');
+            }
+            
+            // Verificar también el email confirmado en auth.users
+            console.log('📝 Verificando confirmación de email en auth...');
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (authUser) {
+              console.log('📝 Email confirmado:', authUser.email_confirmed_at ? 'SI' : 'NO');
+              console.log('📝 Email confirmed at:', authUser.email_confirmed_at || 'null');
+            }
+          }
+        } catch (fnError: any) {
+          console.error('❌ Error invocando Edge Function:', fnError);
+          console.error('❌ Error type:', typeof fnError);
+          console.error('❌ Error message:', fnError?.message || JSON.stringify(fnError));
+        }
+      } else {
+        // No hay sesión - crear usuario usando función RPC (bypasea RLS)
+        console.log('⚠️ Sin sesión activa - creando usuario via RPC function...');
+        console.log('⚠️ User ID para RPC:', data.user?.id);
+        
+        try {
+          // Llamar función SQL que bypasea RLS
+          console.log('📝 Llamando RPC create_staff_user...');
+          
+          // Intentar primero con username (si la migración ya se ejecutó)
+          let rpcData, rpcError;
+          try {
+            console.log('📝 Intentando RPC con username...');
+            const result = await supabase.rpc('create_staff_user', {
+              p_user_id: data.user!.id,
+              p_email: fakeEmail,
+              p_name: username,
+              p_username: username,
+              p_qr_token: qrToken,
+            });
+            rpcData = result.data;
+            rpcError = result.error;
+          } catch (e: any) {
+            // Si falla, intentar sin username (función antigua)
+            console.log('📝 Función RPC no acepta p_username, intentando sin él...');
+            const result = await supabase.rpc('create_staff_user', {
+              p_user_id: data.user!.id,
+              p_email: fakeEmail,
+              p_name: username,
+              p_qr_token: qrToken,
+            });
+            rpcData = result.data;
+            rpcError = result.error;
+          }
+
+          console.log('📝 Respuesta de RPC:');
+          console.log('📝 - Error:', rpcError ? JSON.stringify(rpcError, null, 2) : 'null');
+          console.log('📝 - Data:', rpcData ? JSON.stringify(rpcData, null, 2) : 'null');
+
+          if (rpcError) {
+            console.error('❌ Error en RPC create_staff_user:', rpcError);
+            throw rpcError;
+          }
+
+          if (rpcData && rpcData.success) {
+            console.log('✅ Usuario staff creado exitosamente via RPC:', rpcData);
+            
+            // Si se creó sin username, actualizarlo manualmente
+            if (!rpcData.username) {
+              console.log('📝 Actualizando username manualmente...');
+              const { error: updateError } = await supabase
+                .from('users')
+                .update({ username: username })
+                .eq('id', data.user!.id);
+              
+              if (updateError) {
+                console.error('❌ Error actualizando username:', updateError);
+              } else {
+                console.log('✅ Username actualizado correctamente');
+              }
+            }
+            
+            // Verificar que el usuario se creó en la BD
+            // NOTA: No podemos verificar directamente porque RLS requiere autenticación
+            // Pero la RPC retornó success, así que el usuario se creó correctamente
+            console.log('📝 Verificación: La RPC retornó success, el usuario se creó correctamente');
+            console.log('📝 NOTA: No podemos verificar directamente porque RLS requiere autenticación');
+            console.log('📝 El usuario podrá ser verificado después de que el owner lo apruebe y haga login');
+            
+            // Intentar verificar de todas formas (puede fallar por RLS, pero no es crítico)
+            try {
+              const { data: verifyUser, error: verifyError } = await supabase
+                .from('users')
+                .select('*')
+                .eq('id', data.user!.id)
+                .maybeSingle();
+              
+              if (verifyError) {
+                if (verifyError.code === 'PGRST116') {
+                  console.log('⚠️ No se puede verificar por RLS (esperado - usuario no autenticado)');
+                  console.log('✅ Pero la RPC confirmó que el usuario se creó exitosamente');
+                } else {
+                  console.error('❌ Error verificando usuario:', verifyError);
+                }
+              } else if (verifyUser) {
+                console.log('✅ Usuario verificado en BD:');
+                console.log('✅ - ID:', verifyUser.id);
+                console.log('✅ - Email:', verifyUser.email);
+                console.log('✅ - Username:', verifyUser.username || 'NO asignado');
+                console.log('✅ - Role:', verifyUser.role);
+                console.log('✅ - Status:', verifyUser.status);
+              }
+            } catch (verifyErr: any) {
+              console.log('⚠️ Error en verificación (no crítico):', verifyErr.message);
+              console.log('✅ El usuario se creó correctamente según la RPC');
+            }
+          } else {
+            console.error('❌ RPC retornó error:', rpcData);
+            throw new Error(rpcData?.message || 'Error creando usuario');
+          }
+          
+        } catch (directError) {
+          console.error('❌ Error creando usuario via RPC:', directError);
+          Alert.alert(
+            'Advertencia',
+            'Tu cuenta fue creada en el sistema de autenticación. El administrador completará tu perfil manualmente.'
+          );
+        }
+      }
+      
+      console.log('📝 ==================== FIN REGISTRO CON QR ====================');
+
       Alert.alert(
-        '✅ Registro Enviado', 
-        `Tu solicitud de administrador ha sido enviada.\n\nSucursal: ${branchName || 'Sin especificar'}\n\nEl administrador de la sucursal revisará y aprobará tu solicitud. Recibirás una notificación cuando tu cuenta esté activa.`,
+        '✅ Registro Exitoso', 
+        `Tu cuenta ha sido creada.\n\nSucursal: ${branchName || 'Sin especificar'}\n\n⚠️ Tu cuenta está pendiente de aprobación.\n\nEl owner de la sucursal debe aprobar tu solicitud y asignarte un rol antes de que puedas acceder al catálogo.`,
         [
           {
             text: 'Entendido',
             onPress: () => {
-              // Navegar de vuelta al login
-              navigation.navigate('Login');
+              navigation.navigate('Welcome');
             }
           }
         ]
       );
     } catch (error: any) {
-      Alert.alert('Error', 'Error al registrar administrador');
+      Alert.alert('Error', error.message || 'Error al registrar administrador');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGoogleAuth = async () => {
+    if (googleLoading) return;
+    setGoogleLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: 'cellarium://auth-callback',
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        },
+      });
+
+      if (error) {
+        Alert.alert('Error', error.message);
+        return;
+      }
+
+      if (!data?.url) {
+        return;
+      }
+
+      const result = await WebBrowser.openAuthSessionAsync(
+        data.url,
+        'cellarium://auth-callback'
+      );
+
+      if (__DEV__) {
+        console.log('[OAuth] openAuthSession result type:', result.type);
+      }
+
+      if (result.type !== 'success' || !result.url) {
+        return;
+      }
+
+      const url = result.url;
+      const fragment = url.includes('#') ? url.split('#')[1] : '';
+      const params = new URLSearchParams(fragment);
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+
+      if (!accessToken || !refreshToken) {
+        if (__DEV__) console.log('[OAuth] callback url (missing tokens):', url);
+        Alert.alert('Error', 'OAuth callback missing tokens');
+        return;
+      }
+
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+
+      if (sessionError) {
+        if (__DEV__) console.log('[OAuth] setSession error:', sessionError.message);
+        Alert.alert('Error', sessionError.message);
+        return;
+      }
+
+      if (__DEV__) {
+        console.log('[OAuth] setSession success');
+        const { data: { session } } = await supabase.auth.getSession();
+        console.log('[OAuth] SESSION USER ID', session?.user?.id ?? null);
+        console.log('[OAuth] SESSION EMAIL', session?.user?.email ?? null);
+      }
+      setGoogleLoading(false);
+      return;
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Error iniciando sesión con Google');
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -99,18 +535,38 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
         </View>
 
         <View style={styles.formContainer}>
-          <Text style={styles.formTitle}>Completa tu Registro</Text>
+          <Text style={styles.formTitle}>Registrarse como Staff</Text>
           
+          {/* Botón Google OAuth */}
+          <TouchableOpacity
+            style={[styles.googleButton, googleLoading && styles.buttonDisabled]}
+            onPress={handleGoogleAuth}
+            disabled={googleLoading}
+          >
+            <Text style={styles.googleButtonText}>
+              {googleLoading ? 'Conectando...' : '🌐 Continuar con Google'}
+            </Text>
+          </TouchableOpacity>
+
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>O</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          {/* Formulario Username/Password */}
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Nombre de usuario *</Text>
             <TextInput
               style={styles.input}
               value={username}
               onChangeText={setUsername}
-              placeholder="Elige tu nombre de usuario"
+              placeholder="Mínimo 6 caracteres (letras, números, _)"
               autoCapitalize="none"
               autoCorrect={false}
+              maxLength={20}
             />
+            <Text style={styles.inputHint}>Solo letras, números y guiones bajos (_)</Text>
           </View>
           
           <View style={styles.inputContainer}>
@@ -141,17 +597,17 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
 
           <TouchableOpacity
             style={[styles.registerButton, loading && styles.registerButtonDisabled]}
-            onPress={handleRegister}
+            onPress={handleUsernameRegister}
             disabled={loading}
           >
             <Text style={styles.registerButtonText}>
-              {loading ? 'Enviando solicitud...' : '✓ Completar Registro'}
+              {loading ? 'Registrando...' : '✓ Registrar con Usuario'}
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.cancelButton}
-            onPress={() => navigation.navigate('Login')}
+            onPress={() => navigation.navigate('Welcome')}
           >
             <Text style={styles.cancelButtonText}>Cancelar</Text>
           </TouchableOpacity>
@@ -277,6 +733,36 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     color: '#666',
     fontSize: 15,
+  },
+  googleButton: {
+    backgroundColor: '#4285F4',
+    borderRadius: 8,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  googleButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  buttonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#ddd',
+  },
+  dividerText: {
+    marginHorizontal: 15,
+    color: '#666',
+    fontSize: 14,
   },
   warningContainer: {
     backgroundColor: '#fff3cd',

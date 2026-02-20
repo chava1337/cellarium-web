@@ -11,7 +11,7 @@ vercel-site/
 │   │   ├── apple-app-site-association  # Verificación iOS
 │   │   └── assetlinks.json             # Verificación Android
 │   ├── index.html                       # Página principal
-│   └── qr.html                          # Página de redirección QR
+│   └── (ruta /qr servida por App Router en el repo web)
 ├── vercel.json                          # Configuración Vercel
 └── README.md                            # Este archivo
 ```
@@ -66,7 +66,7 @@ vercel --prod
    - Reemplazar en `assetlinks.json`
 
 3. **URLs de las Stores**:
-   - Actualizar en `qr.html` cuando publiques la app
+   - Actualizar en la ruta `/qr` cuando publiques la app
 
 ## ✅ Verificar Deployment
 

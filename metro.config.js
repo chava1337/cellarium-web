@@ -14,6 +14,9 @@ config.resolver.alias = {
   '@/hooks': './src/hooks',
 };
 
+// Agregar extensión .riv como asset source
+config.resolver.assetExts.push('riv');
+
 // Configuración para debugging
 config.resolver.platforms = ['ios', 'android', 'native', 'web'];
 
