@@ -8,7 +8,7 @@ const STRIPE_PLUGIN = [
 ];
 const OTHER_PLUGINS = ["expo-font", "expo-secure-store", "expo-web-browser"];
 
-// Icono principal: ./assets/icon.png debe ser PNG 1024x1024, sin bordes redondeados ni padding interno excesivo.
+// Icono principal (App Store, Play Store legacy, etc.): PNG 1024x1024.
 const config = {
   expo: {
     name: "Cellarium",
@@ -64,8 +64,9 @@ const config = {
       supportsTablet: true,
       orientation: "default",
       package: "com.cellarium.winecatalog",
+      // Foreground: asset específico para adaptive icon (margen ~20–30% para evitar recorte con la máscara).
       adaptiveIcon: {
-        foregroundImage: "./assets/icon.png",
+        foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#6D1F2B"
       },
       permissions: [
