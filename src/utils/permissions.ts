@@ -1,7 +1,7 @@
 // Sistema de permisos jerárquicos para Cellarium
 
 import type { User } from '../types';
-import { getEffectivePlan } from './effectivePlan';
+import { getEffectivePlan, type EffectivePlanId } from './effectivePlan';
 
 export type UserRole = 'owner' | 'gerente' | 'sommelier' | 'supervisor' | 'personal';
 
@@ -72,28 +72,33 @@ const canGenerateGuestQrByRole = (userRole: UserRole): boolean => {
 
 /**
  * Si el usuario puede generar QR guest según plan + rol.
- * - Free: solo owner
- * - Pro/Business: owner, gerente, supervisor
- * - gerente/supervisor: solo si currentBranchId === user.branch_id
+ * - Requiere status === 'active' (pending/inactive no pueden).
+ * - owner: usa effectivePlan del propio user.
+ * - gerente/supervisor: si cumple (a) status active, (b) owner_id, (c) branch_id, (d) currentBranchId,
+ *   (e) user.branch_id === currentBranchId → puede generar (sin depender del plan del owner).
  */
 export const canGenerateGuestQr = (
   user: User | null,
-  currentBranchId?: string | null
+  currentBranchId?: string | null,
+  _ownerEffectivePlan?: EffectivePlanId | null
 ): boolean => {
-  if (!user?.role) return false;
-  const plan = getEffectivePlan(user);
+  if (!user?.role || user.status !== 'active') return false;
   const role = user.role as UserRole;
 
-  if (plan === 'free') {
-    return role === 'owner';
+  if (role === 'owner') {
+    const plan = getEffectivePlan(user);
+    if (plan === 'free') return true;
+    if (plan === 'basic' || plan === 'additional-branch') return true;
+    return false;
   }
-  if (plan === 'basic' || plan === 'additional-branch') {
-    if (role === 'owner') return true;
-    if (role === 'gerente' || role === 'supervisor') {
-      if (currentBranchId == null) return false;
-      return user.branch_id === currentBranchId;
-    }
+
+  if (role === 'gerente' || role === 'supervisor') {
+    if (user.owner_id == null || user.branch_id == null) return false;
+    if (currentBranchId == null) return false;
+    if (user.branch_id !== currentBranchId) return false;
+    return true;
   }
+
   return false;
 };
 

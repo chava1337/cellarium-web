@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,23 +12,32 @@ import {
   ScrollView,
   Image,
   Dimensions,
+  Switch,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
-import { InventoryService, InventoryItem, InventoryStats } from '../services/InventoryService';
-import { AnalyticsService, WineMetrics, BranchMetrics, ComparisonMetrics } from '../services/AnalyticsService';
+import { InventoryService, InventoryItem, InventoryStats, RegisterCountResult, SalesFromCountsRow, SalesFromCountsSummary, BranchComparisonRow, BranchComparisonSummary } from '../services/InventoryService';
+import { AnalyticsService, WineMetrics, BranchMetrics } from '../services/AnalyticsService';
 import { PDFReportService } from '../services/PDFReportService';
 import { WineService } from '../services/WineService';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranch } from '../contexts/BranchContext';
+import { useLanguage } from '../contexts/LanguageContext';
+import { useAdminGuard } from '../hooks/useAdminGuard';
+import { getEffectivePlan, getOwnerEffectivePlan } from '../utils/effectivePlan';
+import { checkSubscriptionFeatureByPlan } from '../utils/subscriptionPermissions';
+import { PendingApprovalMessage } from '../components/PendingApprovalMessage';
 import { PieChart, BarChart } from 'react-native-chart-kit';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '../lib/supabase';
+import { isValidPrice, formatCurrencyMXN } from '../utils/wineCatalogUtils';
 
 const { width } = Dimensions.get('window');
+const HELP_MODAL_DONT_SHOW_KEY = 'inventory_analytics_help_dont_show';
 
 type InventoryAnalyticsScreenNavigationProp = StackNavigationProp<
   RootStackParamList,
@@ -43,18 +52,54 @@ interface Props {
 
 type ViewMode = 'stock' | 'sales' | 'comparison' | 'reports';
 type SortBy = 'sales' | 'revenue' | 'rotation';
-type ReductionReason = 'venta' | 'rotura' | 'expiracion' | 'otro';
-type EntryReason = 'compra_producto' | 'cortesia_proveedor' | 'otro';
+/** Razones para evento: entrada (compra, cortesia_proveedor) o salida (cortesia_cliente, rotura) */
+type EventReason = 'compra' | 'cortesia_proveedor' | 'cortesia_cliente' | 'rotura';
+
+const FEATURE_ID_INVENTORY = 'inventory' as const;
 
 const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
+  const { status: guardStatus } = useAdminGuard({
+    navigation,
+    route,
+    allowedRoles: ['owner', 'gerente', 'sommelier', 'supervisor'],
+  });
   const { user } = useAuth();
   const { currentBranch, availableBranches } = useBranch();
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const branchId = route.params?.branchId || currentBranch?.id || '';
+
+  const [subscriptionAllowed, setSubscriptionAllowed] = useState<'pending' | true | false>('pending');
+  const alertedBlockedRef = useRef(false);
+
+  useEffect(() => {
+    if (guardStatus !== 'allowed' || !user) return;
+    let cancelled = false;
+    const run = async () => {
+      const plan = user.role === 'owner'
+        ? getEffectivePlan(user)
+        : await getOwnerEffectivePlan(user);
+      if (cancelled) return;
+      const allowed = checkSubscriptionFeatureByPlan(plan, FEATURE_ID_INVENTORY);
+      if (!allowed) {
+        setSubscriptionAllowed(false);
+        navigation.replace('AdminDashboard');
+        if (!alertedBlockedRef.current) {
+          alertedBlockedRef.current = true;
+          Alert.alert(t('subscription.feature_blocked'), undefined, [{ text: 'OK' }]);
+        }
+      } else {
+        setSubscriptionAllowed(true);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [user?.id, user?.role, guardStatus, navigation, t]);
+
   const isOwner = user?.role === 'owner';
   const canCompareBranches = isOwner && availableBranches.length >= 2;
 
-  // Estado general
+  // Estado general (todos los hooks deben ir antes de cualquier return condicional)
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('stock');
 
@@ -68,23 +113,35 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     lowStockCount: 0,
   });
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'no_movement'>('all');
+  const [filterType, setFilterType] = useState<'all'>('all');
 
-  // Estados de análisis
+  // Estados de análisis (Ventas estimadas desde cortes)
+  const [salesFromCounts, setSalesFromCounts] = useState<SalesFromCountsRow[] | null>(null);
+  const [salesFromCountsSummary, setSalesFromCountsSummary] = useState<SalesFromCountsSummary | null>(null);
+  const [salesFromCountsDays, setSalesFromCountsDays] = useState(30);
   const [branchMetrics, setBranchMetrics] = useState<BranchMetrics | null>(null);
   const [winesMetrics, setWinesMetrics] = useState<WineMetrics[]>([]);
-  const [comparisonMetrics, setComparisonMetrics] = useState<ComparisonMetrics | null>(null);
+  const [comparisonFromCounts, setComparisonFromCounts] = useState<{ branches: BranchComparisonRow[]; summary: BranchComparisonSummary } | null>(null);
+  const [comparisonDays, setComparisonDays] = useState<7 | 30 | 90>(30);
   const [sortBy, setSortBy] = useState<SortBy>('sales');
 
-  // Modal de ajuste de stock
-  const [modalVisible, setModalVisible] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
-  const [adjustmentType, setAdjustmentType] = useState<'entrada' | 'salida'>('entrada');
-  const [adjustmentQuantity, setAdjustmentQuantity] = useState('');
-  const [entryReason, setEntryReason] = useState<EntryReason | ''>('');
-  const [reductionReason, setReductionReason] = useState<ReductionReason | ''>('');
-  const [customReason, setCustomReason] = useState('');
-  const [adjusting, setAdjusting] = useState(false);
+  // Modal "Registrar evento" (entrada/salida)
+  const [eventModalVisible, setEventModalVisible] = useState(false);
+  const [eventItem, setEventItem] = useState<InventoryItem | null>(null);
+  const [eventDirection, setEventDirection] = useState<'in' | 'out'>('in');
+  const [eventReason, setEventReason] = useState<EventReason>('compra');
+  const [eventQty, setEventQty] = useState('');
+  const [eventNotes, setEventNotes] = useState('');
+  const [eventSubmitting, setEventSubmitting] = useState(false);
+
+  // Modal "Conteo físico" (correctivo 15–30 días)
+  const [countModalVisible, setCountModalVisible] = useState(false);
+  const [countItem, setCountItem] = useState<InventoryItem | null>(null);
+  const [countPrevStock, setCountPrevStock] = useState(0);
+  const [countQuantity, setCountQuantity] = useState('');
+  const [countNotes, setCountNotes] = useState('');
+  const [countSubmitting, setCountSubmitting] = useState(false);
+  const [lastCountResult, setLastCountResult] = useState<RegisterCountResult | null>(null);
 
   // Modal de edición de vino
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -108,78 +165,81 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // PDF generation
   const [generatingPDF, setGeneratingPDF] = useState(false);
+  const [estimatedReportPeriod, setEstimatedReportPeriod] = useState<7 | 30 | 90>(30);
+  const [generatingEstimatedPDF, setGeneratingEstimatedPDF] = useState(false);
 
-  useEffect(() => {
-    loadData();
-  }, [branchId, viewMode]);
-
-  useEffect(() => {
-    if (viewMode === 'stock') {
-      filterInventory();
-    }
-  }, [inventory, searchQuery, filterType]);
+  // Modal de ayuda
+  const [helpModalVisible, setHelpModalVisible] = useState(false);
+  const [dontShowHelpAgain, setDontShowHelpAgain] = useState(false);
+  const [helpHidden, setHelpHidden] = useState(false);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      console.log('📊 Cargando datos para modo:', viewMode);
+      if (__DEV__) console.log('📊 Cargando datos para modo:', viewMode);
 
       if (!user) {
-        console.error('❌ No hay usuario autenticado');
+        if (__DEV__) console.error('❌ No hay usuario autenticado');
         return;
       }
 
-      // Obtener owner_id: si el usuario es owner, usa su propio ID; si no, usa owner_id
       const ownerId = user.owner_id || user.id;
-      console.log('🔑 Owner ID:', ownerId);
+      if (__DEV__) console.log('🔑 Owner ID:', ownerId);
 
       if (viewMode === 'comparison' && canCompareBranches) {
-        // Cargar comparación entre sucursales
-        console.log('🏢 Cargando comparación de sucursales...');
+        if (__DEV__) console.log('🏢 Cargando comparación desde cortes...');
         try {
-          const comparison = await AnalyticsService.getAllBranchesComparison(ownerId);
-          setComparisonMetrics(comparison);
-          console.log('✅ Comparación cargada:', comparison);
+          const { branches, summary } = await InventoryService.getBranchesComparisonFromCounts({
+            ownerId,
+            days: comparisonDays,
+          });
+          setComparisonFromCounts({ branches, summary });
+          if (__DEV__) console.log('✅ Comparación desde cortes:', branches.length, 'sucursales');
         } catch (error: any) {
-          if (error?.code === 'PGRST205' && error?.message?.includes('sale_items')) {
-            console.log('⚠️ Tabla sale_items no existe aún para comparación');
-            setComparisonMetrics(null);
-          }
+          if (__DEV__) console.error('Error getBranchesComparisonFromCounts:', error);
+          setComparisonFromCounts(null);
         }
-      } else if (viewMode === 'sales') {
-        // Cargar métricas de ventas
-        console.log('📈 Cargando métricas de ventas...');
+      } else if (viewMode === 'sales' || viewMode === 'reports') {
+        if (__DEV__) console.log('📈 Cargando ventas estimadas desde cortes...');
+        const days = viewMode === 'reports' ? estimatedReportPeriod : salesFromCountsDays;
         try {
-          const [metrics, wines] = await Promise.all([
-            AnalyticsService.getBranchMetrics(branchId, ownerId),
-            AnalyticsService.getAllWinesMetrics(branchId, ownerId),
-          ]);
-          setBranchMetrics(metrics);
-          setWinesMetrics(wines);
-          console.log('✅ Ventas cargadas:', wines.length, 'vinos');
+          const { rows, summary } = await InventoryService.getSalesFromCountsByPeriod({
+            ownerId,
+            branchId,
+            days,
+          });
+          setSalesFromCounts(rows);
+          setSalesFromCountsSummary(summary);
+          if (__DEV__) console.log('✅ Ventas estimadas desde cortes:', rows.length, 'vinos, sufficient:', summary.sufficient);
         } catch (error: any) {
-          // Manejar errores cuando sale_items no existe
-          if (error?.code === 'PGRST205' && error?.message?.includes('sale_items')) {
-            console.log('⚠️ Tabla sale_items no existe aún, estableciendo valores por defecto');
-            setBranchMetrics(null);
-            setWinesMetrics([]);
-          } else {
-            throw error;
+          if (__DEV__) console.error('Error getSalesFromCountsByPeriod (ventas estimadas):', error);
+          setSalesFromCounts([]);
+          setSalesFromCountsSummary({ total_sold_estimated: 0, total_revenue_estimated: null, total_entries: 0, total_special_outs: 0, count_start_at: null, count_end_at: null, sufficient: false, valid_wines_count: 0, unpriced_consumption_total: 0, unpriced_wines_count: 0 });
+        }
+        if (viewMode === 'reports') {
+          try {
+            const [invData, statsData] = await Promise.all([
+              InventoryService.getInventoryByBranch(branchId, ownerId),
+              InventoryService.getInventoryStats(branchId, ownerId),
+            ]);
+            setInventory(invData);
+            setInventoryStats(statsData);
+          } catch (e) {
+            if (__DEV__) console.error('Error loading inventory for reports:', e);
           }
         }
       } else {
-        // Cargar inventario (modo stock)
-        console.log('📦 Cargando inventario para branch:', branchId);
+        if (__DEV__) console.log('📦 Cargando inventario para branch:', branchId);
         const [inventoryData, statsData] = await Promise.all([
           InventoryService.getInventoryByBranch(branchId, ownerId),
           InventoryService.getInventoryStats(branchId, ownerId),
         ]);
         setInventory(inventoryData);
         setInventoryStats(statsData);
-        console.log('✅ Inventario cargado:', inventoryData.length, 'vinos, stats:', statsData);
+        if (__DEV__) console.log('✅ Inventario cargado:', inventoryData.length, 'vinos, stats:', statsData);
       }
     } catch (error) {
-      console.error('❌ Error loading data:', error);
+      if (__DEV__) console.error('❌ Error loading data:', error);
       Alert.alert('Error', 'No se pudieron cargar los datos');
     } finally {
       setLoading(false);
@@ -189,7 +249,6 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
   const filterInventory = () => {
     let filtered = [...inventory];
 
-    // Filtrar por búsqueda
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
@@ -201,24 +260,155 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       );
     }
 
-    // Filtrar por tipo
-    if (filterType === 'no_movement') {
-      // TODO: Implementar filtro de vinos sin movimiento
-      // Por ahora, simular con vinos que tienen 0 ventas
-      filtered = filtered.filter((item) => item.stock_quantity === item.stock_quantity); // Placeholder
-    }
-
     setFilteredInventory(filtered);
   };
 
-  const openAdjustmentModal = (item: InventoryItem, type: 'entrada' | 'salida') => {
-    setSelectedItem(item);
-    setAdjustmentType(type);
-    setAdjustmentQuantity('');
-    setEntryReason('');
-    setReductionReason('');
-    setCustomReason('');
-    setModalVisible(true);
+  useEffect(() => {
+    loadData();
+  }, [branchId, viewMode, estimatedReportPeriod, comparisonDays]);
+
+  useEffect(() => {
+    if (viewMode === 'stock') {
+      filterInventory();
+    }
+  }, [inventory, searchQuery, filterType]);
+
+  useEffect(() => {
+    AsyncStorage.getItem(HELP_MODAL_DONT_SHOW_KEY).then((v) => {
+      setHelpHidden(v === 'true');
+    });
+  }, []);
+
+  if (guardStatus === 'pending') {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#f8f9fa' }}>
+        <PendingApprovalMessage />
+      </View>
+    );
+  }
+  if (guardStatus === 'allowed' && subscriptionAllowed === 'pending') {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#8B0000" />
+      </View>
+    );
+  }
+  if (guardStatus === 'allowed' && subscriptionAllowed === false) {
+    return null;
+  }
+
+  const openEventModal = (item: InventoryItem) => {
+    setEventItem(item);
+    setEventDirection('in');
+    setEventReason('compra');
+    setEventQty('');
+    setEventNotes('');
+    setEventModalVisible(true);
+  };
+
+  const closeEventModal = () => {
+    setEventModalVisible(false);
+    setEventItem(null);
+    setEventQty('');
+    setEventNotes('');
+    setEventSubmitting(false);
+  };
+
+  const handleRegisterEvent = async () => {
+    if (!eventItem || !user) return;
+    const qty = parseInt(eventQty, 10);
+    if (isNaN(qty) || qty <= 0) {
+      Alert.alert('Dato inválido', 'La cantidad debe ser mayor a 0.');
+      return;
+    }
+    const bid = (branchId || currentBranch?.id || '');
+    if (!bid) {
+      Alert.alert('Error', 'No se pudo determinar la sucursal.');
+      return;
+    }
+    try {
+      setEventSubmitting(true);
+      await InventoryService.registerInventoryEvent({
+        ownerId: user.owner_id || user.id,
+        branchId: bid,
+        wineId: eventItem.wine_id,
+        stockId: eventItem.id,
+        userId: user.id,
+        direction: eventDirection,
+        qty,
+        reason: eventReason,
+        notes: eventNotes.trim() || null,
+      });
+      Alert.alert('Listo', 'Evento registrado correctamente.');
+      closeEventModal();
+      loadData();
+    } catch (err: any) {
+      if (__DEV__) console.error('Error registering event:', err);
+      Alert.alert('Error', err?.message || 'No se pudo registrar el evento.');
+    } finally {
+      setEventSubmitting(false);
+    }
+  };
+
+  const openCountModal = (item: InventoryItem) => {
+    const prev = item.stock_quantity ?? (item as any).quantity ?? 0;
+    setCountItem(item);
+    setCountPrevStock(prev);
+    setCountQuantity(String(prev));
+    setCountNotes('');
+    setLastCountResult(null);
+    setCountModalVisible(true);
+  };
+
+  const closeCountModal = () => {
+    setCountModalVisible(false);
+    setCountItem(null);
+    setCountPrevStock(0);
+    setCountQuantity('');
+    setCountNotes('');
+    setCountSubmitting(false);
+  };
+
+  const handleRegisterCount = async () => {
+    if (!countItem || !user) return;
+    const counted = parseInt(countQuantity, 10);
+    if (isNaN(counted) || counted < 0) {
+      Alert.alert('Dato inválido', 'El conteo actual debe ser un número mayor o igual a 0.');
+      return;
+    }
+    const prev = countPrevStock;
+    const bid = (branchId || currentBranch?.id || '');
+    if (!bid) {
+      Alert.alert('Error', 'No se pudo determinar la sucursal.');
+      return;
+    }
+    try {
+      setCountSubmitting(true);
+      const result = await InventoryService.registerInventoryCount({
+        ownerId: user.owner_id || user.id,
+        branchId: bid,
+        wineId: countItem.wine_id,
+        countedQuantity: counted,
+        receivedQuantity: 0,
+        reason: 'conteo',
+        notes: countNotes.trim() || null,
+      });
+      setLastCountResult(result);
+      const finalPrev = result?.previous_count ?? prev;
+      const finalCount = result?.new_count ?? counted;
+      const finalDelta = finalCount - finalPrev;
+      Alert.alert(
+        'Conteo registrado',
+        `Se ajustó el stock a ${finalCount} botellas (antes: ${finalPrev}, ajuste: ${finalDelta >= 0 ? '+' : ''}${finalDelta}).`
+      );
+      closeCountModal();
+      loadData();
+    } catch (err: any) {
+      if (__DEV__) console.error('Error registering count:', err);
+      Alert.alert('Error', err?.message || 'No se pudo registrar el conteo.');
+    } finally {
+      setCountSubmitting(false);
+    }
   };
 
   const openEditModal = (item: InventoryItem) => {
@@ -239,81 +429,6 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     setEditModalVisible(true);
   };
 
-  const handleStockAdjustment = async () => {
-    if (!selectedItem || !user) {
-      Alert.alert('Error', 'Datos insuficientes');
-      return;
-    }
-
-    const quantity = parseInt(adjustmentQuantity);
-    if (isNaN(quantity) || quantity <= 0) {
-      Alert.alert('Error', 'Ingresa una cantidad válida');
-      return;
-    }
-
-    let reason = '';
-    if (adjustmentType === 'salida') {
-      if (!reductionReason) {
-        Alert.alert('Error', 'Selecciona una razón para la reducción');
-        return;
-      }
-      if (reductionReason === 'otro') {
-        if (!customReason.trim()) {
-          Alert.alert('Error', 'Ingresa la razón personalizada');
-          return;
-        }
-        reason = customReason.trim();
-      } else {
-        reason = reductionReason;
-      }
-    } else {
-      // Entrada
-      if (!entryReason) {
-        Alert.alert('Error', 'Selecciona una razón para la entrada');
-        return;
-      }
-      if (entryReason === 'otro') {
-        if (!customReason.trim()) {
-          Alert.alert('Error', 'Ingresa la razón personalizada');
-          return;
-        }
-        reason = customReason.trim();
-      } else {
-        reason = entryReason === 'compra_producto' ? 'Compra de producto' : 
-                 entryReason === 'cortesia_proveedor' ? 'Cortesía de proveedores' : entryReason;
-      }
-    }
-
-    try {
-      setAdjusting(true);
-
-      let quantityChange = quantity;
-      if (adjustmentType === 'salida') {
-        quantityChange = -quantity;
-      }
-
-      await InventoryService.updateStock(
-        selectedItem.id,
-        selectedItem.wine_id,
-        branchId,
-        quantityChange,
-        adjustmentType,
-        reason,
-        user.id,
-        user.owner_id || user.id
-      );
-
-      Alert.alert('Éxito', 'Stock actualizado correctamente');
-      setModalVisible(false);
-      loadData();
-    } catch (error) {
-      console.error('Error adjusting stock:', error);
-      Alert.alert('Error', 'No se pudo actualizar el stock');
-    } finally {
-      setAdjusting(false);
-    }
-  };
-
   const handleSelectImage = async () => {
     if (!editingWine || !user) return;
 
@@ -325,7 +440,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 0.8,
         allowsEditing: true,
         aspect: [3, 4],
@@ -373,7 +488,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
         });
 
       if (uploadError) {
-        console.error('Error uploading image:', uploadError);
+        if (__DEV__) console.error('Error uploading image:', uploadError);
         throw uploadError;
       }
 
@@ -406,7 +521,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
 
       // No mostrar alert ni cerrar modal - el usuario puede seguir editando
     } catch (error) {
-      console.error('Error uploading image:', error);
+      if (__DEV__) console.error('Error uploading image:', error);
       Alert.alert('Error', 'No se pudo actualizar la imagen');
     } finally {
       setUploadingImage(false);
@@ -423,20 +538,20 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       // Actualizar datos del vino (incluyendo imagen si fue cambiada)
       await WineService.updateWine(editingWine.wine_id, ownerId, {
         name: wineEditData.name,
-        winery: wineEditData.winery || null,
+        winery: wineEditData.winery || undefined,
         grape_variety: wineEditData.grape_variety,
-        region: wineEditData.region || null,
-        country: wineEditData.country || null,
+        region: wineEditData.region || undefined,
+        country: wineEditData.country || undefined,
         // Guardar vintage como string si contiene comas (múltiples añadas), 
         // de lo contrario como número (se convertirá a string en la BD después de la migración)
         vintage: wineEditData.vintage 
           ? (wineEditData.vintage.includes(',') 
               ? wineEditData.vintage.trim()
               : parseInt(wineEditData.vintage) || wineEditData.vintage.trim())
-          : null,
-        description: wineEditData.description || null,
-        tasting_notes: wineEditData.tasting_notes || null,
-        image_url: wineEditData.image_url || editingWine.wines.image_url || null, // Guardar nueva imagen si existe
+          : undefined,
+        description: wineEditData.description || undefined,
+        tasting_notes: wineEditData.tasting_notes || undefined,
+        image_url: wineEditData.image_url || editingWine.wines.image_url || undefined,
       });
 
       // Actualizar precios en stock (solo si el stock pertenece al owner)
@@ -451,7 +566,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
         .eq('wine_id', editingWine.wine_id); // SEGURIDAD: Verificar wine_id también
 
       if (stockUpdateError) {
-        console.error('Error updating stock prices:', stockUpdateError);
+        if (__DEV__) console.error('Error updating stock prices:', stockUpdateError);
         // No lanzamos error porque el vino ya se actualizó, solo logueamos
       }
 
@@ -459,7 +574,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       setEditModalVisible(false);
       loadData();
     } catch (error) {
-      console.error('Error saving wine:', error);
+      if (__DEV__) console.error('Error saving wine:', error);
       Alert.alert('Error', 'No se pudo actualizar el vino');
     } finally {
       setSavingWine(false);
@@ -516,7 +631,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
               Alert.alert('Éxito', 'Vino eliminado correctamente del catálogo');
               loadData();
             } catch (error) {
-              console.error('Error deleting wine:', error);
+              if (__DEV__) console.error('Error deleting wine:', error);
               Alert.alert('Error', 'No se pudo eliminar el vino');
             } finally {
               setDeletingWine(false);
@@ -532,32 +647,77 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       setGeneratingPDF(true);
 
       if (type === 'inventory') {
-        // PDF de inventario
-        const reportData = {
-          branchName: currentBranch?.name || 'Sin sucursal',
-          inventory: inventory,
-          stats: inventoryStats,
-          generatedDate: new Date().toLocaleString('es-MX', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
-          generatedBy: user?.username || 'Usuario',
-        };
-
-        await PDFReportService.generateAndShareReport(reportData);
+        // PDF de inventario: usar API real del servicio
+        if (!inventoryStats) {
+          Alert.alert('Datos no disponibles', 'Carga el inventario antes de generar el reporte.');
+          return;
+        }
+        await PDFReportService.exportInventoryReport(
+          currentBranch?.name ?? 'Sucursal',
+          inventory,
+          inventoryStats
+        );
         Alert.alert('✅ Reporte Generado', 'El reporte de inventario ha sido generado exitosamente.');
       } else if (type === 'sales') {
-        // TODO: PDF de análisis de ventas
-        Alert.alert('Próximamente', 'PDF de análisis de ventas estará disponible pronto');
+        if (!user) return;
+        const ownerId = user.owner_id ?? user.id;
+        const bid = (branchId || currentBranch?.id || '');
+        if (!bid) {
+          Alert.alert('Error', 'No se pudo determinar la sucursal.');
+          return;
+        }
+        setGeneratingEstimatedPDF(true);
+        try {
+          // Misma fuente y lógica que la pestaña Ventas estimadas (getSalesFromCountsByPeriod).
+          const { rows, summary } = await InventoryService.getSalesFromCountsByPeriod({
+            ownerId,
+            branchId: bid,
+            days: estimatedReportPeriod,
+          });
+          if (summary.valid_wines_count === 0 || rows.length === 0) {
+            Alert.alert(
+              'Datos insuficientes',
+              'Necesitas al menos un vino con 2 conteos físicos (corte inicial y final) para generar el reporte de ventas estimadas.'
+            );
+            return;
+          }
+          const toDate = new Date();
+          const fromDate = new Date();
+          fromDate.setDate(fromDate.getDate() - estimatedReportPeriod);
+          const fromStr = fromDate.toISOString().slice(0, 10);
+          const toStr = toDate.toISOString().slice(0, 10);
+          await PDFReportService.exportSalesFromCountsReport(
+            currentBranch?.name ?? 'Sucursal',
+            { from: fromStr, to: toStr, label: `Últimos ${estimatedReportPeriod} días` },
+            rows,
+            summary
+          );
+          Alert.alert('✅ Reporte generado', 'El reporte de ventas estimadas (desde cortes) se ha generado.');
+        } catch (err: any) {
+          if (__DEV__) console.error('Error generating sales from counts PDF:', err);
+          Alert.alert('Error', err?.message ?? 'No se pudo generar el reporte.');
+        } finally {
+          setGeneratingEstimatedPDF(false);
+        }
       } else if (type === 'comparison') {
-        // TODO: PDF comparativo multi-sucursal
-        Alert.alert('Próximamente', 'PDF comparativo multi-sucursal estará disponible pronto');
+        if (!comparisonFromCounts || comparisonFromCounts.summary.valid_branches_count === 0) {
+          Alert.alert('Datos insuficientes', 'No hay sucursales con datos suficientes para generar el reporte comparativo.');
+          return;
+        }
+        try {
+          await PDFReportService.exportBranchComparisonReport(
+            { from: '', to: '', label: `Últimos ${comparisonDays} días` },
+            comparisonFromCounts.branches,
+            comparisonFromCounts.summary
+          );
+          Alert.alert('✅ Reporte generado', 'El reporte comparativo se ha generado.');
+        } catch (err: any) {
+          if (__DEV__) console.error('Error generating comparison PDF:', err);
+          Alert.alert('Error', err?.message ?? 'No se pudo generar el reporte.');
+        }
       }
     } catch (error: any) {
-      console.error('Error generando PDF:', error);
+      if (__DEV__) console.error('Error generando PDF:', error);
       Alert.alert('Error', error.message || 'No se pudo generar el reporte');
     } finally {
       setGeneratingPDF(false);
@@ -566,7 +726,6 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const getSortedWines = (): WineMetrics[] => {
     let sorted = [...winesMetrics];
-
     switch (sortBy) {
       case 'sales':
         return sorted.sort((a, b) => b.total_sales - a.total_sales);
@@ -579,6 +738,29 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   };
 
+  const closeHelpModal = () => {
+    if (dontShowHelpAgain) {
+      setHelpHidden(true);
+      AsyncStorage.setItem(HELP_MODAL_DONT_SHOW_KEY, 'true');
+    }
+    setHelpModalVisible(false);
+    setDontShowHelpAgain(false);
+  };
+
+  const getSortedSalesFromCounts = (): SalesFromCountsRow[] => {
+    const list = salesFromCounts ?? [];
+    switch (sortBy) {
+      case 'sales':
+        return [...list].sort((a, b) => b.sold_estimated - a.sold_estimated);
+      case 'revenue':
+        return [...list].sort((a, b) => (b.revenue_estimated ?? 0) - (a.revenue_estimated ?? 0));
+      case 'rotation':
+        return [...list].sort((a, b) => b.sold_estimated - a.sold_estimated);
+      default:
+        return [...list];
+    }
+  };
+
   // ========================================
   // RENDER TAB 1: STOCK (INVENTARIO)
   // ========================================
@@ -586,7 +768,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     const renderInventoryItem = ({ item }: { item: InventoryItem }) => {
       // Validar que item.wines exista
       if (!item.wines) {
-        console.warn('⚠️ Vino sin datos en inventario:', item);
+        if (__DEV__) console.warn('⚠️ Vino sin datos en inventario:', item);
         return null;
       }
 
@@ -613,7 +795,13 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
               <Text style={styles.wineRegion}>
                 {item.wines.region}, {item.wines.country}
               </Text>
-              <Text style={styles.winePrice}>${item.price_by_bottle?.toFixed(2) || '0.00'} / botella</Text>
+              <Text style={styles.winePrice}>
+                {isValidPrice(item.price_by_bottle)
+                  ? `${formatCurrencyMXN(item.price_by_bottle)} / botella`
+                  : isValidPrice(item.price_by_glass)
+                    ? `${formatCurrencyMXN(item.price_by_glass)} / copa`
+                    : 'No disponible'}
+              </Text>
             </View>
           </View>
 
@@ -632,26 +820,23 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           {/* Botones de acción */}
           <View style={styles.actionButtons}>
             <TouchableOpacity
-              style={[styles.actionButton, styles.entradaButton]}
-              onPress={() => openAdjustmentModal(item, 'entrada')}
+              style={[styles.actionButton, styles.countButton]}
+              onPress={() => openEventModal(item)}
             >
-              <Text style={styles.actionButtonText}>➕</Text>
+              <Text style={styles.actionButtonText}>Registrar evento</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
-              style={[styles.actionButton, styles.salidaButton]}
-              onPress={() => openAdjustmentModal(item, 'salida')}
+              style={[styles.actionButton, styles.countSecondaryButton]}
+              onPress={() => openCountModal(item)}
             >
-              <Text style={styles.actionButtonText}>➖</Text>
+              <Text style={styles.actionButtonText}>Conteo físico</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={[styles.actionButton, styles.editButton]}
               onPress={() => openEditModal(item)}
             >
               <Text style={styles.actionButtonText}>✏️</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={[styles.actionButton, styles.deleteButton]}
               onPress={() => handleDeleteWine(item)}
@@ -668,7 +853,11 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           {/* Valor total en inventario */}
           <View style={styles.valueSection}>
             <Text style={styles.valueLabel}>Valor en inventario:</Text>
-            <Text style={styles.valueAmount}>${(item.stock_quantity * (item.price_by_bottle || 0)).toFixed(2)}</Text>
+            <Text style={styles.valueAmount}>
+              {isValidPrice(item.price_by_bottle)
+                ? formatCurrencyMXN(item.stock_quantity * item.price_by_bottle)
+                : '—'}
+            </Text>
           </View>
         </View>
       );
@@ -690,20 +879,11 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={styles.filterButtons}>
               <TouchableOpacity
-                style={[styles.filterButton, filterType === 'all' && styles.filterButtonActive]}
+                style={[styles.filterButton, styles.filterButtonActive]}
                 onPress={() => setFilterType('all')}
               >
-                <Text style={[styles.filterButtonText, filterType === 'all' && styles.filterButtonTextActive]}>
+                <Text style={[styles.filterButtonText, styles.filterButtonTextActive]}>
                   Todos ({inventory.length})
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.filterButton, filterType === 'no_movement' && styles.filterButtonActive]}
-                onPress={() => setFilterType('no_movement')}
-              >
-                <Text style={[styles.filterButtonText, filterType === 'no_movement' && styles.filterButtonTextActive]}>
-                  Sin Movimiento
                 </Text>
               </TouchableOpacity>
             </View>
@@ -729,158 +909,113 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   // ========================================
-  // RENDER TAB 2: VENTAS (ANÁLISIS)
+  // RENDER TAB 2: VENTAS (DESDE CORTES)
   // ========================================
   const renderSalesTab = () => {
-    if (!branchMetrics) {
+    const validWinesCount = salesFromCountsSummary?.valid_wines_count ?? (salesFromCounts?.length ?? 0);
+    if (validWinesCount === 0) {
       return (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>📊</Text>
-          <Text style={styles.emptyTitle}>No hay datos de ventas</Text>
+          <Text style={styles.emptyTitle}>Necesitas 2 conteos físicos (corte inicial y final) para ventas estimadas</Text>
+          <Text style={styles.emptySubtitle}>Por cada vino: un conteo al inicio del periodo y otro al final. Las estimaciones se basan en cortes. Realiza conteos en la pestaña Stock.</Text>
         </View>
       );
     }
 
-    const sortedWines = getSortedWines();
-    const topWines = [...winesMetrics].sort((a, b) => b.total_revenue - a.total_revenue).slice(0, 5);
-    const topSelling = [...winesMetrics].sort((a, b) => b.total_sales - a.total_sales).slice(0, 6);
+    const sorted = getSortedSalesFromCounts();
+    const topByRevenue = [...sorted].sort((a, b) => (b.revenue_estimated ?? 0) - (a.revenue_estimated ?? 0)).slice(0, 5);
+    const topBySold = [...sorted].sort((a, b) => b.sold_estimated - a.sold_estimated).slice(0, 5);
 
-    const pieData = topWines.map((wine, index) => ({
-      name: wine.wine_name.substring(0, 15) + (wine.wine_name.length > 15 ? '...' : ''),
-      population: wine.total_revenue,
-      color: ['#8B0000', '#B22222', '#DC143C', '#FF6347', '#FFA07A'][index],
-      legendFontColor: '#333',
-      legendFontSize: 11,
-    }));
-
-    const barData = {
-      labels: topSelling.map(w => w.wine_name.split(' ')[0].substring(0, 8)),
-      datasets: [{ data: topSelling.map(w => w.total_sales) }],
-    };
+    const renderRow = ({ item, index }: { item: SalesFromCountsRow; index: number }) => (
+      <View style={styles.wineMetricCard}>
+        <View style={styles.wineRank}>
+          <Text style={styles.wineRankText}>#{index + 1}</Text>
+        </View>
+        <View style={[styles.wineImageSmall, styles.placeholderImage]}>
+          <Text style={styles.placeholderTextSmall}>🍷</Text>
+        </View>
+        <View style={styles.wineMetricInfo}>
+          <Text style={styles.wineMetricName} numberOfLines={2}>{item.wine_name}</Text>
+          <View style={styles.metricsRow}>
+            <View style={styles.metricItem}>
+              <Text style={styles.metricLabel}>Consumo est.:</Text>
+              <Text style={styles.metricValue}>{item.sold_estimated}</Text>
+              <Text style={styles.wineCalculationHint}>
+                Cálculo: {item.start_count} + {item.entries_total} - {item.special_out_total} - {item.end_count}
+              </Text>
+            </View>
+            <View style={styles.metricItem}>
+              <Text style={styles.metricLabel}>Ingresos:</Text>
+              <Text style={styles.metricValue} numberOfLines={1}>
+                {item.revenue_estimated != null && item.revenue_estimated > 0 ? formatCurrencyMXN(item.revenue_estimated) : '—'}
+              </Text>
+              {item.sold_estimated > 0 && !isValidPrice(item.price_by_bottle) && (
+                <Text style={styles.wineUnpricedHint}>Sin precio configurado</Text>
+              )}
+            </View>
+          </View>
+          <Text style={styles.wineExtraMetric}>
+            Stock inicio: {item.start_count} · Entradas: {item.entries_total} · Salidas esp.: {item.special_out_total} · Stock fin: {item.end_count}
+          </Text>
+        </View>
+      </View>
+    );
 
     return (
       <View style={styles.tabContent}>
-
         <ScrollView showsVerticalScrollIndicator={false}>
-          {/* Gráficas */}
-          {pieData.length > 0 && (
             <View style={styles.chartSection}>
-              <Text style={styles.sectionTitle}>💰 Top 5 Vinos por Ingresos</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <PieChart
-                  data={pieData}
-                  width={width - 40}
-                  height={220}
-                  chartConfig={{
-                    color: (opacity = 1) => `rgba(139, 0, 0, ${opacity})`,
-                  }}
-                  accessor="population"
-                  backgroundColor="transparent"
-                  paddingLeft="15"
-                  absolute
-                />
-              </ScrollView>
-            </View>
-          )}
+            <Text style={styles.sectionTitle}>💰 Top 5 por ingresos estimados (desde cortes)</Text>
+            {topByRevenue.map((w, i) => (
+              <View key={w.wine_id} style={styles.topRow}>
+                <Text style={styles.topRank}>#{i + 1}</Text>
+                <Text style={styles.topName} numberOfLines={1}>{w.wine_name}</Text>
+                <Text style={styles.topValue} numberOfLines={1}>
+                  {w.revenue_estimated != null && w.revenue_estimated > 0 ? formatCurrencyMXN(w.revenue_estimated) : '—'}
+                </Text>
+              </View>
+            ))}
+          </View>
+          <View style={styles.chartSection}>
+            <Text style={styles.sectionTitle}>📊 Top 5 por consumo estimado (botellas)</Text>
+            {topBySold.map((w, i) => (
+              <View key={w.wine_id} style={styles.topRow}>
+                <Text style={styles.topRank}>#{i + 1}</Text>
+                <Text style={styles.topName} numberOfLines={1}>{w.wine_name}</Text>
+                <Text style={styles.topValue}>{w.sold_estimated} bot.</Text>
+              </View>
+            ))}
+          </View>
 
-          {barData.labels.length > 0 && (
-            <View style={styles.chartSection}>
-              <Text style={styles.sectionTitle}>📊 Top Ventas por Cantidad</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <BarChart
-                  data={barData}
-                  width={Math.max(width - 40, barData.labels.length * 80)}
-                  height={220}
-                  yAxisLabel=""
-                  yAxisSuffix=""
-                  chartConfig={{
-                    backgroundColor: '#fff',
-                    backgroundGradientFrom: '#fff',
-                    backgroundGradientTo: '#fff',
-                    decimalPlaces: 0,
-                    color: (opacity = 1) => `rgba(139, 0, 0, ${opacity})`,
-                    labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
-                  }}
-                  style={{ marginVertical: 8, borderRadius: 16 }}
-                />
-              </ScrollView>
-            </View>
-          )}
-
-          {/* Botones de ordenamiento */}
           <View style={styles.sortButtons}>
             <TouchableOpacity
               style={[styles.sortButton, sortBy === 'sales' && styles.sortButtonActive]}
               onPress={() => setSortBy('sales')}
             >
-              <Text style={[styles.sortButtonText, sortBy === 'sales' && styles.sortButtonTextActive]}>
-                📈 Ventas
-              </Text>
+              <Text style={[styles.sortButtonText, sortBy === 'sales' && styles.sortButtonTextActive]}>📈 Ventas est.</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.sortButton, sortBy === 'revenue' && styles.sortButtonActive]}
               onPress={() => setSortBy('revenue')}
             >
-              <Text style={[styles.sortButtonText, sortBy === 'revenue' && styles.sortButtonTextActive]}>
-                💰 Ingresos
-              </Text>
+              <Text style={[styles.sortButtonText, sortBy === 'revenue' && styles.sortButtonTextActive]}>💰 Ingresos</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.sortButton, sortBy === 'rotation' && styles.sortButtonActive]}
               onPress={() => setSortBy('rotation')}
             >
-              <Text style={[styles.sortButtonText, sortBy === 'rotation' && styles.sortButtonTextActive]}>
-                🔄 Rotación
-              </Text>
+              <Text style={[styles.sortButtonText, sortBy === 'rotation' && styles.sortButtonTextActive]}>🔄 Rotación</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Lista de vinos con métricas */}
-          <View style={styles.winesList}>
-            {sortedWines.map((wine, index) => (
-              <View key={wine.wine_id} style={styles.wineMetricCard}>
-                <View style={styles.wineRank}>
-                  <Text style={styles.wineRankText}>#{index + 1}</Text>
-                </View>
-
-                {wine.wine_image ? (
-                  <Image source={{ uri: wine.wine_image }} style={styles.wineImageSmall} />
-                ) : (
-                  <View style={[styles.wineImageSmall, styles.placeholderImage]}>
-                    <Text style={styles.placeholderTextSmall}>🍷</Text>
-                  </View>
-                )}
-
-                <View style={styles.wineMetricInfo}>
-                  <Text style={styles.wineMetricName}>{wine.wine_name}</Text>
-                  <Text style={styles.wineMetricDetails}>
-                    {wine.grape_variety} • {wine.region}
-                  </Text>
-
-                  <View style={styles.metricsRow}>
-                    <View style={styles.metricItem}>
-                      <Text style={styles.metricLabel}>Vendidas:</Text>
-                      <Text style={styles.metricValue}>{wine.total_sales}</Text>
-                    </View>
-                    <View style={styles.metricItem}>
-                      <Text style={styles.metricLabel}>Ingresos:</Text>
-                      <Text style={styles.metricValue}>${wine.total_revenue.toFixed(0)}</Text>
-                    </View>
-                    <View style={styles.metricItem}>
-                      <Text style={styles.metricLabel}>Stock:</Text>
-                      <Text style={[styles.metricValue, wine.current_stock <= 5 && styles.metricValueLow]}>
-                        {wine.current_stock}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <Text style={styles.wineExtraMetric}>
-                    🍾 {wine.bottles_sold} botellas • 🍷 {wine.glasses_sold} copas • 📊 {wine.sales_per_day.toFixed(1)}/día
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
+          <FlatList
+            data={sorted}
+            renderItem={renderRow}
+            keyExtractor={(item) => item.wine_id}
+            scrollEnabled={false}
+            ListEmptyComponent={null}
+          />
         </ScrollView>
       </View>
     );
@@ -890,38 +1025,89 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
   // RENDER TAB 4: REPORTS (REPORTES)
   // ========================================
   const renderReportsTab = () => {
-    const totalRevenue = branchMetrics?.total_revenue || 0;
-    const totalSales = branchMetrics?.total_sales || 0;
+    const summary = salesFromCountsSummary;
+    const validWinesCount = summary?.valid_wines_count ?? 0;
+    const totalRevenue = summary?.total_revenue_estimated ?? null;
+    const totalSales = summary?.total_sold_estimated ?? 0;
+    const hasValidRevenue = totalRevenue != null && totalRevenue > 0 && isValidPrice(totalRevenue);
 
     return (
       <View style={styles.tabContent}>
         <ScrollView showsVerticalScrollIndicator={false}>
-          {/* Estadísticas Resumen */}
+          {/* Estadísticas Resumen (misma fuente que pestaña Ventas estimadas) */}
           <View style={styles.reportsStatsGrid}>
             <View style={styles.reportStatCard}>
               <Text style={styles.reportStatIcon}>🍷</Text>
-              <Text style={styles.reportStatValue}>{inventoryStats.totalWines}</Text>
+              <Text style={styles.reportStatValue} numberOfLines={1}>{inventoryStats.totalWines}</Text>
               <Text style={styles.reportStatLabel}>Vinos</Text>
             </View>
             <View style={styles.reportStatCard}>
               <Text style={styles.reportStatIcon}>📦</Text>
-              <Text style={styles.reportStatValue}>{inventoryStats.totalBottles}</Text>
+              <Text style={styles.reportStatValue} numberOfLines={1}>{inventoryStats.totalBottles}</Text>
               <Text style={styles.reportStatLabel}>Botellas</Text>
             </View>
             <View style={styles.reportStatCard}>
               <Text style={styles.reportStatIcon}>💰</Text>
-              <Text style={styles.reportStatValue}>${inventoryStats.totalValue.toFixed(0)}</Text>
-              <Text style={styles.reportStatLabel}>Valor Total</Text>
+              <Text style={[styles.reportStatValue, styles.reportStatValueCurrency]} numberOfLines={1}>
+                {inventoryStats.totalValue > 0
+                  ? formatCurrencyMXN(inventoryStats.totalValue)
+                  : inventoryStats.totalBottles > 0
+                    ? '—'
+                    : formatCurrencyMXN(0)}
+              </Text>
+              <Text style={styles.reportStatLabel}>Valor total</Text>
             </View>
             <View style={styles.reportStatCard}>
               <Text style={styles.reportStatIcon}>💵</Text>
-              <Text style={styles.reportStatValue}>${totalRevenue.toFixed(0)}</Text>
-              <Text style={styles.reportStatLabel}>Ingresos Totales</Text>
+              <Text style={[styles.reportStatValue, styles.reportStatValueCurrency]} numberOfLines={1}>
+                {hasValidRevenue ? formatCurrencyMXN(totalRevenue) : '—'}
+              </Text>
+              <Text style={styles.reportStatLabel}>Ingresos estimados</Text>
             </View>
             <View style={styles.reportStatCard}>
               <Text style={styles.reportStatIcon}>📈</Text>
-              <Text style={styles.reportStatValue}>{totalSales}</Text>
-              <Text style={styles.reportStatLabel}>Ventas Totales</Text>
+              <Text style={styles.reportStatValue} numberOfLines={1}>
+                {validWinesCount > 0 ? totalSales : '—'}
+              </Text>
+              <Text style={styles.reportStatLabel}>Consumo est. total</Text>
+            </View>
+          </View>
+
+          {(summary && (summary.unpriced_consumption_total > 0 || summary.unpriced_wines_count > 0)) && (
+            <View style={styles.reportsUnpricedRow}>
+              <Text style={styles.reportsUnpricedText}>
+                Consumo sin precio configurado: {summary.unpriced_consumption_total} botellas
+              </Text>
+              {summary.unpriced_wines_count > 0 && (
+                <Text style={styles.reportsUnpricedText}>Vinos sin precio: {summary.unpriced_wines_count}</Text>
+              )}
+            </View>
+          )}
+
+          {/* Periodo para ventas estimadas (misma lógica que pestaña Ventas estimadas) */}
+          <View style={{ marginBottom: 16 }}>
+            <Text style={[styles.inputLabel, { marginBottom: 8 }]}>Periodo para ventas estimadas</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {([7, 30, 90] as const).map((days) => (
+                <TouchableOpacity
+                  key={days}
+                  style={[
+                    styles.filterButton,
+                    estimatedReportPeriod === days && styles.filterButtonActive,
+                    { paddingVertical: 10, paddingHorizontal: 16 },
+                  ]}
+                  onPress={() => setEstimatedReportPeriod(days)}
+                >
+                  <Text
+                    style={[
+                      styles.filterButtonText,
+                      estimatedReportPeriod === days && styles.filterButtonTextActive,
+                    ]}
+                  >
+                    {days} días
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
 
@@ -930,7 +1116,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
             <TouchableOpacity
               style={styles.reportButton}
               onPress={() => generatePDF('inventory')}
-              disabled={generatingPDF}
+              disabled={generatingPDF || inventory.length === 0}
             >
               {generatingPDF ? (
                 <ActivityIndicator color="#fff" />
@@ -945,14 +1131,14 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
             <TouchableOpacity
               style={styles.reportButton}
               onPress={() => generatePDF('sales')}
-              disabled={generatingPDF}
+              disabled={generatingPDF || generatingEstimatedPDF}
             >
-              {generatingPDF ? (
+              {generatingEstimatedPDF ? (
                 <ActivityIndicator color="#fff" />
               ) : (
                 <>
                   <Text style={styles.reportButtonIcon}>📊</Text>
-                  <Text style={styles.reportButtonText}>Reporte de Ventas</Text>
+                  <Text style={styles.reportButtonText}>Reporte de Ventas estimadas</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -980,10 +1166,10 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   // ========================================
-  // RENDER TAB 3: COMPARACIÓN (SOLO OWNER)
+  // RENDER TAB 3: COMPARACIÓN (SOLO OWNER) – misma lógica que Ventas estimadas (cortes)
   // ========================================
   const renderComparisonTab = () => {
-    if (!comparisonMetrics) {
+    if (!comparisonFromCounts) {
       return (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>🏢</Text>
@@ -992,37 +1178,69 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       );
     }
 
+    const { branches, summary } = comparisonFromCounts;
+    const totalRevenue = summary.total_revenue_estimated ?? 0;
+    const totalConsumption = summary.total_consumption_estimated ?? 0;
+    const sortedBranches = [...branches].sort((a, b) => (b.total_revenue_estimated ?? 0) - (a.total_revenue_estimated ?? 0));
+
     return (
       <View style={styles.tabContent}>
         <ScrollView showsVerticalScrollIndicator={false}>
+          {/* Periodo */}
+          <View style={{ marginHorizontal: 16, marginTop: 16, marginBottom: 8 }}>
+            <Text style={[styles.inputLabel, { marginBottom: 8 }]}>Periodo</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {([7, 30, 90] as const).map((days) => (
+                <TouchableOpacity
+                  key={days}
+                  style={[
+                    styles.filterButton,
+                    comparisonDays === days && styles.filterButtonActive,
+                    { paddingVertical: 10, paddingHorizontal: 16 },
+                  ]}
+                  onPress={() => setComparisonDays(days)}
+                >
+                  <Text
+                    style={[
+                      styles.filterButtonText,
+                      comparisonDays === days && styles.filterButtonTextActive,
+                    ]}
+                  >
+                    {days} días
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
           {/* Resumen Global */}
           <View style={styles.comparisonHeader}>
-            <Text style={styles.comparisonTitle}>📊 Resumen Global del Sistema</Text>
+            <Text style={styles.comparisonTitle}>📊 Resumen (desde cortes)</Text>
             <View style={styles.comparisonStats}>
               <View style={styles.comparisonStatCard}>
-                <Text style={styles.comparisonStatValue}>
-                  ${comparisonMetrics.total_system_revenue.toFixed(0)}
+                <Text style={[styles.comparisonStatValue, { fontSize: 16 }]} numberOfLines={1}>
+                  {totalRevenue > 0 ? formatCurrencyMXN(totalRevenue) : '—'}
                 </Text>
-                <Text style={styles.comparisonStatLabel}>Ingresos Totales</Text>
+                <Text style={styles.comparisonStatLabel}>Ingresos estimados</Text>
               </View>
               <View style={styles.comparisonStatCard}>
-                <Text style={styles.comparisonStatValue}>{comparisonMetrics.total_system_sales}</Text>
-                <Text style={styles.comparisonStatLabel}>Ventas Totales</Text>
+                <Text style={styles.comparisonStatValue}>{totalConsumption}</Text>
+                <Text style={styles.comparisonStatLabel}>Consumo estimado</Text>
               </View>
             </View>
             <View style={styles.comparisonInfo}>
               <Text style={styles.comparisonInfoText}>
-                🏆 Mejor: {comparisonMetrics.best_performing_branch}
+                🏆 Mejor: {summary.best_branch}
               </Text>
               <Text style={styles.comparisonInfoText}>
-                📉 A mejorar: {comparisonMetrics.worst_performing_branch}
+                📉 A mejorar: {summary.worst_branch}
               </Text>
             </View>
 
             <TouchableOpacity
               style={[styles.pdfButton, { marginTop: 12 }]}
               onPress={() => generatePDF('comparison')}
-              disabled={generatingPDF}
+              disabled={generatingPDF || summary.valid_branches_count === 0}
             >
               {generatingPDF ? (
                 <ActivityIndicator color="#fff" />
@@ -1033,10 +1251,14 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
 
           {/* Comparación por Sucursal */}
-          <Text style={styles.sectionTitle}>🏢 Comparación por Sucursal</Text>
-          {comparisonMetrics.branches
-            .sort((a, b) => b.total_revenue - a.total_revenue)
-            .map((branch, index) => (
+          <Text style={styles.sectionTitle}>🏢 Por sucursal</Text>
+          {sortedBranches.map((branch, index) => {
+            const contributionPct = totalRevenue > 0 && (branch.total_revenue_estimated ?? 0) >= 0
+              ? ((branch.total_revenue_estimated ?? 0) / totalRevenue) * 100
+              : 0;
+            const hasData = branch.valid_wines_count > 0;
+
+            return (
               <View key={branch.branch_id} style={styles.branchComparisonCard}>
                 <View style={styles.branchComparisonHeader}>
                   <View style={styles.branchRank}>
@@ -1045,41 +1267,57 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
                   <Text style={styles.branchComparisonName}>{branch.branch_name}</Text>
                 </View>
 
-                <View style={styles.branchComparisonMetrics}>
-                  <View style={styles.branchComparisonMetricRow}>
-                    <Text style={styles.branchComparisonLabel}>Vinos:</Text>
-                    <Text style={styles.branchComparisonValue}>{branch.total_wines}</Text>
-                  </View>
-                  <View style={styles.branchComparisonMetricRow}>
-                    <Text style={styles.branchComparisonLabel}>Ventas:</Text>
-                    <Text style={styles.branchComparisonValue}>{branch.total_sales}</Text>
-                  </View>
-                  <View style={styles.branchComparisonMetricRow}>
-                    <Text style={styles.branchComparisonLabel}>Ingresos:</Text>
-                    <Text style={[styles.branchComparisonValue, styles.branchComparisonValueHighlight]}>
-                      ${branch.total_revenue.toFixed(2)}
-                    </Text>
-                  </View>
-                </View>
+                {!hasData ? (
+                  <Text style={[styles.comparisonInfoText, { marginVertical: 8 }]}>Datos insuficientes</Text>
+                ) : (
+                  <>
+                    <View style={styles.branchComparisonMetrics}>
+                      <View style={styles.branchComparisonMetricRow}>
+                        <Text style={styles.branchComparisonLabel}>Ingresos est.:</Text>
+                        <Text style={[styles.branchComparisonValue, styles.branchComparisonValueHighlight]} numberOfLines={1}>
+                          {(branch.total_revenue_estimated ?? 0) > 0 ? formatCurrencyMXN(branch.total_revenue_estimated!) : '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.branchComparisonMetricRow}>
+                        <Text style={styles.branchComparisonLabel}>Consumo est.:</Text>
+                        <Text style={styles.branchComparisonValue}>{branch.total_consumption_estimated}</Text>
+                      </View>
+                    </View>
 
-                <View style={styles.contributionBar}>
-                  <Text style={styles.contributionLabel}>Contribución:</Text>
-                  <View style={styles.contributionBarContainer}>
-                    <View
-                      style={[
-                        styles.contributionBarFill,
-                        {
-                          width: `${(branch.total_revenue / comparisonMetrics.total_system_revenue) * 100}%`,
-                        },
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.contributionPercent}>
-                    {((branch.total_revenue / comparisonMetrics.total_system_revenue) * 100).toFixed(1)}%
-                  </Text>
-                </View>
+                    {(branch.top_wine || branch.bottom_wine) && (
+                      <View style={{ marginTop: 8, marginBottom: 4 }}>
+                        {branch.top_wine && (
+                          <Text style={styles.wineExtraMetric}>
+                            Más movido: {branch.top_wine.wine_name} ({branch.top_wine.sold_estimated} bot.)
+                          </Text>
+                        )}
+                        {branch.bottom_wine && branch.bottom_wine.wine_name !== branch.top_wine?.wine_name && (
+                          <Text style={styles.wineExtraMetric}>
+                            Menos movido: {branch.bottom_wine.wine_name} ({branch.bottom_wine.sold_estimated} bot.)
+                          </Text>
+                        )}
+                      </View>
+                    )}
+
+                    <View style={styles.contributionBar}>
+                      <Text style={styles.contributionLabel}>Contribución:</Text>
+                      <View style={styles.contributionBarContainer}>
+                        <View
+                          style={[
+                            styles.contributionBarFill,
+                            { width: `${Math.min(100, contributionPct)}%` },
+                          ]}
+                        />
+                      </View>
+                      <Text style={styles.contributionPercent}>
+                        {totalRevenue > 0 ? `${contributionPct.toFixed(1)}%` : '—'}
+                      </Text>
+                    </View>
+                  </>
+                )}
               </View>
-            ))}
+            );
+          })}
         </ScrollView>
       </View>
     );
@@ -1102,6 +1340,15 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={styles.title}>Inventario y Análisis</Text>
           <Text style={styles.subtitle}>{currentBranch?.name}</Text>
         </View>
+        {!helpHidden && (
+          <TouchableOpacity
+            onPress={() => setHelpModalVisible(true)}
+            style={styles.helpButton}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Text style={styles.helpButtonText}>ℹ️</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Tabs */}
@@ -1119,7 +1366,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           onPress={() => setViewMode('sales')}
         >
           <Text style={[styles.tabText, viewMode === 'sales' && styles.tabTextActive]}>
-            📈 Ventas
+            📈 Ventas estimadas
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -1157,136 +1404,201 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       {viewMode === 'comparison' && renderComparisonTab()}
       {viewMode === 'reports' && renderReportsTab()}
 
-      {/* Modal de ajuste de stock */}
+      {/* Modal Registrar evento */}
       <Modal
-        visible={modalVisible}
+        visible={eventModalVisible}
         transparent={true}
         animationType="slide"
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={closeEventModal}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalTitle}>
-                {adjustmentType === 'entrada' ? '➕ Entrada' : '➖ Salida'} de Stock
-              </Text>
+              <Text style={styles.modalTitle}>Registrar evento</Text>
+              <Text style={styles.modalCopy}>Registra solo lo que ocurrió. Puedes dejar notas vacío.</Text>
 
-              {selectedItem && (
+              {eventItem && (
                 <View style={styles.modalWineInfo}>
-                  <Text style={styles.modalWineName}>{selectedItem.wines.name}</Text>
-                  <Text style={styles.modalWineStock}>Stock actual: {selectedItem.stock_quantity} botellas</Text>
+                  <Text style={styles.modalWineName}>{eventItem.wines.name}</Text>
+                  <Text style={styles.modalWineStock}>Stock actual: {eventItem.stock_quantity} botellas</Text>
                 </View>
               )}
 
-              <Text style={styles.inputLabel}>Cantidad:</Text>
+              <Text style={styles.inputLabel}>Tipo</Text>
+              <View style={styles.reasonButtons}>
+                <TouchableOpacity
+                  style={[styles.reasonButton, eventDirection === 'in' && styles.reasonButtonActive]}
+                  onPress={() => { setEventDirection('in'); setEventReason('compra'); }}
+                >
+                  <Text style={[styles.reasonButtonText, eventDirection === 'in' && styles.reasonButtonTextActive]}>Entrada</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.reasonButton, eventDirection === 'out' && styles.reasonButtonActive]}
+                  onPress={() => { setEventDirection('out'); setEventReason('cortesia_cliente'); }}
+                >
+                  <Text style={[styles.reasonButtonText, eventDirection === 'out' && styles.reasonButtonTextActive]}>Salida</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.inputLabel}>Motivo</Text>
+              <View style={styles.reasonButtons}>
+                {eventDirection === 'in'
+                  ? (['compra', 'cortesia_proveedor'] as EventReason[]).map((r) => (
+                      <TouchableOpacity
+                        key={r}
+                        style={[styles.reasonButton, eventReason === r && styles.reasonButtonActive]}
+                        onPress={() => setEventReason(r)}
+                      >
+                        <Text style={[styles.reasonButtonText, eventReason === r && styles.reasonButtonTextActive]}>
+                          {r === 'compra' ? 'Compra' : 'Cortesía proveedor'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))
+                  : (['cortesia_cliente', 'rotura'] as EventReason[]).map((r) => (
+                      <TouchableOpacity
+                        key={r}
+                        style={[styles.reasonButton, eventReason === r && styles.reasonButtonActive]}
+                        onPress={() => setEventReason(r)}
+                      >
+                        <Text style={[styles.reasonButtonText, eventReason === r && styles.reasonButtonTextActive]}>
+                          {r === 'cortesia_cliente' ? 'Cortesía cliente' : 'Rotura/Merma'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+              </View>
+
+              <Text style={styles.inputLabel}>Cantidad</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Número de botellas"
-                keyboardType="numeric"
-                value={adjustmentQuantity}
-                onChangeText={setAdjustmentQuantity}
+                keyboardType="number-pad"
+                value={eventQty}
+                onChangeText={setEventQty}
               />
 
-              {adjustmentType === 'entrada' && (
-                <>
-                  <Text style={styles.inputLabel}>Razón de entrada:</Text>
-                  <View style={styles.reasonButtons}>
-                    {(['compra_producto', 'cortesia_proveedor', 'otro'] as EntryReason[]).map((reason) => (
-                      <TouchableOpacity
-                        key={reason}
-                        style={[
-                          styles.reasonButton,
-                          entryReason === reason && styles.reasonButtonActive,
-                        ]}
-                        onPress={() => setEntryReason(reason)}
-                      >
-                        <Text
-                          style={[
-                            styles.reasonButtonText,
-                            entryReason === reason && styles.reasonButtonTextActive,
-                          ]}
-                        >
-                          {reason === 'compra_producto' ? '🛒 Compra de producto' :
-                           reason === 'cortesia_proveedor' ? '🎁 Cortesía de proveedores' : '📝 Otro'}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
+              {eventItem && eventQty.trim() !== '' && (() => {
+                const q = parseInt(eventQty, 10);
+                if (isNaN(q) || q <= 0) return null;
+                const prev = eventItem.stock_quantity ?? 0;
+                const next = eventDirection === 'in' ? prev + q : Math.max(0, prev - q);
+                return (
+                  <View style={styles.previewSection}>
+                    <Text style={styles.previewLabel}>Vista previa</Text>
+                    <Text style={styles.previewText}>{prev} → {next} botellas</Text>
                   </View>
-                </>
-              )}
+                );
+              })()}
 
-              {adjustmentType === 'salida' && (
-                <>
-                  <Text style={styles.inputLabel}>Razón de reducción:</Text>
-                  <View style={styles.reasonButtons}>
-                    {(['venta', 'rotura', 'expiracion', 'otro'] as ReductionReason[]).map((reason) => (
-                      <TouchableOpacity
-                        key={reason}
-                        style={[
-                          styles.reasonButton,
-                          reductionReason === reason && styles.reasonButtonActive,
-                        ]}
-                        onPress={() => setReductionReason(reason)}
-                      >
-                        <Text
-                          style={[
-                            styles.reasonButtonText,
-                            reductionReason === reason && styles.reasonButtonTextActive,
-                          ]}
-                        >
-                          {reason === 'venta' ? '💰 Venta' :
-                           reason === 'rotura' ? '💔 Rotura' :
-                           reason === 'expiracion' ? '📅 Expiración' : '📝 Otro'}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>
-              )}
-
-              {((adjustmentType === 'entrada' && entryReason === 'otro') || 
-                (adjustmentType === 'salida' && reductionReason === 'otro')) && (
-                <>
-                  <Text style={styles.inputLabel}>Motivo adicional:</Text>
-                  <TextInput
-                    style={[styles.input, styles.textArea]}
-                    placeholder="Describe el motivo"
-                    multiline
-                    numberOfLines={3}
-                    value={customReason}
-                    onChangeText={setCustomReason}
-                  />
-                </>
-              )}
-
-              {selectedItem && adjustmentQuantity && (
-                <View style={styles.previewSection}>
-                  <Text style={styles.previewLabel}>Resultado:</Text>
-                  <Text style={styles.previewText}>
-                    {selectedItem.stock_quantity} →{' '}
-                    {adjustmentType === 'salida'
-                      ? Math.max(0, selectedItem.stock_quantity - parseInt(adjustmentQuantity || '0'))
-                      : selectedItem.stock_quantity + parseInt(adjustmentQuantity || '0')}{' '}
-                    botellas
-                  </Text>
-                </View>
-              )}
+              <Text style={styles.inputLabel}>Notas (opcional)</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Notas"
+                multiline
+                numberOfLines={2}
+                value={eventNotes}
+                onChangeText={setEventNotes}
+              />
 
               <View style={styles.modalButtons}>
                 <TouchableOpacity
                   style={[styles.modalButton, styles.cancelButton]}
-                  onPress={() => setModalVisible(false)}
-                  disabled={adjusting}
+                  onPress={closeEventModal}
+                  disabled={eventSubmitting}
                 >
                   <Text style={styles.cancelButtonText}>Cancelar</Text>
                 </TouchableOpacity>
-
                 <TouchableOpacity
                   style={[styles.modalButton, styles.confirmButton]}
-                  onPress={handleStockAdjustment}
-                  disabled={adjusting}
+                  onPress={handleRegisterEvent}
+                  disabled={eventSubmitting || eventQty.trim() === '' || !(parseInt(eventQty, 10) > 0)}
                 >
-                  {adjusting ? (
+                  {eventSubmitting ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.confirmButtonText}>Confirmar</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal Conteo físico */}
+      <Modal
+        visible={countModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={closeCountModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.modalTitle}>Conteo físico</Text>
+              <Text style={styles.modalCopy}>Recomendado cada 15–30 días para evitar acumulación de errores.</Text>
+
+              {countItem && (
+                <View style={styles.modalWineInfo}>
+                  <Text style={styles.modalWineName}>{countItem.wines.name}</Text>
+                  <Text style={styles.modalWineStock}>Stock actual en app: {countPrevStock} botellas</Text>
+                </View>
+              )}
+
+              <Text style={styles.inputLabel}>Conteo físico ingresado</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Número de botellas contadas"
+                keyboardType="number-pad"
+                value={countQuantity}
+                onChangeText={setCountQuantity}
+              />
+
+              {countQuantity.trim() !== '' && (() => {
+                const count = parseInt(countQuantity, 10);
+                if (isNaN(count) || count < 0) return null;
+                const delta = count - countPrevStock;
+                return (
+                  <View style={styles.previewSection}>
+                    <Text style={styles.previewLabel}>Vista previa</Text>
+                    <Text style={styles.previewText}>{countPrevStock} → {count} botellas</Text>
+                    <Text style={styles.previewText}>
+                      Ajuste: {delta > 0 ? `+${delta}` : delta < 0 ? `-${Math.abs(delta)}` : '0'}
+                    </Text>
+                  </View>
+                );
+              })()}
+
+              <Text style={styles.inputLabel}>Notas (opcional)</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Notas del conteo"
+                multiline
+                numberOfLines={2}
+                value={countNotes}
+                onChangeText={setCountNotes}
+              />
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={closeCountModal}
+                  disabled={countSubmitting}
+                >
+                  <Text style={styles.cancelButtonText}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.confirmButton]}
+                  onPress={handleRegisterCount}
+                  disabled={
+                    countSubmitting ||
+                    countQuantity.trim() === '' ||
+                    (() => {
+                      const n = parseInt(countQuantity, 10);
+                      return isNaN(n) || n < 0;
+                    })()
+                  }
+                >
+                  {countSubmitting ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
                     <Text style={styles.confirmButtonText}>Confirmar</Text>
@@ -1438,6 +1750,65 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
         </View>
       </Modal>
+
+      {/* Modal de ayuda */}
+      <Modal
+        visible={helpModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeHelpModal}
+      >
+        <View style={styles.helpModalOverlay}>
+          <View style={styles.helpModalContent}>
+            <Text style={styles.helpModalTitle}>Cómo usar Inventario y Análisis</Text>
+            <ScrollView showsVerticalScrollIndicator={false} style={styles.helpModalScroll}>
+              <View style={styles.helpBlock}>
+                <Text style={styles.helpBlockTitle}>1️⃣ Registrar eventos de inventario</Text>
+                <Text style={styles.helpBlockText}>
+                  Cuando recibas o retires botellas usa:{'\n'}
+                  • Entrada → Compra o cortesía proveedor{'\n'}
+                  • Salida → Cortesía cliente o rotura
+                </Text>
+              </View>
+              <View style={styles.helpBlock}>
+                <Text style={styles.helpBlockTitle}>2️⃣ Conteos físicos</Text>
+                <Text style={styles.helpBlockText}>
+                  Realiza conteos cada 15–30 días.{'\n'}
+                  Estos cortes permiten estimar ventas y consumo.
+                </Text>
+              </View>
+              <View style={styles.helpBlock}>
+                <Text style={styles.helpBlockTitle}>3️⃣ Ventas estimadas</Text>
+                <Text style={styles.helpBlockText}>
+                  El sistema calcula consumo con:{'\n'}
+                  Stock inicio + Entradas − Salidas especiales − Stock final.
+                </Text>
+              </View>
+              <View style={styles.helpBlock}>
+                <Text style={styles.helpBlockTitle}>4️⃣ Comparar sucursales</Text>
+                <Text style={styles.helpBlockText}>
+                  Si tienes varias sucursales puedes comparar su desempeño y ver qué vinos se venden más.
+                </Text>
+              </View>
+              <Text style={styles.helpModalNote}>
+                Las ventas se estiman con base en conteos físicos y movimientos registrados.
+              </Text>
+              <View style={styles.helpModalCheckRow}>
+                <Switch
+                  value={dontShowHelpAgain}
+                  onValueChange={setDontShowHelpAgain}
+                  trackColor={{ false: '#ccc', true: '#8B0000' }}
+                  thumbColor="#fff"
+                />
+                <Text style={styles.helpModalCheckLabel}>No mostrar de nuevo</Text>
+              </View>
+            </ScrollView>
+            <TouchableOpacity style={styles.helpModalCloseButton} onPress={closeHelpModal}>
+              <Text style={styles.helpModalCloseText}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1459,14 +1830,28 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   header: {
+    flexDirection: 'row',
     padding: 20,
+    paddingVertical: 16,
     backgroundColor: '#8B0000',
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerContent: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  helpButton: {
+    position: 'absolute',
+    right: 16,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    padding: 8,
+  },
+  helpButtonText: {
+    fontSize: 22,
   },
   title: {
     fontSize: 28,
@@ -1706,18 +2091,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   actionButton: {
-    flex: 1,
     borderRadius: 8,
     padding: 12,
     alignItems: 'center',
     marginHorizontal: 2,
-    minWidth: 50,
+    minWidth: 44,
   },
-  entradaButton: {
-    backgroundColor: '#28a745',
+  countButton: {
+    flex: 1,
+    backgroundColor: '#8E2C3A',
   },
-  salidaButton: {
-    backgroundColor: '#dc3545',
+  countSecondaryButton: {
+    flex: 1,
+    backgroundColor: '#5a6268',
   },
   ajusteButton: {
     backgroundColor: '#ffc107',
@@ -1873,6 +2259,17 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#666',
   },
+  wineCalculationHint: {
+    fontSize: 9,
+    color: '#999',
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
+  wineUnpricedHint: {
+    fontSize: 9,
+    color: '#b8860b',
+    marginTop: 2,
+  },
   comparisonHeader: {
     backgroundColor: '#fff',
     marginHorizontal: 16,
@@ -2019,6 +2416,38 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    paddingHorizontal: 24,
+  },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  topRank: {
+    width: 28,
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#8B0000',
+  },
+  topName: {
+    flex: 1,
+    fontSize: 14,
+    color: '#333',
+    marginRight: 8,
+  },
+  topValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
   },
   modalOverlay: {
     flex: 1,
@@ -2032,10 +2461,86 @@ const styles = StyleSheet.create({
     padding: 24,
     maxHeight: '80%',
   },
+  helpModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  helpModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    width: '100%',
+    maxWidth: 400,
+    maxHeight: '85%',
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+  },
+  helpModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
+  helpModalScroll: {
+    maxHeight: 360,
+  },
+  helpBlock: {
+    marginBottom: 16,
+  },
+  helpBlockTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#8B0000',
+    marginBottom: 6,
+  },
+  helpBlockText: {
+    fontSize: 13,
+    color: '#555',
+    lineHeight: 20,
+  },
+  helpModalNote: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    marginTop: 8,
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  helpModalCheckRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 10,
+  },
+  helpModalCheckLabel: {
+    fontSize: 13,
+    color: '#555',
+  },
+  helpModalCloseButton: {
+    backgroundColor: '#8B0000',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  helpModalCloseText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   modalTitle: {
     fontSize: 22,
     fontWeight: 'bold',
     color: '#333',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  modalCopy: {
+    fontSize: 14,
+    color: '#666',
     marginBottom: 16,
     textAlign: 'center',
   },
@@ -2207,10 +2712,30 @@ const styles = StyleSheet.create({
     color: '#8B0000',
     marginBottom: 4,
   },
+  reportStatValueNoWrap: {
+    maxWidth: '100%',
+  },
+  reportStatValueCurrency: {
+    fontSize: 16,
+    maxWidth: '100%',
+  },
   reportStatLabel: {
     fontSize: 12,
     color: '#666',
     textAlign: 'center',
+  },
+  reportsUnpricedRow: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 10,
+    backgroundColor: '#fffbe6',
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#b8860b',
+  },
+  reportsUnpricedText: {
+    fontSize: 12,
+    color: '#666',
   },
   reportsButtonsContainer: {
     paddingHorizontal: 16,

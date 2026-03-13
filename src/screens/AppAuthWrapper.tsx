@@ -8,7 +8,7 @@ import { useRoute } from '@react-navigation/native';
 const ENTRANDO_WATCHDOG_MS = 20000;
 
 export default function AppAuthWrapper() {
-  const { user, loading, session, refreshUserData, signOut } = useAuth();
+  const { user, loading, session, refreshUserData, signOut, profileMissingMessage } = useAuth();
   const route = useRoute();
   const didTriggerRefreshRef = useRef(false);
   const sessionRef = useRef(session);
@@ -57,10 +57,17 @@ export default function AppAuthWrapper() {
   if (!user) {
     const isOwnerRegistration = route.name === 'AppAuth' && route.params?.mode === 'register';
     return (
-      <AuthScreen
-        onAuthSuccess={() => {}}
-        initialMode={isOwnerRegistration ? 'register' : 'login'}
-      />
+      <View style={styles.authContainer}>
+        {profileMissingMessage ? (
+          <View style={styles.profileMissingBanner}>
+            <Text style={styles.profileMissingText}>{profileMissingMessage}</Text>
+          </View>
+        ) : null}
+        <AuthScreen
+          onAuthSuccess={() => {}}
+          initialMode={isOwnerRegistration ? 'register' : 'login'}
+        />
+      </View>
     );
   }
 
@@ -68,6 +75,21 @@ export default function AppAuthWrapper() {
 }
 
 const styles = StyleSheet.create({
+  authContainer: {
+    flex: 1,
+  },
+  profileMissingBanner: {
+    backgroundColor: '#fff3cd',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ffc107',
+  },
+  profileMissingText: {
+    fontSize: 14,
+    color: '#856404',
+    textAlign: 'center',
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,11 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranch } from '../contexts/BranchContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { TastingExamService, TastingExam } from '../services/TastingExamService';
+import { canCreateTastingExam, canManageTastingExams } from '../utils/rolePermissions';
+import { getEffectivePlan, getOwnerEffectivePlan } from '../utils/effectivePlan';
+import { checkSubscriptionFeatureByPlan } from '../utils/subscriptionPermissions';
 
 type TastingExamsListScreenNavigationProp = StackNavigationProp<RootStackParamList, 'TastingExamsList'>;
 
@@ -22,9 +26,14 @@ interface Props {
   navigation: TastingExamsListScreenNavigationProp;
 }
 
+const FEATURE_ID_TASTINGS = 'tastings' as const;
+
 const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
   const { user } = useAuth();
   const { currentBranch } = useBranch();
+  const { t } = useLanguage();
+  const [subscriptionAllowed, setSubscriptionAllowed] = useState<'pending' | true | false>('pending');
+  const alertedBlockedRef = useRef(false);
   const [exams, setExams] = useState<TastingExam[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedExam, setSelectedExam] = useState<TastingExam | null>(null);
@@ -32,8 +41,36 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
   const [actionType, setActionType] = useState<'enable' | 'disable' | 'delete' | null>(null);
   const [durationModalVisible, setDurationModalVisible] = useState(false);
 
-  const canCreateExam = user?.role === 'owner' || user?.role === 'gerente' || user?.role === 'sommelier';
-  const canManageExam = canCreateExam;
+  const canCreateExam = canCreateTastingExam(user?.role as 'owner' | 'gerente' | 'sommelier' | 'supervisor' | 'personal');
+  const canManageExam = canManageTastingExams(user?.role as 'owner' | 'gerente' | 'sommelier' | 'supervisor' | 'personal');
+
+  useEffect(() => {
+    if (!user) {
+      setSubscriptionAllowed(false);
+      navigation.replace('AdminDashboard');
+      return;
+    }
+    let cancelled = false;
+    const run = async () => {
+      const plan = user.role === 'owner'
+        ? getEffectivePlan(user)
+        : await getOwnerEffectivePlan(user);
+      if (cancelled) return;
+      const allowed = checkSubscriptionFeatureByPlan(plan, FEATURE_ID_TASTINGS);
+      if (!allowed) {
+        setSubscriptionAllowed(false);
+        navigation.replace('AdminDashboard');
+        if (!alertedBlockedRef.current) {
+          alertedBlockedRef.current = true;
+          Alert.alert(t('subscription.feature_blocked'), undefined, [{ text: 'OK' }]);
+        }
+      } else {
+        setSubscriptionAllowed(true);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [user?.id, user?.role, navigation, t]);
 
   useEffect(() => {
     loadExams();
@@ -204,6 +241,19 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
       minute: '2-digit',
     });
   };
+
+  if (subscriptionAllowed === 'pending') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#8B0000" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+  if (subscriptionAllowed === false) {
+    return null;
+  }
 
   if (loading) {
     return (

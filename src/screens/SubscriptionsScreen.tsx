@@ -11,15 +11,19 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
+import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { useAdminGuard } from '../hooks/useAdminGuard';
 import { supabase } from '../lib/supabase';
 import * as WebBrowser from 'expo-web-browser';
 import { CELLARIUM, CELLARIUM_THEME } from '../theme/cellariumTheme';
 import { useLanguage } from '../contexts/LanguageContext';
 import { log } from '../utils/logger';
 import { getEffectivePlan, isBusiness } from '../utils/effectivePlan';
+import { isSensitiveAllowed } from '../utils/sensitiveActionGating';
+import CellariumLoader from '../components/CellariumLoader';
 
 // Paleta y layout alineados con Catálogo Cellarium
 const PALETTE = {
@@ -45,10 +49,20 @@ const LAYOUT = {
   spacing: 16,
   padding: 20,
 } as const;
+
+type LoadingActionSubscription = 'subscribe' | 'open-portal' | 'save-addons' | null;
+const LOADING_LABELS: Record<NonNullable<LoadingActionSubscription>, string> = {
+  'subscribe': 'Procesando suscripción...',
+  'open-portal': 'Abriendo portal de suscripción...',
+  'save-addons': 'Guardando add-ons...',
+};
+
 type SubscriptionsScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Subscriptions'>;
+type SubscriptionsScreenRouteProp = RouteProp<RootStackParamList, 'Subscriptions'>;
 
 interface Props {
   navigation: SubscriptionsScreenNavigationProp;
+  route: SubscriptionsScreenRouteProp;
 }
 
 /**
@@ -220,8 +234,10 @@ type StylesRecord = ReturnType<typeof StyleSheet.create>;
 function CurrentStatusCard({
   styles,
   planLabel,
-  isPremium,
+  statusValue,
+  expirationRowLabel,
   expirationText,
+  expirationOptionalLines,
   isBusiness,
   addonsCount,
   onRefresh,
@@ -231,8 +247,10 @@ function CurrentStatusCard({
 }: {
   styles: StylesRecord;
   planLabel: string;
-  isPremium: boolean;
+  statusValue: string;
+  expirationRowLabel: string;
   expirationText: string;
+  expirationOptionalLines?: string[];
   isBusiness: boolean;
   addonsCount: number;
   onRefresh: () => void;
@@ -240,11 +258,7 @@ function CurrentStatusCard({
   showExpiration: boolean;
   labels: {
     statusCurrent: string;
-    active: string;
-    yes: string;
-    no: string;
-    renews: string;
-    expires: string;
+    statusLabel: string;
     addonsBranches: string;
     refresh: string;
   };
@@ -258,15 +272,20 @@ function CurrentStatusCard({
         </View>
       </View>
       <View style={styles.statusRow}>
-        <Text style={styles.statusLabel}>{labels.active}</Text>
-        <Text style={styles.statusValue}>{isPremium ? labels.yes : labels.no}</Text>
+        <Text style={styles.statusLabel}>{labels.statusLabel}</Text>
+        <Text style={styles.statusValue}>{statusValue}</Text>
       </View>
       {showExpiration && (
         <View style={styles.statusRow}>
-          <Text style={styles.statusLabel}>{isPremium ? labels.renews : labels.expires}</Text>
+          <Text style={styles.statusLabel}>{expirationRowLabel}</Text>
           <Text style={styles.statusValue}>{expirationText}</Text>
         </View>
       )}
+      {expirationOptionalLines?.map((line, i) => (
+        <View key={i} style={styles.statusRow}>
+          <Text style={styles.statusValue}>{line}</Text>
+        </View>
+      ))}
       {isBusiness && (
         <View style={styles.statusRow}>
           <Text style={styles.statusLabel}>{labels.addonsBranches}</Text>
@@ -347,31 +366,59 @@ function PlanCard({
   );
 }
 
+/** Base branches included in Business plan (UI copy only). */
+const BUSINESS_BASE_BRANCHES = 2;
+
 function AddonBranchesCard({
   styles,
+  addonTitle,
+  businessAddonPillLabel,
+  businessIncludesText,
+  totalBranchesText,
+  pricePerBranchMuted,
+  addonBranchesLabel,
   addonBranchesQty,
   setAddonBranchesQty,
   currentAddonQty,
+  newMonthlyTotalText,
+  currentAddonsLabel,
+  newMonthlyTotalLabel,
   onUpdate,
   isProcessing,
-  addonTitle,
-  addonSubtitleText,
-  updateAddonsLabel,
+  saveAddonsLabel,
+  updateDisabled = false,
 }: {
   styles: StylesRecord;
+  addonTitle: string;
+  businessAddonPillLabel: string;
+  businessIncludesText: string;
+  totalBranchesText: string;
+  pricePerBranchMuted: string;
+  addonBranchesLabel: string;
   addonBranchesQty: string;
   setAddonBranchesQty: (v: string) => void;
   currentAddonQty: number;
+  newMonthlyTotalText: string;
+  currentAddonsLabel: string;
+  newMonthlyTotalLabel: string;
   onUpdate: () => void;
   isProcessing: boolean;
-  addonTitle: string;
-  addonSubtitleText: string;
-  updateAddonsLabel: string;
+  saveAddonsLabel: string;
+  updateDisabled?: boolean;
 }) {
+  const addonButtonDisabled = isProcessing || updateDisabled;
   return (
-    <View style={styles.addonCard}>
-      <Text style={styles.addonTitle}>{addonTitle}</Text>
-      <Text style={styles.addonSubtitle}>{addonSubtitleText}</Text>
+    <View style={[styles.addonCard, isProcessing && styles.buttonDisabled]}>
+      <View style={styles.addonCardHeaderRow}>
+        <Text style={styles.addonTitle}>{addonTitle}</Text>
+        <View style={styles.addonPill}>
+          <Text style={styles.addonPillText}>{businessAddonPillLabel}</Text>
+        </View>
+      </View>
+      <Text style={styles.addonSummaryLine}>{businessIncludesText}</Text>
+      <Text style={styles.addonSummaryLine}>{totalBranchesText}</Text>
+      <Text style={styles.addonSummaryMuted}>{pricePerBranchMuted}</Text>
+      <Text style={styles.addonControlLabel}>{addonBranchesLabel}</Text>
       <View style={styles.addonControls}>
         <TouchableOpacity
           style={[styles.addonStepperBtn, isProcessing && styles.buttonDisabled]}
@@ -406,27 +453,66 @@ function AddonBranchesCard({
           <Text style={styles.addonStepperBtnText}>+</Text>
         </TouchableOpacity>
       </View>
+      <Text style={styles.addonMetaLine}>{currentAddonsLabel} {currentAddonQty}</Text>
+      <Text style={styles.addonMetaLine}>{newMonthlyTotalLabel} {newMonthlyTotalText}</Text>
       <TouchableOpacity
-        style={[styles.addonUpdateButton, isProcessing && styles.buttonDisabled]}
+        style={[styles.addonUpdateButton, addonButtonDisabled && styles.buttonDisabled]}
         onPress={onUpdate}
-        disabled={isProcessing}
+        disabled={addonButtonDisabled}
       >
         {isProcessing ? (
           <ActivityIndicator color="#fff" size="small" />
         ) : (
-          <Text style={styles.addonUpdateButtonText}>{updateAddonsLabel}</Text>
+          <Text style={styles.addonUpdateButtonText}>{saveAddonsLabel}</Text>
         )}
       </TouchableOpacity>
     </View>
   );
 }
 
-const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
+const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
+  const { status: guardStatus } = useAdminGuard({
+    navigation,
+    route,
+    allowedRoles: ['owner'],
+  });
   const { t, language } = useLanguage();
   const { user, refreshUser, profileReady } = useAuth();
+
+  if (guardStatus === 'loading' || guardStatus === 'profile_loading') {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
+        <ActivityIndicator size="large" color="#8B0000" />
+      </View>
+    );
+  }
+  if (guardStatus === 'pending') {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa', padding: 24 }}>
+        <Text style={{ fontSize: 16, color: '#666', textAlign: 'center' }}>Pendiente de aprobación</Text>
+      </View>
+    );
+  }
+  if (guardStatus === 'denied') {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa', padding: 24 }}>
+        <Text style={{ fontSize: 18, fontWeight: '600', color: '#333', textAlign: 'center' }}>Sin permiso</Text>
+        <Text style={{ marginTop: 8, fontSize: 14, color: '#666', textAlign: 'center' }}>Solo el propietario puede gestionar suscripciones.</Text>
+      </View>
+    );
+  }
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [loadingAction, setLoadingAction] = useState<LoadingActionSubscription>(null);
+  const isProcessing = loadingAction !== null;
   const [addonBranchesQty, setAddonBranchesQty] = useState<string>('0');
+  const [verifyCode, setVerifyCode] = useState('');
+  const [sendingCode, setSendingCode] = useState(false);
+  const [verifyingCode, setVerifyingCode] = useState(false);
+  const verifyInputRef = useRef<TextInput>(null);
+  const needsEmailVerification =
+    user?.role === 'owner' &&
+    user?.signup_method === 'password' &&
+    user?.owner_email_verified !== true;
   /** Precio formateado del add-on (ej. "$499 MXN"). Cargado desde get-addon-price o fallback. */
   const [addonPriceFormatted, setAddonPriceFormatted] = useState<string>(`$${PRICE_ADDON_BRANCH_MXN}`);
   const addonPriceCacheRef = useRef<{ formatted: string; unit_amount: number } | null>(null);
@@ -434,6 +520,14 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (route.params?.openVerifyEmail && needsEmailVerification) {
+        setTimeout(() => verifyInputRef.current?.focus(), 400);
+      }
+    }, [route.params?.openVerifyEmail, needsEmailVerification])
+  );
 
   const dateLocale = language === 'en' ? 'en-US' : 'es-MX';
   const formatDate = useCallback(
@@ -451,6 +545,114 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
     },
     [language, t]
   );
+
+  /** Suscripción del owner (current_period_end, cancel_at_period_end, metadata) para UI de cancelación programada. */
+  const [latestSubscription, setLatestSubscription] = useState<{
+    current_period_end?: string;
+    cancel_at_period_end?: boolean;
+    metadata?: Record<string, unknown>;
+  } | null>(null);
+  useEffect(() => {
+    if (!user?.id || user?.role !== 'owner') {
+      setLatestSubscription(null);
+      return;
+    }
+    const load = async () => {
+      const ownerId = (user as any)?.owner_id ?? user.id;
+      if (user.subscription_id) {
+        const { data, error } = await supabase
+          .from('subscriptions')
+          .select('current_period_end, cancel_at_period_end, metadata')
+          .eq('id', user.subscription_id)
+          .maybeSingle();
+        if (__DEV__) {
+          console.log('[SUBS_UI] latestSubscription fetch', {
+            source: 'by_id',
+            ownerId,
+            error: (error as any)?.message ?? null,
+            data,
+            userCancel: user.subscription_cancel_at_period_end ?? null,
+            cancel_at_period_end: (data as any)?.cancel_at_period_end ?? null,
+            metaCancelScheduled: (data as any)?.metadata?.cancel_scheduled ?? null,
+            metaCancelAtUnix: (data as any)?.metadata?.cancel_at_unix ?? null,
+          });
+        }
+        setLatestSubscription(data ?? null);
+      } else {
+        const { data, error } = await supabase
+          .from('subscriptions')
+          .select('current_period_end, cancel_at_period_end, metadata')
+          .eq('owner_id', ownerId)
+          .order('current_period_end', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (__DEV__) {
+          console.log('[SUBS_UI] latestSubscription fetch', {
+            source: 'by_owner',
+            ownerId,
+            error: (error as any)?.message ?? null,
+            data,
+            userCancel: user.subscription_cancel_at_period_end ?? null,
+            cancel_at_period_end: (data as any)?.cancel_at_period_end ?? null,
+            metaCancelScheduled: (data as any)?.metadata?.cancel_scheduled ?? null,
+            metaCancelAtUnix: (data as any)?.metadata?.cancel_at_unix ?? null,
+          });
+        }
+        setLatestSubscription(data ?? null);
+      }
+    };
+    load();
+  }, [user?.id, user?.role, user?.subscription_id]);
+
+  // Prioridad: subscriptions.metadata > subscriptions > users (blindaje si users desincronizado)
+  const expiresAt = useMemo(() => {
+    const metaIso = latestSubscription?.metadata?.cancel_at_iso;
+    const iso =
+      (typeof metaIso === 'string' ? metaIso : null) ||
+      latestSubscription?.current_period_end ||
+      user?.subscription_expires_at ||
+      null;
+    return iso ? new Date(iso) : null;
+  }, [
+    latestSubscription?.metadata?.cancel_at_iso,
+    latestSubscription?.current_period_end,
+    user?.subscription_expires_at,
+  ]);
+
+  const cancelScheduled = useMemo(() => {
+    if (latestSubscription?.metadata?.cancel_scheduled === true) return true;
+    if (typeof latestSubscription?.metadata?.cancel_at_unix === 'number') return true;
+    if (latestSubscription?.cancel_at_period_end === true) return true;
+    if (user?.subscription_cancel_at_period_end === true) return true;
+    return false;
+  }, [
+    latestSubscription?.metadata?.cancel_scheduled,
+    latestSubscription?.metadata?.cancel_at_unix,
+    latestSubscription?.cancel_at_period_end,
+    user?.subscription_cancel_at_period_end,
+  ]);
+
+  useEffect(() => {
+    if (!__DEV__) return;
+    console.log('[SUBS_HARDEN]', {
+      cancelScheduled,
+      metaCancelScheduled: latestSubscription?.metadata?.cancel_scheduled,
+      metaCancelAtUnix: latestSubscription?.metadata?.cancel_at_unix,
+      latestCancelAtPeriodEnd: latestSubscription?.cancel_at_period_end,
+      userCancel: user?.subscription_cancel_at_period_end,
+    });
+  }, [
+    cancelScheduled,
+    latestSubscription?.metadata?.cancel_scheduled,
+    latestSubscription?.metadata?.cancel_at_unix,
+    latestSubscription?.cancel_at_period_end,
+    user?.subscription_cancel_at_period_end,
+  ]);
+
+  const cancelAtIso = useMemo(() => {
+    const iso = latestSubscription?.metadata?.cancel_at_iso;
+    return typeof iso === 'string' ? iso : null;
+  }, [latestSubscription?.metadata?.cancel_at_iso]);
 
   const refreshUserWithBackoffUntilUpdated = useCallback(
     async (expectedPlan?: 'basic' | 'additional-branch'): Promise<boolean> => {
@@ -499,6 +701,13 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
     enforceExpiryAndRefresh();
   }, [profileReady, user?.id, refreshUser, enforceExpiryAndRefresh]);
 
+  useFocusEffect(
+    useCallback(() => {
+      setLoadingAction(null);
+      refreshUser?.();
+    }, [refreshUser])
+  );
+
   useEffect(() => {
     if (user?.subscription_branch_addons_count === undefined) return;
     const next = user.subscription_branch_addons_count.toString();
@@ -542,7 +751,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
           t('subscription.plan.free.features.3'),
           t('subscription.plan.free.features.4'),
         ],
-        limitations: { branches: 1, wines: 5, managers: 1 },
+        limitations: { branches: 1, wines: 10, managers: 1 },
         blockedFeatures: [
           t('subscription.plan.free.blocked.0'),
           t('subscription.plan.free.blocked.1'),
@@ -631,6 +840,14 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
       );
       return;
     }
+    if (!isSensitiveAllowed(user)) {
+      Alert.alert(
+        'Verificación requerida',
+        'Verifica tu correo en el bloque de arriba para poder suscribirte.',
+        [{ text: 'Entendido', style: 'cancel' }]
+      );
+      return;
+    }
     const message = `${t('subscription.confirm_subscribe_message')} $${plan.price} ${plan.currency}/${plan.period}?`;
     Alert.alert(
       t('subscription.confirm_subscribe'),
@@ -641,14 +858,23 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
           text: t('subscription.cta_subscribe'),
           onPress: async () => {
             try {
-              setIsProcessing(true);
+              setLoadingAction('subscribe');
               const { data, error } = await invokeAuthedFunction<{ url: string; sessionId: string }>(
                 'create-checkout-session',
                 { planLookupKey: plan.lookupKey }
               );
-              if (error) {
+      if (error) {
+        setLoadingAction(null);
                 if (error.code === 'ALREADY_SUBSCRIBED') {
                   await handleManageSubscription();
+                  return;
+                }
+                if (error.code === 'EMAIL_VERIFICATION_REQUIRED') {
+                  Alert.alert(
+                    'Verificación requerida',
+                    'Verifica tu correo en el bloque de arriba para continuar.',
+                    [{ text: 'Entendido', style: 'cancel' }]
+                  );
                   return;
                 }
                 Alert.alert(t('msg.error'), t('subscription.error_generic'));
@@ -659,13 +885,18 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
               }
               const expectedPlan: 'basic' | 'additional-branch' =
                 selectedPlan === 'pro' ? 'basic' : 'additional-branch';
-              await WebBrowser.openBrowserAsync(data.url);
+              const returnUrl = 'cellarium://auth-callback';
+              if (__DEV__) console.log('[Checkout] opening', { url: data.url, returnUrl });
+              const result = await WebBrowser.openAuthSessionAsync(data.url, returnUrl);
+              console.log('[StripeAuthSession result]', result);
+              const resultUrl = (result as { url?: string })?.url;
+              if (resultUrl) console.log('[StripeAuthSession url]', resultUrl);
               await refreshUserWithBackoffUntilUpdated(expectedPlan);
             } catch (error: any) {
               if (__DEV__) console.error('Error en suscripción:', error);
               Alert.alert(t('msg.error'), t('subscription.error_generic'));
             } finally {
-              setIsProcessing(false);
+              setLoadingAction(null);
             }
           },
         },
@@ -678,13 +909,22 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
       Alert.alert(t('msg.error'), t('subscription.error_no_session'));
       return;
     }
+    if (!isSensitiveAllowed(user)) {
+      Alert.alert(
+        'Verificación requerida',
+        'Verifica tu correo en el bloque de arriba para administrar tu suscripción.',
+        [{ text: 'Entendido', style: 'cancel' }]
+      );
+      return;
+    }
     try {
-      setIsProcessing(true);
+      setLoadingAction('open-portal');
       const { data, error } = await invokeAuthedFunction<{ url: string }>(
         'create-portal-session',
         {}
       );
       if (error) {
+        setLoadingAction(null);
         if (error.code === 'NO_CUSTOMER') {
           Alert.alert(
             t('subscription.no_subscription'),
@@ -692,13 +932,28 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
           );
           return;
         }
+        if (error.code === 'EMAIL_VERIFICATION_REQUIRED') {
+          Alert.alert(
+            'Verificación requerida',
+            'Verifica tu correo en el bloque de arriba para continuar.',
+            [{ text: 'Entendido', style: 'cancel' }]
+          );
+          return;
+        }
         Alert.alert(t('msg.error'), t('subscription.error_generic'));
         return;
       }
       if (!data?.url) {
+        setLoadingAction(null);
         throw new Error('No portal URL received');
       }
-      await WebBrowser.openBrowserAsync(data.url);
+      const result = await WebBrowser.openAuthSessionAsync(
+        data.url,
+        'cellarium://auth-callback'
+      );
+      console.log('[StripeAuthSession result]', result);
+      const resultUrl = (result as { url?: string })?.url;
+      if (resultUrl) console.log('[StripeAuthSession url]', resultUrl);
       const updated = await refreshUserWithBackoffUntilUpdated();
       if (updated) {
         Alert.alert(t('subscription.plan_updated_title'), t('subscription.plan_updated_message'));
@@ -707,14 +962,58 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
       if (__DEV__) console.error('Error en portal:', error);
       Alert.alert(t('msg.error'), t('subscription.error_generic'));
     } finally {
-      setIsProcessing(false);
+      setLoadingAction(null);
     }
-  }, [user?.id, refreshUserWithBackoffUntilUpdated, t]);
+  }, [user, refreshUserWithBackoffUntilUpdated, t]);
 
   const formatMxn = useCallback((cents: number) => {
     const locale = language === 'en' ? 'en-US' : 'es-MX';
     return new Intl.NumberFormat(locale, { style: 'currency', currency: 'MXN', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(cents / 100);
   }, [language]);
+
+  const handleSendVerifyCode = useCallback(async () => {
+    setSendingCode(true);
+    try {
+      const { data, error } = await invokeAuthedFunction<{ success?: boolean; code?: string; message?: string }>('send-owner-verification-email', {});
+      const code = error?.code ?? (data as any)?.code;
+      if (code === 'ALREADY_VERIFIED') {
+        await refreshUser?.();
+        return;
+      }
+      if (code) {
+        Alert.alert('Aviso', (error?.message ?? (data as any)?.message) ?? 'No se pudo enviar el código');
+        return;
+      }
+      Alert.alert('Código enviado', 'Revisa tu correo. El código es válido 15 minutos.');
+    } catch (_) {
+      Alert.alert('Error', 'No se pudo enviar el código. Intenta de nuevo.');
+    } finally {
+      setSendingCode(false);
+    }
+  }, [refreshUser]);
+
+  const handleVerifyEmailCode = useCallback(async () => {
+    const codeTrimmed = verifyCode.trim();
+    if (!/^\d{6}$/.test(codeTrimmed)) {
+      Alert.alert('Código inválido', 'Ingresa los 6 dígitos que recibiste por correo.');
+      return;
+    }
+    setVerifyingCode(true);
+    try {
+      const { data, error } = await invokeAuthedFunction('verify-owner-email', { code: codeTrimmed });
+      if (error?.code) {
+        Alert.alert('Error', error.message ?? 'Código inválido o expirado');
+        return;
+      }
+      setVerifyCode('');
+      await refreshUser?.();
+      Alert.alert('Correo verificado', 'Ya puedes usar suscripciones y generar QR.');
+    } catch (_) {
+      Alert.alert('Error', 'No se pudo verificar. Intenta de nuevo.');
+    } finally {
+      setVerifyingCode(false);
+    }
+  }, [verifyCode, refreshUser]);
 
   const handleUpdateAddonBranches = async () => {
     if (!user?.id) {
@@ -753,11 +1052,28 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
         {
           text: t('subscription.confirm'),
           onPress: async () => {
+            if (!isSensitiveAllowed(user)) {
+              Alert.alert(
+                'Verificación requerida',
+                'Verifica tu correo en el bloque de arriba para actualizar add-ons.',
+                [{ text: 'Entendido', style: 'cancel' }]
+              );
+              return;
+            }
             try {
-              setIsProcessing(true);
+              setLoadingAction('save-addons');
               const { error } = await invokeAuthedFunction('update-subscription', { addonBranchesQty: qty });
               if (error) {
+                setLoadingAction(null);
                 log.error('update-subscription failed', error.status, error.code);
+                if (error.code === 'EMAIL_VERIFICATION_REQUIRED') {
+                  Alert.alert(
+                    'Verificación requerida',
+                    'Verifica tu correo en el bloque de arriba para continuar.',
+                    [{ text: 'Entendido', style: 'cancel' }]
+                  );
+                  return;
+                }
                 Alert.alert(t('msg.error'), t('subscription.update_failed_message'));
                 return;
               }
@@ -771,7 +1087,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
               log.error('update-subscription error', (err as Error)?.message);
               Alert.alert(t('msg.error'), t('subscription.update_failed_message'));
             } finally {
-              setIsProcessing(false);
+              setLoadingAction(null);
             }
           },
         },
@@ -865,32 +1181,43 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
     if (planMode !== 'free') setSelectedPlan(null);
   }, [planMode]);
 
-  const handleCancelSubscription = useCallback(() => {
-    Alert.alert(
-      t('subscription.cancel_confirm_title'),
-      t('subscription.cancel_confirm_message'),
-      [
-        { text: t('subscription.alert_no'), style: 'cancel' },
-        { text: t('subscription.alert_open_portal'), onPress: () => handleManageSubscription() },
-      ]
-    );
-  }, [handleManageSubscription, t]);
-
   const plansForFreeUsers = useMemo(() => mainPlans.filter(p => p.id !== 'free'), []);
 
   const statusLabels = useMemo(
     () => ({
       statusCurrent: t('subscription.status_current'),
-      active: t('subscription.active'),
-      yes: t('subscription.yes'),
-      no: t('subscription.no'),
-      renews: t('subscription.renews'),
-      expires: t('subscription.expires'),
+      statusLabel: t('subscription.status_label'),
       addonsBranches: t('subscription.addons_branches'),
       refresh: t('subscription.refresh'),
     }),
     [t]
   );
+
+  const statusValue = useMemo(() => {
+    if (cancelScheduled) return t('subscription.status_canceled_value');
+    if (user?.subscription_active === true) return t('subscription.status_active_value');
+    return t('subscription.status_free_value');
+  }, [cancelScheduled, user?.subscription_active, t]);
+
+  const expirationRowLabel = useMemo(() => {
+    if (cancelScheduled) return t('subscription.access_until');
+    if (isPremium) return t('subscription.renews_on');
+    return t('subscription.expires_on');
+  }, [cancelScheduled, isPremium, t]);
+
+  const expirationText = useMemo(
+    () => (expiresAt ? formatDate(expiresAt.toISOString()) : t('common.na')),
+    [expiresAt, formatDate, t]
+  );
+
+  const expirationOptionalLines = useMemo(() => {
+    if (!cancelScheduled) return [];
+    const lines: string[] = [t('subscription.no_renewal')];
+    if (cancelAtIso) {
+      lines.push(`${t('subscription.cancel_scheduled_on')} ${formatDate(cancelAtIso)}`);
+    }
+    return lines;
+  }, [cancelScheduled, cancelAtIso, formatDate, t]);
   const planCardLabels = useMemo(
     () => ({
       includes: t('subscription.includes'),
@@ -933,12 +1260,55 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
         )}
         {profileReady && user?.role === 'owner' && (
         <>
+        {needsEmailVerification && (
+          <View style={styles.verifyBlock} collapsable={false}>
+            <Text style={styles.verifyBlockTitle}>Verificar correo</Text>
+            <Text style={styles.verifyBlockSubtitle}>
+              Para activar suscripciones y generación de QR, verifica tu correo con el código que te enviamos.
+            </Text>
+            <TouchableOpacity
+              style={[styles.verifyButton, sendingCode && styles.verifyButtonDisabled]}
+              onPress={handleSendVerifyCode}
+              disabled={sendingCode}
+            >
+              {sendingCode ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.verifyButtonText}>Enviar código</Text>
+              )}
+            </TouchableOpacity>
+            <Text style={styles.verifyLabel}>Código de 6 dígitos</Text>
+            <TextInput
+              ref={verifyInputRef}
+              style={styles.verifyInput}
+              value={verifyCode}
+              onChangeText={setVerifyCode}
+              placeholder="000000"
+              placeholderTextColor="#999"
+              keyboardType="number-pad"
+              maxLength={6}
+            />
+            <TouchableOpacity
+              style={[styles.verifyButton, styles.verifyButtonPrimary, verifyingCode && styles.verifyButtonDisabled]}
+              onPress={handleVerifyEmailCode}
+              disabled={verifyingCode}
+            >
+              {verifyingCode ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.verifyButtonText}>Verificar</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
         <CurrentStatusCard
           styles={styles}
           planLabel={planLabelForPill}
-          isPremium={isPremium}
-          expirationText={formatDate(user?.subscription_expires_at)}
-          showExpiration={!!user?.subscription_expires_at}
+          statusValue={statusValue}
+          expirationRowLabel={expirationRowLabel}
+          expirationText={expirationText}
+          expirationOptionalLines={expirationOptionalLines}
+          showExpiration={!!expiresAt}
           isBusiness={isBusinessPlan()}
           addonsCount={user?.subscription_branch_addons_count ?? 0}
           onRefresh={enforceExpiryAndRefresh}
@@ -946,48 +1316,53 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
           labels={statusLabels}
         />
 
-        {/* Business: solo estado + add-ons + Administrar + Cancelar suscripción */}
+        {/* Business: estado + add-ons + Administrar suscripción */}
         {planMode === 'business' && (
           <>
             <AddonBranchesCard
               styles={styles}
+              addonTitle={t('subscription.addon_title')}
+              businessAddonPillLabel={t('subscription.business_addon_pill')}
+              businessIncludesText={t('subscription.business_includes_branches').replace('{count}', String(BUSINESS_BASE_BRANCHES))}
+              totalBranchesText={t('subscription.total_branches_now').replace('{count}', String(BUSINESS_BASE_BRANCHES + (user?.subscription_branch_addons_count ?? 0)))}
+              pricePerBranchMuted={`${addonPriceFormatted} ${t('subscription.addon_price_per')}`}
+              addonBranchesLabel={t('subscription.addon_branches_label')}
               addonBranchesQty={addonBranchesQty}
               setAddonBranchesQty={setAddonBranchesQty}
               currentAddonQty={user?.subscription_branch_addons_count ?? 0}
+              newMonthlyTotalText={(() => {
+                const qty = parseInt(addonBranchesQty, 10) || 0;
+                const unitCents = addonPriceCacheRef.current?.unit_amount ?? 49900;
+                return qty > 0 ? formatMxn(qty * unitCents) : '—';
+              })()}
+              currentAddonsLabel={t('subscription.current_addons')}
+              newMonthlyTotalLabel={t('subscription.new_monthly_total')}
               onUpdate={handleUpdateAddonBranches}
               isProcessing={isProcessing}
-              addonTitle={t('subscription.addon_title')}
-              addonSubtitleText={`${addonPriceFormatted} ${t('subscription.addon_price_per')} ${t('subscription.addon_current')} ${user?.subscription_branch_addons_count ?? 0}`}
-              updateAddonsLabel={t('subscription.update_addons')}
+              saveAddonsLabel={t('subscription.save_addons')}
+              updateDisabled={needsEmailVerification}
             />
             <TouchableOpacity
-              style={[styles.manageButton, isProcessing && styles.buttonDisabled]}
+              style={[styles.manageButton, (isProcessing || needsEmailVerification) && styles.buttonDisabled]}
               onPress={handleManageSubscription}
-              disabled={isProcessing}
+              disabled={isProcessing || needsEmailVerification}
             >
               {isProcessing ? (
                 <ActivityIndicator color={PALETTE.primary} size="small" />
               ) : (
                 <Text style={styles.manageButtonText}>{t('subscription.manage')}</Text>
               )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.cancelButton, isProcessing && styles.buttonDisabled]}
-              onPress={handleCancelSubscription}
-              disabled={isProcessing}
-            >
-              <Text style={styles.cancelButtonText}>{t('subscription.cancel')}</Text>
             </TouchableOpacity>
           </>
         )}
 
-        {/* Pro: solo estado + Administrar + Cancelar + opcional Cambiar a Business */}
+        {/* Pro: estado + Administrar + Mejorar plan */}
         {planMode === 'pro' && (
           <>
             <TouchableOpacity
-              style={[styles.manageButton, isProcessing && styles.buttonDisabled]}
+              style={[styles.manageButton, (isProcessing || needsEmailVerification) && styles.buttonDisabled]}
               onPress={handleManageSubscription}
-              disabled={isProcessing}
+              disabled={isProcessing || needsEmailVerification}
             >
               {isProcessing ? (
                 <ActivityIndicator color={PALETTE.primary} size="small" />
@@ -996,16 +1371,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
               )}
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.cancelButton, isProcessing && styles.buttonDisabled]}
-              onPress={handleCancelSubscription}
-              disabled={isProcessing}
-            >
-              <Text style={styles.cancelButtonText}>{t('subscription.cancel')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.secondaryButton, isProcessing && styles.buttonDisabled]}
+              style={[styles.secondaryButton, (isProcessing || needsEmailVerification) && styles.buttonDisabled]}
               onPress={handleManageSubscription}
-              disabled={isProcessing}
+              disabled={isProcessing || needsEmailVerification}
             >
               <Text style={styles.secondaryButtonText}>{t('subscription.upgrade_plan')}</Text>
             </TouchableOpacity>
@@ -1029,9 +1397,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
             {selectedPlan && selectedPlan !== 'free' && (
               <View style={styles.ctaWrap}>
                 <TouchableOpacity
-                  style={[styles.ctaButtonPrimary, isProcessing && styles.buttonDisabled]}
+                  style={[styles.ctaButtonPrimary, (isProcessing || needsEmailVerification) && styles.buttonDisabled]}
                   onPress={handleSubscribe}
-                  disabled={isProcessing}
+                  disabled={isProcessing || needsEmailVerification}
                 >
                   {isProcessing ? (
                     <ActivityIndicator color="#fff" size="small" />
@@ -1046,6 +1414,14 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
         </>
         )}
       </ScrollView>
+      {loadingAction && (
+        <CellariumLoader
+          overlay
+          fullscreen
+          label={LOADING_LABELS[loadingAction]}
+          size={140}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -1109,6 +1485,66 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: PALETTE.text,
+  },
+  verifyBlock: {
+    backgroundColor: PALETTE.cardBg,
+    borderRadius: LAYOUT.cardRadius,
+    padding: LAYOUT.padding,
+    marginBottom: LAYOUT.spacing,
+    borderLeftWidth: 4,
+    borderLeftColor: PALETTE.primary,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  verifyBlockTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: PALETTE.primary,
+    marginBottom: 8,
+  },
+  verifyBlockSubtitle: {
+    fontSize: 14,
+    color: PALETTE.subtext,
+    marginBottom: 16,
+  },
+  verifyButton: {
+    backgroundColor: '#666',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  verifyButtonPrimary: {
+    backgroundColor: PALETTE.primary,
+    marginTop: 8,
+  },
+  verifyButtonDisabled: {
+    opacity: 0.6,
+  },
+  verifyButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  verifyLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: PALETTE.text,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  verifyInput: {
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 18,
+    letterSpacing: 4,
+    marginBottom: 8,
   },
   statusCard: {
     backgroundColor: PALETTE.cardBg,
@@ -1320,23 +1756,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  cancelButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: PALETTE.blocked,
-    borderRadius: LAYOUT.cardRadius,
-    paddingVertical: 16,
-    minHeight: LAYOUT.minTouchSize,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  cancelButtonText: {
-    color: PALETTE.blocked,
-    fontSize: 16,
-    fontWeight: '600',
-  },
   secondaryButton: {
     backgroundColor: PALETTE.primary,
     borderRadius: LAYOUT.cardRadius,
@@ -1366,47 +1785,82 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 3,
   },
+  addonCardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   addonTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: PALETTE.text,
+  },
+  addonPill: {
+    backgroundColor: PALETTE.pillBg,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: LAYOUT.pillRadius,
+  },
+  addonPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: PALETTE.subtext,
+  },
+  addonSummaryLine: {
+    fontSize: 14,
+    color: PALETTE.text,
     marginBottom: 4,
   },
-  addonSubtitle: {
-    fontSize: 14,
+  addonSummaryMuted: {
+    fontSize: 13,
     color: PALETTE.subtext,
-    marginBottom: 12,
+    marginBottom: 16,
+  },
+  addonControlLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: PALETTE.text,
+    marginBottom: 8,
   },
   addonControls: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   addonStepperBtn: {
-    backgroundColor: PALETTE.primary,
-    width: LAYOUT.minTouchSize,
-    height: LAYOUT.minTouchSize,
-    borderRadius: LAYOUT.cardRadius,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    width: 40,
+    height: 40,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
   addonStepperBtnText: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: 'bold',
+    color: PALETTE.text,
+    fontSize: 20,
+    fontWeight: '600',
   },
   addonInput: {
     borderWidth: 1,
     borderColor: PALETTE.border,
     borderRadius: 8,
-    padding: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     marginHorizontal: 12,
-    minWidth: 80,
+    minWidth: 56,
     textAlign: 'center',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: PALETTE.text,
+  },
+  addonMetaLine: {
+    fontSize: 13,
+    color: PALETTE.subtext,
+    marginBottom: 4,
   },
   addonUpdateButton: {
     backgroundColor: PALETTE.success,

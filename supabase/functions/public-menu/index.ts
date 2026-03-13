@@ -1,7 +1,8 @@
 // Edge Function: public-menu
 // PUBLIC endpoint — no Authorization header required.
-// Returns branch + wines for a valid guest QR token.
+// Returns branch + wines + cocktails for a valid guest QR token.
 // GET /public-menu?token=...  OR  POST /public-menu { "token": "..." }
+// JSONB (name, description, ingredients): returned as-is (bilingual objects/arrays) so the client can choose language.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -196,8 +197,35 @@ Deno.serve(async (req: Request) => {
     address: (branchRow as { address?: string | null }).address ?? null,
   };
 
+  // Cocktails: same branch/owner, is_active only. name/description/ingredients (jsonb) returned as-is for client i18n.
+  const { data: cocktailRows, error: cocktailError } = await supabase
+    .from('cocktail_menu')
+    .select('id, name, description, ingredients, image_url, price, display_order')
+    .eq('branch_id', branchId)
+    .eq('owner_id', ownerId)
+    .eq('is_active', true)
+    .order('display_order', { ascending: true })
+    .order('created_at', { ascending: false });
+
+  if (cocktailError) {
+    return new Response(
+      JSON.stringify({ error: 'server_error' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  const cocktails = (cocktailRows || []).map((row: Record<string, unknown>) => ({
+    id: row.id,
+    name: row.name ?? null,
+    description: row.description ?? null,
+    ingredients: row.ingredients ?? null,
+    image_url: row.image_url ?? null,
+    price: typeof row.price === 'number' ? row.price : Number(row.price) ?? 0,
+    display_order: typeof row.display_order === 'number' ? row.display_order : Number(row.display_order) ?? 0,
+  }));
+
   return new Response(
-    JSON.stringify({ branch, wines }),
+    JSON.stringify({ branch, wines, cocktails }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   );
 });

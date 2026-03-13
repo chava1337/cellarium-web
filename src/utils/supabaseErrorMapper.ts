@@ -84,6 +84,20 @@ export function mapSupabaseErrorToUi(
     };
   }
 
+  // Unique constraint (duplicado owner_id + name) — Postgres 23505
+  if (
+    errorCode === '23505' ||
+    errorMessage.includes('duplicate key') ||
+    errorMessage.includes('unique constraint') ||
+    errorMessage.includes('branches_owner_name_unique')
+  ) {
+    return {
+      title: t('msg.error'),
+      message: t('branches.duplicate_name') || 'Ya existe una sucursal con ese nombre',
+      ctaAction: 'none',
+    };
+  }
+
   // Error genérico
   return {
     title: t('common.error'),

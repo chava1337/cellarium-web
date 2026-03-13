@@ -126,9 +126,9 @@ export const generateUniversalQrUrl = (qrData: QrTokenData): string => {
   // Codificar datos del QR
   const encodedData = encodeURIComponent(JSON.stringify(qrData));
   
-  // URL universal que funciona en web y redirige a stores si no hay app
-  // Mantener formato de query parameter para compatibilidad con sitio Vercel
-  const universalUrl = `https://cellarium-visualizador-web.vercel.app/qr?data=${encodedData}`;
+  // Dominio asociado a la app (associatedDomains / intentFilters) para que Universal/App Links abran la app
+  // Si la app no está instalada, esta URL abre el visualizador web en el navegador
+  const universalUrl = `https://www.cellarium.net/qr?data=${encodedData}`;
   
   return universalUrl;
 };

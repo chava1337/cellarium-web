@@ -17,6 +17,13 @@ web-build/
 *.key
 *.mobileprovision
 
+# Android build artifacts (evitar "No matching variant" en EAS; no versionar cache/autolinking)
+android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/app/.externalNativeBuild/
+
 # Metro
 .metro-health-check*
 

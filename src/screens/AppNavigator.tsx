@@ -4,6 +4,7 @@ import { RootStackParamList } from '../types';
 
 // Importar pantallas principales
 import WineCatalogScreen from './WineCatalogScreen';
+import AdminLoginScreen from './AdminLoginScreen';
 import AdminDashboardScreen from './AdminDashboardScreen';
 import UserManagementScreen from './UserManagementScreen';
 import TastingNotesScreen from './TastingNotesScreen';
@@ -23,6 +24,7 @@ import TastingExamResultsScreen from './TastingExamResultsScreen';
 import SettingsScreen from './SettingsScreen';
 import CocktailManagementScreen from './CocktailManagementScreen';
 import SubscriptionsScreen from './SubscriptionsScreen';
+import OwnerEmailVerificationScreen from './OwnerEmailVerificationScreen';
 
 const Stack = createStackNavigator<RootStackParamList>();
 
@@ -49,6 +51,11 @@ export default function AppNavigator() {
         name="QrProcessor" 
         component={QrProcessorScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen 
+        name="AdminLogin" 
+        component={AdminLoginScreen}
+        options={{ title: 'Acceso Administrativo', headerShown: true }}
       />
       <Stack.Screen 
         name="AdminDashboard" 
@@ -139,6 +146,11 @@ export default function AppNavigator() {
         name="Subscriptions" 
         component={SubscriptionsScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen 
+        name="OwnerEmailVerification" 
+        component={OwnerEmailVerificationScreen}
+        options={{ title: 'Verificar correo' }}
       />
     </Stack.Navigator>
   );

@@ -47,7 +47,11 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isTablet = SCREEN_WIDTH >= 768;
 
 const InventoryManagementScreen: React.FC<Props> = ({ navigation, route }) => {
-  const { status: guardStatus } = useAdminGuard({ navigation, route });
+  const { status: guardStatus } = useAdminGuard({
+    navigation,
+    route,
+    allowedRoles: ['owner', 'gerente', 'sommelier', 'supervisor'],
+  });
   const { user } = useAuth();
   const { currentBranch, availableBranches } = useBranch();
   const deviceInfo = useDeviceInfo();
@@ -385,7 +389,7 @@ const InventoryManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 0.8,
         allowsEditing: true,
         aspect: [3, 4],

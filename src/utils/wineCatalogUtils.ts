@@ -19,6 +19,25 @@ export const toValidPrice = (v: unknown): number | undefined => {
 };
 
 /**
+ * Formatea un número como moneda MXN (ej. $1,234.56).
+ * Usa Intl.NumberFormat cuando existe; si no, fallback a toFixed(2).
+ */
+export function formatCurrencyMXN(value: number): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  try {
+    if (typeof Intl !== 'undefined' && Intl.NumberFormat) {
+      return new Intl.NumberFormat('es-MX', {
+        style: 'currency',
+        currency: 'MXN',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(value);
+    }
+  } catch (_) {}
+  return `$${value.toFixed(2)}`;
+}
+
+/**
  * Divide un array en chunks de tamaño máximo para evitar límites de query.
  * 
  * @param array - Array a dividir
@@ -62,12 +81,10 @@ export const toLevel1to5 = (v: unknown): number | undefined => {
     return undefined;
   }
   
-  // Si no es finito, retornar undefined
-  if (!Number.isFinite(num)) return undefined;
-  
-  // Si num <= 0 o NaN, retornar undefined
-  if (num <= 0 || isNaN(num)) return undefined;
-  
+  // Si no es finito o NaN, retornar undefined (0 es válido: seco/dry)
+  if (!Number.isFinite(num) || isNaN(num)) return undefined;
+  if (num < 0) return undefined;
+
   if (num > 5 && num <= 10) {
     num = num / 2;
   } else if (num > 10) {

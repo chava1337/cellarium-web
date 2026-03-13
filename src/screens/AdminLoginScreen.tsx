@@ -24,32 +24,32 @@ interface Props {
   route: AdminLoginScreenRouteProp;
 }
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const AdminLoginScreen: React.FC<Props> = ({ navigation, route }) => {
-  // Guard de navegación: bloquear acceso de guests (pero permitir acceso sin auth para login)
   useAdminGuard({ navigation, route, requireAuth: false });
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [username, setUsername] = useState('');
   const { signIn } = useAuth();
 
   const handleAdminLogin = async () => {
-    if (!username || !password) {
-      Alert.alert('Error', 'Por favor ingresa usuario y contraseña');
+    if (!email.trim() || !password) {
+      Alert.alert('Error', 'Por favor ingresa correo electrónico y contraseña');
+      return;
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!EMAIL_REGEX.test(normalizedEmail)) {
+      Alert.alert('Error', 'Ingresa un correo electrónico válido.');
       return;
     }
 
     try {
       setLoading(true);
-      
-      // En producción: validar con Supabase
-      // Por ahora, simular login exitoso
-      await signIn(username, password);
-      
-      // Navegar al panel de administración
-      // El usuario ya quedó guardado en el contexto
+      await signIn(normalizedEmail, password);
       navigation.navigate('AdminDashboard');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Usuario o contraseña incorrectos');
+      Alert.alert('Credenciales inválidas', 'Correo o contraseña incorrectos.');
     } finally {
       setLoading(false);
     }
@@ -75,13 +75,15 @@ const AdminLoginScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={styles.formTitle}>Autenticación de Administrador</Text>
           
           <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Correo electrónico</Text>
             <TextInput
               style={styles.input}
-              value={username}
-              onChangeText={setUsername}
-              placeholder="Nombre de usuario"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="correo@ejemplo.com"
               autoCapitalize="none"
               autoCorrect={false}
+              keyboardType="email-address"
             />
           </View>
           
@@ -166,6 +168,12 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     marginBottom: 24,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
   },
   input: {
     borderWidth: 1,

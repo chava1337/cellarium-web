@@ -25,7 +25,6 @@ import { RootStackParamList } from '../types';
 import { useDeviceInfo, getRecommendedLayout } from '../hooks/useDeviceInfo';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import { SalesService } from '../services/SalesService';
 import { WineService } from '../services/WineService';
 import { supabase } from '../services/supabase';
 import { useBranch } from '../contexts/BranchContext';
@@ -42,9 +41,18 @@ import {
   chunkArray, 
   normalizeWineFromCanonical,
   extractTasteLevelsFromCanonical,
+  toLevel1to5,
   type WineUpdates
 } from '../utils/wineCatalogUtils';
+import { WINE_TYPE_UI_MAP, WINE_TYPES, type WineType } from '../constants/wineTypeUi';
 import { persistWineUpdatesIfNeeded } from '../services/wineCanonicalNormalization';
+import { PendingApprovalMessage } from '../components/PendingApprovalMessage';
+import {
+  getPublicMenuByToken,
+  type PublicMenuResponse,
+  type PublicMenuBranch,
+  type PublicMenuWine,
+} from '../services/PublicMenuService';
 
 // Debug flags
 const DEBUG = __DEV__;
@@ -62,6 +70,55 @@ const debugWarn = (...args: any[]) => {
   console.warn(...args);
 };
 
+const MAX_INGREDIENTS_VISIBLE = 8;
+
+/**
+ * Parsea texto de ingredientes separados por comas en lista.
+ * Usado en la ficha de coctel (card "Ingredientes:") para listado con bullets.
+ */
+function parseIngredients(ingredientsText: string | null | undefined): string[] {
+  if (ingredientsText == null || ingredientsText === '') return [];
+  return ingredientsText
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Map public-menu JSON to Branch + Wine[] for catalog UI (guest flow). */
+function mapPublicMenuToWineCatalogItems(menu: PublicMenuResponse): { branch: Branch; wines: Wine[] } {
+  const branch: Branch = {
+    id: menu.branch.id,
+    name: menu.branch.name,
+    address: menu.branch.address ?? '',
+    phone: '',
+    email: '',
+    created_at: '',
+    updated_at: '',
+  };
+  const now = new Date().toISOString();
+  const wines: Wine[] = (menu.wines || []).map((w: PublicMenuWine) => {
+    const priceBottle = typeof w.price_by_bottle === 'number' && Number.isFinite(w.price_by_bottle) ? w.price_by_bottle : null;
+    const priceGlass = typeof w.price_by_glass === 'number' && Number.isFinite(w.price_by_glass) ? w.price_by_glass : null;
+    return {
+      id: w.id,
+      name: w.name ?? '',
+      grape_variety: w.grape_variety ?? '',
+      region: w.region ?? '',
+      country: w.country ?? '',
+      vintage: w.vintage ?? '',
+      description: w.description ?? '',
+      price: priceBottle ?? priceGlass ?? 0,
+      price_per_glass: priceGlass ?? undefined,
+      image_url: w.image_url ?? undefined,
+      winery: w.winery ?? undefined,
+      stock_quantity: typeof w.stock_quantity === 'number' && Number.isFinite(w.stock_quantity) ? w.stock_quantity : undefined,
+      type: (w.type as Wine['type']) ?? undefined,
+      created_at: now,
+      updated_at: now,
+    };
+  });
+  return { branch, wines };
+}
 
 type WineCatalogScreenNavigationProp = StackNavigationProp<RootStackParamList, 'WineCatalog'>;
 type WineCatalogScreenRouteProp = RouteProp<RootStackParamList, 'WineCatalog'>;
@@ -77,6 +134,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
   
   // Verificar si es un invitado (acceso por QR de comensal)
   const isGuest = route.params?.isGuest || false;
+  const guestToken = route.params?.guestToken;
   const { user } = useAuth(); // Obtener usuario autenticado
   const { currentBranch, setCurrentBranch, availableBranches, setAvailableBranches, isInitialized } = useBranch(); // Obtener sucursal actual y estado de inicialización
   const { session: guestSession, currentBranch: guestBranch } = useGuest(); // Obtener sesión e información de sucursal si existe
@@ -139,12 +197,15 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
+  // Branch from public-menu when guest loads by token (no qr_tokens / wine_branch_stock from client)
+  const [guestBranchFromMenu, setGuestBranchFromMenu] = useState<Branch | null>(null);
+  const [guestMenuError, setGuestMenuError] = useState<string | null>(null);
+
   const activeBranch = useMemo(() => {
-    if (isGuest && guestBranch) {
-      return guestBranch;
-    }
+    if (isGuest && guestBranchFromMenu) return guestBranchFromMenu;
+    if (isGuest && guestBranch) return guestBranch;
     return currentBranch;
-  }, [currentBranch, guestBranch, isGuest]);
+  }, [currentBranch, guestBranch, guestBranchFromMenu, isGuest]);
 
   const branchDisplayName = activeBranch?.name?.trim() ?? '';
   const isBranchNameConfigured = branchDisplayName.length > 0;
@@ -167,12 +228,16 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
   const [loading, setLoading] = useState(true);
   const [searchText, setSearchText] = useState('');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<'red' | 'white' | 'rose' | 'sparkling' | 'dessert' | 'fortified' | null>(null);
-  const [availabilityFilter, setAvailabilityFilter] = useState<'by_glass' | 'by_bottle' | null>(null);
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | null>(null);
+  const [availabilityFilter, setAvailabilityFilter] = useState<'by_glass' | null>(null);
+  const [sortOrder, setSortOrder] = useState<'asc' | null>(null);
+  const [filterCanScrollLeft, setFilterCanScrollLeft] = useState(false);
+  const [filterCanScrollRight, setFilterCanScrollRight] = useState(false);
+  const [filterContainerWidth, setFilterContainerWidth] = useState(0);
+  const [filterContentWidth, setFilterContentWidth] = useState(0);
   const [showCocktails, setShowCocktails] = useState(false);
   const [searchVisible, setSearchVisible] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
-  const [purchasing, setPurchasing] = useState<string | null>(null); // Key del vino y tipo en proceso de compra: "wineId:bottle" o "wineId:glass"
+  const filterScrollXRef = useRef(0);
   const [configModalVisible, setConfigModalVisible] = useState(false);
   const [selectedWineForConfig, setSelectedWineForConfig] = useState<Wine | null>(null);
   const [isEditingBranchName, setIsEditingBranchName] = useState(false);
@@ -191,9 +256,6 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
   // Nunca reutilizar ownerId si branchId no coincide con activeBranch.id
   const branchOwnerIdCacheRef = useRef<{ branchId: string; ownerId: string } | null>(null);
   
-  // Referencia para prevenir compras duplicadas por doble tap/race condition
-  const purchaseLockRef = useRef<Set<string>>(new Set());
-
   useEffect(() => {
     if (!isEditingBranchName) {
       setBranchNameInput(branchDisplayName);
@@ -203,24 +265,32 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
   // Referencia para el FlatList del carrusel
   const flatListRef = useRef<FlatList>(null);
 
-  const handleFilterSelect = (filterKey: string) => {
-    if (filterKey === 'cocktails') {
-      setShowCocktails(true);
-      // No resetear type/availability/sort al cambiar a cocktails (mantener estado)
-    } else if (filterKey === 'all') {
+  const handleFilterSelect = (filterKey: FilterKey) => {
+    if (filterKey === 'all') {
       setShowCocktails(false);
+      setSelectedTypeFilter(null);
+      setAvailabilityFilter(null);
+      setSortOrder(null);
+    } else if (filterKey === 'cocktails') {
+      setShowCocktails(true);
       setSelectedTypeFilter(null);
       setAvailabilityFilter(null);
       setSortOrder(null);
     } else if (filterKey === 'red' || filterKey === 'white' || filterKey === 'rose' || filterKey === 'sparkling' || filterKey === 'dessert' || filterKey === 'fortified') {
       setShowCocktails(false);
       setSelectedTypeFilter(filterKey);
-    } else if (filterKey === 'by_glass' || filterKey === 'by_bottle') {
+      setAvailabilityFilter(null);
+      setSortOrder(null);
+    } else if (filterKey === 'by_glass') {
       setShowCocktails(false);
-      setAvailabilityFilter(filterKey);
-    } else if (filterKey === 'sort_asc' || filterKey === 'sort_desc') {
+      setSelectedTypeFilter(null);
+      setAvailabilityFilter('by_glass');
+      setSortOrder(null);
+    } else if (filterKey === 'sort_asc') {
       setShowCocktails(false);
-      setSortOrder(filterKey === 'sort_asc' ? 'asc' : 'desc');
+      setSelectedTypeFilter(null);
+      setAvailabilityFilter(null);
+      setSortOrder('asc');
     }
   };
 
@@ -228,7 +298,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     ? 'cocktails' 
     : (selectedTypeFilter 
         ?? availabilityFilter 
-        ?? (sortOrder === 'asc' ? 'sort_asc' : sortOrder === 'desc' ? 'sort_desc' : null) 
+        ?? (sortOrder === 'asc' ? 'sort_asc' : null) 
         ?? 'all');
 
   const getSelectedFilterLabel = () => {
@@ -246,13 +316,13 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     try {
       // Validar que existe activeBranch
       if (!activeBranch?.id) {
-        Alert.alert('Error', 'No hay sucursal activa seleccionada');
+        Alert.alert(t('catalog.error'), t('catalog.no_active_branch'));
         return;
       }
 
       // Validar precio si está habilitado usando helper unificado
       if (enabled && !isValidPrice(price)) {
-        throw new Error('Precio inválido');
+        throw new Error(t('catalog.invalid_price'));
       }
 
       // Preparar el payload para upsert
@@ -312,34 +382,44 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
 
       // Mostrar mensaje de éxito
       Alert.alert(
-        'Éxito',
-        enabled ? 'Venta por copa habilitada.' : 'Venta por copa deshabilitada.'
+        t('catalog.success'),
+        enabled ? t('catalog.glass_sale_enabled') : t('catalog.glass_sale_disabled')
       );
     } catch (error) {
       debugWarn('Error al actualizar configuración:', error);
       const errorMessage = error instanceof Error ? error.message : (error as any)?.message;
-      Alert.alert('Error', errorMessage ?? 'No se pudo actualizar la configuración');
+      Alert.alert(t('catalog.error'), errorMessage ?? t('catalog.error_update_config'));
     }
   };
 
-  // Tipo para items de la barra de filtros horizontal
-  type FilterItem = { key: string; label: string; icon: string; };
+  // Tipo para clave de filtro (solo opciones visibles en la barra)
+  type FilterKey =
+    | 'all'
+    | 'cocktails'
+    | 'by_glass'
+    | 'sort_asc'
+    | WineType;
 
-  // Arreglo de filtros para la barra horizontal con orden fijo (cocktails siempre segundo)
-  const filterBarItems = useMemo<FilterItem[]>(() => ([
-    { key: 'all', label: t('catalog.all'), icon: '🍇' },
-    { key: 'cocktails', label: t('catalog.cocktails'), icon: '🍹' },
-    { key: 'red', label: t('catalog.red'), icon: '🍷' },
-    { key: 'white', label: t('catalog.white'), icon: '🥂' },
-    { key: 'rose', label: t('catalog.rose'), icon: '🌸' },
-    { key: 'sparkling', label: t('catalog.sparkling'), icon: '🍾' },
-    { key: 'dessert', label: t('catalog.dessert'), icon: '🍨' },
-    { key: 'fortified', label: t('catalog.fortified'), icon: '🛡️' },
-    { key: 'by_glass', label: t('catalog.by_glass'), icon: '🍷' },
-    { key: 'by_bottle', label: t('catalog.by_bottle'), icon: '🍾' },
-    { key: 'sort_asc', label: 'A → Z', icon: '📖' },
-    { key: 'sort_desc', label: 'Z → A', icon: '📕' },
-  ]), [t]);
+  type FilterItem = {
+    key: FilterKey;
+    label: string;
+  };
+
+  // Arreglo de filtros para la barra horizontal (solo key + label; WINE_TYPE_UI_MAP solo para labelKey)
+  const filterBarItems = useMemo<FilterItem[]>(() => {
+    const wineTypeItems: FilterItem[] = WINE_TYPES.map((wineType) => {
+      const ui = WINE_TYPE_UI_MAP[wineType];
+      return { key: wineType, label: t(ui.labelKey) };
+    });
+
+    return [
+      { key: 'all', label: t('catalog.all') },
+      { key: 'cocktails', label: t('catalog.cocktails') },
+      ...wineTypeItems,
+      { key: 'by_glass', label: t('catalog.by_glass') },
+      { key: 'sort_asc', label: t('catalog.sort_asc') },
+    ];
+  }, [t]);
 
   // ============================================
   // WRAPPER PARA LOGGING DE NORMALIZACIÓN
@@ -363,6 +443,10 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // Función para cargar vinos
   const loadWines = async () => {
+      if (isGuest === true && !guestToken?.trim()) {
+        if (__DEV__) console.log('[GUEST_GUARD] blocked guest load without token');
+        return;
+      }
       const loadErrors: string[] = [];
       
       try {
@@ -728,11 +812,16 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
             })(),
             sweetness_level: (() => {
               const val = stock.wines.sweetness_level;
-              if (val == null || val === undefined) return undefined;
-              const num = typeof val === 'number' ? val : (typeof val === 'string' && val.trim() !== '' ? parseFloat(val) : parseInt(String(val), 10));
-              if (isNaN(num) || !Number.isFinite(num)) return undefined;
-              // Clamp 1..5 y redondear a entero para consistencia
-              return Math.round(Math.max(1, Math.min(5, num)));
+              if (val !== null && val !== undefined) {
+                const num = typeof val === 'number' ? val : (typeof val === 'string' && val.trim() !== '' ? parseFloat(val) : parseInt(String(val), 10));
+                if (!isNaN(num) && Number.isFinite(num)) return Math.round(Math.max(1, Math.min(5, num)));
+              }
+              const fromTaste = canonicalData?.taste_profile?.sweetness;
+              if (fromTaste !== undefined && fromTaste !== null) {
+                const derived = toLevel1to5(fromTaste);
+                if (derived !== undefined) return Math.round(Math.max(1, Math.min(5, derived)));
+              }
+              return undefined;
             })(),
             acidity_level: (() => {
               const val = stock.wines.acidity_level;
@@ -796,12 +885,56 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
       }
   };
 
+  /** Load menu via Edge public-menu (guest only; no qr_tokens / wine_branch_stock from client). */
+  const loadGuestMenuByToken = useCallback(async () => {
+    const token = guestToken?.trim();
+    if (!token) {
+      setGuestMenuError(t('catalog.guest_token_missing'));
+      setLoading(false);
+      return;
+    }
+    setGuestMenuError(null);
+    setLoading(true);
+    rawWinesDataRef.current = [];
+    canonicalDataRef.current = new Map();
+    stockByWineIdRef.current = new Map();
+    try {
+      const menu = await getPublicMenuByToken(token);
+      const { branch, wines } = mapPublicMenuToWineCatalogItems(menu);
+      setGuestBranchFromMenu(branch);
+      setWines(wines);
+      setFilteredWines(wines);
+      rawWinesDataRef.current = wines.map((w) => ({
+        wines: w,
+        stock_quantity: w.stock_quantity,
+        price_by_glass: w.price_per_glass,
+        price_by_bottle: w.price,
+      }));
+      const stockMap = new Map<string, { wines: Wine; stock_quantity?: number; price_by_glass?: number; price_by_bottle?: number }>();
+      wines.forEach((w) => stockMap.set(w.id, { wines: w, stock_quantity: w.stock_quantity, price_by_glass: w.price_per_glass, price_by_bottle: w.price }));
+      stockByWineIdRef.current = stockMap;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (__DEV__) console.warn('[GUEST_MENU] fetch failed', msg);
+      setGuestMenuError(t('catalog.guest_code_expired'));
+      setWines([]);
+      setFilteredWines([]);
+      setGuestBranchFromMenu(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [guestToken]);
+
   // Helper para evitar cargas duplicadas de vinos
   // Usa useRef para mantener referencia estable a loadWines y evitar loops
   const loadWinesRef = useRef<typeof loadWines | null>(null);
   loadWinesRef.current = loadWines;
 
   const safeLoadWines = useCallback((reason: string) => {
+    if (isGuest === true && !guestToken?.trim()) {
+      if (__DEV__) console.log('[GUEST_GUARD] blocked guest load without token');
+      return;
+    }
     const now = Date.now();
     if (now - lastLoadRef.current < 500) {
       debugLog(`⏭️ Carga duplicada evitada (${reason}), última carga hace ${now - lastLoadRef.current}ms`);
@@ -812,7 +945,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     if (loadWinesRef.current) {
       loadWinesRef.current();
     }
-  }, []); // Sin dependencias: usa loadWinesRef.current() que se actualiza automáticamente
+  }, [isGuest, guestToken]); // Sin dependencias: usa loadWinesRef.current() que se actualiza automáticamente
 
   // Función para cargar cocteles
   const loadCocktails = async () => {
@@ -882,47 +1015,58 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     setFilteredCocktails(filtered);
   }, [cocktails, searchText, showCocktails, language]);
 
-  // Cargar vinos reales de la base de datos
+  // Guest con token: cargar menú vía Edge public-menu (no qr_tokens ni wine_branch_stock)
   useEffect(() => {
-    // En modo guest: solo necesita activeBranch (guestBranch)
-    // En modo admin/staff: necesita user, activeBranch (currentBranch) e isInitialized
-    const canLoad = isGuest 
-      ? !!activeBranch
-      : !!user && !!activeBranch && isInitialized;
-    
+    if (!isGuest) return;
+    if (guestToken?.trim()) {
+      loadGuestMenuByToken();
+      return;
+    }
+    setGuestMenuError(t('catalog.guest_token_missing'));
+    setGuestBranchFromMenu(null);
+  }, [isGuest, guestToken, loadGuestMenuByToken]);
+
+  // Cargar vinos reales de la base de datos (staff/legacy guest con branchId; no cuando guest sin token)
+  useEffect(() => {
+    if (!isGuest && user?.status === 'pending') return;
+    if (isGuest && guestToken?.trim()) return; // guest con token usa loadGuestMenuByToken
+    const canLoad = isGuest
+      ? false // guest sin token nunca debe disparar safeLoadWines -> wine_branch_stock
+      : !!user && user.status === 'active' && !!activeBranch && isInitialized;
+
     if (canLoad) {
       const timeoutId = setTimeout(() => {
         safeLoadWines('effect');
       }, 100);
-      
+
       return () => clearTimeout(timeoutId);
     } else {
       if (!isGuest) {
-        debugLog('⏳ Esperando inicialización:', { 
-          hasUser: !!user, 
-          hasBranch: !!activeBranch, 
-          isInitialized 
+        debugLog('⏳ Esperando inicialización:', {
+          hasUser: !!user,
+          hasBranch: !!activeBranch,
+          isInitialized
         });
       }
     }
-  }, [activeBranch?.id, user, isInitialized, isGuest, safeLoadWines]);
+  }, [activeBranch?.id, user, isInitialized, isGuest, guestToken, safeLoadWines]);
 
-  // Recargar vinos cuando se regrese del WineManagementScreen
+  // Recargar vinos cuando se regrese del WineManagementScreen (no para guest sin token)
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      // En modo guest: solo necesita activeBranch
-      // En modo admin/staff: necesita user, activeBranch e isInitialized
-      const canLoad = isGuest 
-        ? !!activeBranch
-        : !!user && !!activeBranch && isInitialized;
-      
+      if (!isGuest && user?.status === 'pending') return;
+      if (isGuest && guestToken?.trim()) return;
+      const canLoad = isGuest
+        ? false // guest sin token nunca debe disparar safeLoadWines -> wine_branch_stock
+        : !!user && user.status === 'active' && !!activeBranch && isInitialized;
+
       if (canLoad) {
         safeLoadWines('focus');
       }
     });
 
     return unsubscribe;
-  }, [navigation, activeBranch?.id, user, isInitialized, isGuest, safeLoadWines]);
+  }, [navigation, activeBranch?.id, user, isInitialized, isGuest, guestToken, safeLoadWines]);
 
   // Cargar y cachear owner_id de la sucursal cuando cambie activeBranch
   useEffect(() => {
@@ -1048,8 +1192,6 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     // Aplicar filtro por disponibilidad
     if (availabilityFilter === 'by_glass') {
       filtered = filtered.filter(wine => wine.available_by_glass);
-    } else if (availabilityFilter === 'by_bottle') {
-      filtered = filtered.filter(wine => wine.available_by_bottle);
     }
 
     // Aplicar búsqueda por texto
@@ -1087,213 +1229,10 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     setFilteredWines(filtered);
   }, [wines, selectedTypeFilter, availabilityFilter, sortOrder, searchText]);
 
-  // Memoizar handleConfigGlassSale y handlePurchase antes de renderWineCard
   const handleConfigGlassSaleMemo = useCallback((wine: Wine) => {
     setSelectedWineForConfig(wine);
     setConfigModalVisible(true);
   }, []);
-
-  const handlePurchaseMemo = useCallback(async (wine: Wine, isBottle: boolean) => {
-    // Crear key única para vino y tipo de compra
-    const purchaseKey = `${wine.id}:${isBottle ? 'bottle' : 'glass'}`;
-    
-    // Guard anti-duplicados: bloquear re-entradas inmediatamente
-    if (purchaseLockRef.current.has(purchaseKey)) {
-      debugLog('🚫 Compra bloqueada (duplicada):', purchaseKey);
-      return;
-    }
-    
-    // Agregar al lock antes de cualquier operación asíncrona
-    purchaseLockRef.current.add(purchaseKey);
-    
-    // Timeout de seguridad: liberar lock después de 15s si el Alert se cierra sin presionar botones
-    let lockTimeout: ReturnType<typeof setTimeout> | null = null;
-    lockTimeout = setTimeout(() => {
-      if (purchaseLockRef.current.has(purchaseKey)) {
-        debugWarn('⚠️ Purchase lock timeout, liberando:', purchaseKey);
-        purchaseLockRef.current.delete(purchaseKey);
-        setPurchasing(null);
-      }
-    }, 15000);
-    
-    try {
-      setPurchasing(purchaseKey);
-
-      // Validar sesión guest antes de continuar
-      if (isGuest && !guestSession?.id) {
-        if (lockTimeout) clearTimeout(lockTimeout);
-        Alert.alert('Sesión no válida', 'No se pudo identificar tu sesión de comensal. Vuelve a escanear el QR.');
-        purchaseLockRef.current.delete(purchaseKey);
-        setPurchasing(null);
-        return;
-      }
-
-      // Validar que hay stock disponible (solo para botellas)
-      // null = inventario ilimitado/no aplica, permitir compra
-      // Solo bloquear si stock_quantity != null && stock_quantity < 1
-      if (isBottle && wine.stock_quantity != null && wine.stock_quantity < 1) {
-        if (lockTimeout) clearTimeout(lockTimeout);
-        Alert.alert('Sin Stock', 'Este vino no está disponible en este momento');
-        purchaseLockRef.current.delete(purchaseKey);
-        setPurchasing(null);
-        return;
-      }
-
-      // Validar precio por botella si es botella
-      if (isBottle) {
-        if (!wine.available_by_bottle || !isValidPrice(wine.price)) {
-          if (lockTimeout) clearTimeout(lockTimeout);
-          Alert.alert('No disponible', 'Este vino no está disponible por botella.');
-          purchaseLockRef.current.delete(purchaseKey);
-          setPurchasing(null);
-          return;
-        }
-      }
-
-      // Validar precio por copa si no es botella
-      if (!isBottle) {
-        if (!wine.available_by_glass || !isValidPrice(wine.price_per_glass)) {
-          if (lockTimeout) clearTimeout(lockTimeout);
-          Alert.alert('No disponible', 'Este vino no está disponible por copa.');
-          purchaseLockRef.current.delete(purchaseKey);
-          setPurchasing(null);
-          return;
-        }
-      }
-
-      // Confirmar compra
-      Alert.alert(
-        'Confirmar Compra',
-        `¿Deseas comprar ${isBottle ? 'una botella' : 'una copa'} de ${wine.name}?\n\n` +
-        `Precio: $${isBottle ? wine.price.toFixed(2) : (isValidPrice(wine.price_per_glass) ? Number(wine.price_per_glass).toFixed(2) : 'N/A')}`,
-        [
-          {
-            text: 'Cancelar',
-            style: 'cancel',
-            onPress: () => {
-              if (lockTimeout) clearTimeout(lockTimeout);
-              purchaseLockRef.current.delete(purchaseKey);
-              setPurchasing(null);
-            },
-          },
-          {
-            text: 'Confirmar',
-            onPress: async () => {
-              setPurchasing(purchaseKey);
-              try {
-                // Usar sucursal real: activeBranch (soporta guest y admin/staff)
-                const branchId = activeBranch?.id;
-                
-                // Validar branchId
-                if (!branchId) {
-                  if (lockTimeout) clearTimeout(lockTimeout);
-                  Alert.alert(
-                    'Sucursal no disponible',
-                    'No se pudo identificar la sucursal de este menú. Vuelve a escanear el QR o intenta de nuevo.'
-                  );
-                  purchaseLockRef.current.delete(purchaseKey);
-                  setPurchasing(null);
-                  return;
-                }
-
-                // Usar ownerId cacheado del ref (solo si branchId coincide)
-                const cached = branchOwnerIdCacheRef.current;
-                const ownerId = (cached && cached.branchId === branchId) ? cached.ownerId : null;
-
-                if (!ownerId) {
-                  if (lockTimeout) clearTimeout(lockTimeout);
-                  Alert.alert(
-                    'Error',
-                    'No se pudo identificar el propietario de este menú. Vuelve a escanear el QR o intenta de nuevo.'
-                  );
-                  purchaseLockRef.current.delete(purchaseKey);
-                  setPurchasing(null);
-                  return;
-                }
-
-                // Generar idempotency_key para prevenir ventas duplicadas
-                // Ventana de 15 segundos para agrupar intentos de doble tap
-                // Formato: {sessionId|userId}:{branchId}:{wineId}:{bottle|glass}:{timestampWindow}
-                const timestampWindow = Math.floor(Date.now() / 15000); // Ventana de 15 segundos
-                const sessionOrUserId = guestSession?.id || user?.id || 'unknown';
-                const idempotencyKey = `${sessionOrUserId}:${branchId}:${wine.id}:${isBottle ? 'bottle' : 'glass'}:${timestampWindow}`;
-
-                // Obtener precio validado (ya validado arriba para copa)
-                const unitPrice = isBottle ? wine.price : (() => {
-                  const gp = toValidPrice(wine.price_per_glass);
-                  // Esta validación ya se hizo arriba, pero por seguridad:
-                  if (gp == null) {
-                    throw new Error('Precio por copa inválido');
-                  }
-                  return gp;
-                })();
-
-                // Crear la venta con valores reales (sin defaults hardcodeados)
-                await SalesService.processSale({
-                  branch_id: branchId,
-                  guest_session_id: guestSession?.id || null,
-                  user_id: user?.id || null,
-                  sale_type: isGuest ? 'guest' : 'direct',
-                  items: [
-                    {
-                      wine_id: wine.id,
-                      quantity: 1, // Siempre 1 (botella o copa), is_bottle decide si afecta inventario
-                      unit_price: unitPrice,
-                      is_bottle: isBottle,
-                    },
-                  ],
-                  total_amount: unitPrice,
-                  payment_status: 'pending',
-                  owner_id: ownerId,
-                  idempotency_key: idempotencyKey,
-                });
-
-                Alert.alert(
-                  '¡Compra Exitosa!',
-                  `Tu pedido de ${isBottle ? 'botella' : 'copa'} de ${wine.name} ha sido registrado.\n\n` +
-                  `El personal te lo llevará pronto.`,
-                  [{ text: 'OK' }]
-                );
-
-                // Actualizar stock local si es botella
-                if (isBottle) {
-                  setWines(prevWines =>
-                    prevWines.map(w => {
-                      // Solo decrementar si es el vino correcto y tiene stock válido (no null/undefined y > 0)
-                      if (w.id === wine.id && w.stock_quantity != null && w.stock_quantity > 0) {
-                        const current = Number(w.stock_quantity);
-                        const next = Math.max(0, current - 1);
-                        return { ...w, stock_quantity: next };
-                      }
-                      // Si stock_quantity es null/undefined o 0, dejarlo igual
-                      return w;
-                    })
-                  );
-                }
-              } catch (error: any) {
-                debugWarn('Error procesando compra:', error);
-                Alert.alert(
-                  'Error',
-                  error.message || 'No se pudo procesar la compra. Intenta de nuevo.'
-                );
-              } finally {
-                // Liberar el lock y limpiar purchasing
-                if (lockTimeout) clearTimeout(lockTimeout);
-                purchaseLockRef.current.delete(purchaseKey);
-                setPurchasing(null);
-              }
-            },
-          },
-        ]
-      );
-    } catch (error) {
-      debugWarn('Error en handlePurchase:', error);
-      // En caso de error antes del Alert, liberar el lock
-      if (lockTimeout) clearTimeout(lockTimeout);
-      purchaseLockRef.current.delete(purchaseKey);
-      setPurchasing(null);
-    }
-  }, [activeBranch, isGuest, user, guestSession, setPurchasing, setWines]);
 
   // Función para obtener la imagen de fondo según el tipo de vino
   const getWineCardBackground = useCallback((wineType: string) => {
@@ -1304,13 +1243,12 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         return require('../../assets/images/wine-card-red.png');
       case 'white':
         return require('../../assets/images/wine-card-white.png');
-      // Aquí se agregarán más tipos de vino con sus respectivas imágenes
+      case 'dessert':
+        return require('../../assets/images/wine-card-dessert.png');
+      case 'fortified':
+        return require('../../assets/images/wine-card-fortified.png');
       // case 'rose':
       //   return require('../../assets/images/wine-card-rose.png');
-      // case 'dessert':
-      //   return require('../../assets/images/wine-card-dessert.png');
-      // case 'fortified':
-      //   return require('../../assets/images/wine-card-fortified.png');
       default:
         return null; // Sin imagen de fondo para tipos no definidos
     }
@@ -1365,47 +1303,47 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [language]);
 
 
-  // Componente de chip de filtro para la barra horizontal (tile premium)
-  const FilterChip = ({ 
-    item, 
-    active, 
-    onPress, 
-    isTablet 
-  }: { 
-    item: FilterItem; 
-    active: boolean; 
-    onPress: () => void; 
-    isTablet: boolean; 
+  const WINE_TYPE_KEYS: readonly string[] = WINE_TYPES;
+
+  // Componente de chip de filtro para la barra horizontal (tile premium, solo texto)
+  const FilterChip = ({
+    item,
+    active,
+    onPress,
+    isTablet
+  }: {
+    item: FilterItem;
+    active: boolean;
+    onPress: () => void;
+    isTablet: boolean;
   }) => {
-    const chipWidth = isTablet ? 108 : 92;
-    const chipHeight = isTablet ? 70 : 60;
+    const isWineTypeChip = WINE_TYPE_KEYS.includes(item.key);
+    const baseMinWidth = isTablet ? 120 : 110;
+    const chipMinWidth = isWineTypeChip ? baseMinWidth + (isTablet ? 4 : 4) : baseMinWidth;
     const borderRadius = isTablet ? 18 : 16;
-    const iconSize = isTablet ? 26 : 24;
-    const fontSize = isTablet ? 12 : 11;
+    const paddingVertical = isTablet ? 14 : 10;
 
     return (
       <Pressable
         onPress={onPress}
         style={({ pressed }) => [
           styles.filterChip,
+          styles.filterChipTextOnly,
           active && styles.filterChipActive,
           {
-            width: chipWidth,
-            height: chipHeight,
+            minWidth: chipMinWidth,
             borderRadius,
+            paddingVertical,
             transform: pressed ? [{ scale: 0.98 }] : [],
             opacity: pressed ? 0.95 : 1,
           }
         ]}
       >
-        <Text style={[styles.filterChipIconText, { fontSize: iconSize }]}>
-          {item.icon}
-        </Text>
-        <Text 
+        <Text
           style={[
-            styles.filterChipLabel,
-            active && styles.filterChipLabelActive,
-            { fontSize }
+            styles.filterChipLabelPremium,
+            active && styles.filterChipLabelPremiumActive,
+            { fontSize: isTablet ? 20 : 18, lineHeight: isTablet ? 24 : 22 }
           ]}
           numberOfLines={1}
           ellipsizeMode="tail"
@@ -1589,11 +1527,11 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
             value={sweetnessLevel} 
             label={t('sensory.sweetness')}
             type="sweetness"
-            isMissing={sweetnessLevel === undefined}
+            isMissing={sweetnessLevel === undefined || sweetnessLevel === null}
             isTablet={isTablet}
           />
-          <SensoryBar 
-            value={acidityLevel} 
+          <SensoryBar
+            value={acidityLevel}
             label={t('sensory.acidity')}
             type="acidity"
             isMissing={acidityLevel === undefined}
@@ -1619,15 +1557,15 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
             isMissing={tanninLevel === undefined}
             isTablet={isTablet}
           />
-          <SensoryBar 
-            value={sweetnessLevel} 
+          <SensoryBar
+            value={sweetnessLevel}
             label={t('sensory.sweetness')}
             type="sweetness"
-            isMissing={sweetnessLevel === undefined}
+            isMissing={sweetnessLevel === undefined || sweetnessLevel === null}
             isTablet={isTablet}
           />
-          <SensoryBar 
-            value={acidityLevel} 
+          <SensoryBar
+            value={acidityLevel}
             label={t('sensory.acidity')}
             type="acidity"
             isMissing={acidityLevel === undefined}
@@ -1644,15 +1582,24 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     const cocktailDescription = cocktail.description 
       ? (getBilingualFromCatalog(cocktail.description, language) || getBilingualFromCatalog(cocktail.description, language === 'es' ? 'en' : 'es') || '')
       : '';
-    const cocktailIngredients = Array.isArray(cocktail.ingredients)
-      ? cocktail.ingredients
-      : (typeof cocktail.ingredients === 'object' && cocktail.ingredients !== null
+    // Normalizar ingredientes a string y luego parsear por comas para listado
+    const ingredientsRaw = Array.isArray(cocktail.ingredients)
+      ? cocktail.ingredients.join(', ')
+      : typeof cocktail.ingredients === 'string'
+        ? cocktail.ingredients
+        : typeof cocktail.ingredients === 'object' && cocktail.ingredients !== null
           ? (() => {
-              const esIngredients = Array.isArray(cocktail.ingredients.es) ? cocktail.ingredients.es : [];
-              const enIngredients = Array.isArray(cocktail.ingredients.en) ? cocktail.ingredients.en : [];
-              return language === 'es' ? (esIngredients.length > 0 ? esIngredients : enIngredients) : (enIngredients.length > 0 ? enIngredients : esIngredients);
+              const obj = cocktail.ingredients as { es?: string[]; en?: string[] };
+              const esArr = Array.isArray(obj.es) ? obj.es : [];
+              const enArr = Array.isArray(obj.en) ? obj.en : [];
+              const arr = language === 'es' ? (esArr.length > 0 ? esArr : enArr) : (enArr.length > 0 ? enArr : esArr);
+              return arr.join(', ');
             })()
-          : []);
+          : '';
+    const cocktailIngredientsParsed = parseIngredients(ingredientsRaw);
+    const originalHadComma = ingredientsRaw.indexOf(',') >= 0;
+    const visibleIngredients = cocktailIngredientsParsed.slice(0, MAX_INGREDIENTS_VISIBLE);
+    const overflowCount = cocktailIngredientsParsed.length - MAX_INGREDIENTS_VISIBLE;
 
     return (
       <View key={cocktail.id} style={{ width: carouselDimensions.ITEM_WIDTH }}>
@@ -1695,109 +1642,82 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
               </View>
             </View>
 
-            {/* Información principal del coctel - Similar a vinos */}
+            {/* Información principal del coctel - Background temático coctelería (romero + limón + shaker) */}
             {(() => {
-              const backgroundImage = getWineCardBackground('red'); // Usar fondo rojo como default para cocteles
+              const cocktailCardBackground = stableIsTablet
+                ? require('../../assets/images/bg_cocktail_tablet.jpg')
+                : require('../../assets/images/bg_cocktail_phone.jpg');
 
-              if (backgroundImage) {
-                return (
-                  <ImageBackground 
-                    source={backgroundImage}
-                    resizeMode="cover"
-                    imageStyle={{ opacity: 1 }}
-                    style={styles.wineAdditionalInfo}
-                  >
-                    {/* Overlay con gradiente para mejorar legibilidad del texto */}
-                    <View style={StyleSheet.absoluteFillObject}>
-                      <LinearGradient
-                        colors={[
-                          'rgba(255, 255, 255, 0.45)',
-                          'rgba(255, 255, 255, 0.65)',
-                          'rgba(255, 255, 255, 0.1)',
-                        ]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 0, y: 1 }}
-                        style={StyleSheet.absoluteFillObject}
-                      />
-                    </View>
-                    <ScrollView 
-                      style={styles.wineAdditionalInfoScroll}
-                      contentContainerStyle={styles.wineAdditionalInfoContent}
-                      showsVerticalScrollIndicator={false}
-                      nestedScrollEnabled={true}
-                      bounces={false}
-                    >
-                      {/* Nombre del coctel */}
-                      <View style={styles.wineNameRow}>
-                        <Text style={styles.wineName} numberOfLines={2} ellipsizeMode="tail">
-                          {cocktailName}
-                        </Text>
-                      </View>
-
-                      {/* Descripción */}
-                      {cocktailDescription && (
-                        <Text style={[styles.wineCountry, { marginTop: 8, marginBottom: 12, lineHeight: 20 }]}>
-                          {cocktailDescription}
-                        </Text>
-                      )}
-
-                      {/* Ingredientes */}
-                      {cocktailIngredients.length > 0 && (
-                        <View style={{ marginTop: 12 }}>
-                          <Text style={[styles.wineGrapes, { fontWeight: '600', marginBottom: 6, fontSize: 14 }]}>
-                            {t('cocktail.ingredients')}:
-                          </Text>
-                          <Text style={[styles.wineGrapes, { lineHeight: 20 }]}>
-                            {cocktailIngredients.join(', ')}
-                          </Text>
-                        </View>
-                      )}
-                    </ScrollView>
-                  </ImageBackground>
-                );
-              } else {
-                return (
-                  <View style={styles.wineAdditionalInfo}>
-                    <ScrollView 
-                      style={styles.wineAdditionalInfoScroll}
-                      contentContainerStyle={styles.wineAdditionalInfoContent}
-                      showsVerticalScrollIndicator={false}
-                      nestedScrollEnabled={true}
-                      bounces={false}
-                    >
-                      {/* Nombre del coctel */}
-                      <View style={styles.wineNameRow}>
-                        <Text style={styles.wineName} numberOfLines={2} ellipsizeMode="tail">
-                          {cocktailName}
-                        </Text>
-                      </View>
-
-                      {/* Descripción */}
-                      {cocktailDescription && (
-                        <Text style={[styles.wineCountry, { marginTop: 8, marginBottom: 12, lineHeight: 20 }]}>
-                          {cocktailDescription}
-                        </Text>
-                      )}
-
-                      {/* Ingredientes */}
-                      {cocktailIngredients.length > 0 && (
-                        <View style={{ marginTop: 12 }}>
-                          <Text style={[styles.wineGrapes, { fontWeight: '600', marginBottom: 6, fontSize: 14 }]}>
-                            {t('cocktail.ingredients')}:
-                          </Text>
-                          <Text style={[styles.wineGrapes, { lineHeight: 20 }]}>
-                            {cocktailIngredients.join(', ')}
-                          </Text>
-                        </View>
-                      )}
-                    </ScrollView>
+              return (
+                <ImageBackground
+                  source={cocktailCardBackground}
+                  resizeMode="cover"
+                  imageStyle={{ opacity: 1 }}
+                  style={styles.wineAdditionalInfo}
+                >
+                  {/* Overlay oscuro para legibilidad del texto */}
+                  <View style={StyleSheet.absoluteFillObject}>
+                    <LinearGradient
+                      colors={['rgba(0,0,0,0.20)', 'rgba(0,0,0,0.40)', 'rgba(0,0,0,0.60)']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 0, y: 1 }}
+                      style={StyleSheet.absoluteFillObject}
+                    />
                   </View>
-                );
-              }
+                    <ScrollView 
+                      style={styles.wineAdditionalInfoScroll}
+                      contentContainerStyle={[styles.wineAdditionalInfoContent, { alignItems: 'center' }]}
+                      showsVerticalScrollIndicator={false}
+                      nestedScrollEnabled={true}
+                      bounces={false}
+                    >
+                      {/* Nombre del coctel — centrado, colores claros para contraste sobre fondo oscuro */}
+                      <View style={[styles.wineNameRow, { alignSelf: 'stretch', alignItems: 'center' }]}>
+                        <Text style={[styles.wineName, { color: '#FFFFFF', fontSize: 21, fontWeight: '700', textAlign: 'center' }]} numberOfLines={2} ellipsizeMode="tail">
+                          {cocktailName}
+                        </Text>
+                      </View>
+
+                      {/* Descripción */}
+                      {cocktailDescription && (
+                        <Text style={[styles.wineCountry, { marginTop: 8, marginBottom: 12, lineHeight: 20, color: 'rgba(255,255,255,0.85)', textAlign: 'center' }]}>
+                          {cocktailDescription}
+                        </Text>
+                      )}
+
+                      {/* Ingredientes: listado por comas (bullets si 2+ o original tenía coma) */}
+                      {visibleIngredients.length > 0 && (
+                        <View style={{ marginTop: 12, alignSelf: 'stretch', alignItems: 'center' }}>
+                          <Text style={[styles.wineGrapes, { fontWeight: '600', marginBottom: 6, fontSize: 14, color: 'rgba(255,255,255,0.9)', textAlign: 'center' }]}>
+                            {t('cocktail.ingredients')}:
+                          </Text>
+                          {visibleIngredients.length === 1 && !originalHadComma ? (
+                            <Text style={[styles.wineGrapes, { lineHeight: 20, color: 'rgba(255,255,255,0.85)', textAlign: 'center' }]}>
+                              {visibleIngredients[0]}
+                            </Text>
+                          ) : (
+                            <>
+                              {visibleIngredients.map((item, idx) => (
+                                <Text key={idx} style={[styles.wineGrapes, { lineHeight: 22, color: 'rgba(255,255,255,0.85)', textAlign: 'center' }]}>
+                                  • {item}
+                                </Text>
+                              ))}
+                              {overflowCount > 0 && (
+                                <Text style={[styles.wineGrapes, { lineHeight: 22, color: 'rgba(255,255,255,0.85)', textAlign: 'center', marginTop: 2 }]}>
+                                  +{overflowCount} más
+                                </Text>
+                              )}
+                            </>
+                          )}
+                        </View>
+                      )}
+                    </ScrollView>
+                </ImageBackground>
+              );
             })()}
           </View>
 
-          {/* Footer: Precio - Similar a vinos */}
+          {/* Footer: Precio - Similar a vinos (texto claro para contraste sobre card oscura) */}
           <View
             style={[
               styles.pricesContainer,
@@ -1810,6 +1730,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                   styles.priceBottle,
                   {
                     fontSize: stableIsTablet ? 18 : 16,
+                    color: '#FFFFFF',
                   }
                 ]}>
                   ${cocktail.price.toFixed(2)}
@@ -1820,7 +1741,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         </View>
       </View>
     );
-  }, [stableIsTablet, carouselDimensions.ITEM_WIDTH, t, language, getWineCardBackground]);
+  }, [stableIsTablet, carouselDimensions.ITEM_WIDTH, t, language]);
 
   // Subcomponente: Bloque de imagen del vino
   const WineImageBlock = ({ wine, isTablet }: { wine: Wine; isTablet: boolean }) => {
@@ -1881,7 +1802,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   // Subcomponente: Bloque de información (winery, nombre, país, uvas, vintage)
-  const WineInfoBlock = ({ wine, t, navigation, onOpenPairings, isTablet }: { wine: Wine; t: (key: string) => string; navigation: any; onOpenPairings: (wine: Wine) => void; isTablet: boolean }) => {
+  const WineInfoBlock = ({ wine, t, onOpenPairings, isTablet }: { wine: Wine; t: (key: string) => string; onOpenPairings: (wine: Wine) => void; isTablet: boolean }) => {
     const winery = wine.winery?.trim() || '';
     const wineName = wine.name?.trim() || '';
     const areEqual = winery.toLowerCase() === wineName.toLowerCase() && winery.length > 0;
@@ -1918,15 +1839,9 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
             <Text style={styles.wineWinery} numberOfLines={1} ellipsizeMode="tail">{winery}</Text>
           )}
           
-          {/* Nombre del vino - Arriba con icono de más información */}
+        {/* Nombre del vino */}
           <View style={styles.wineNameRow}>
             <Text style={styles.wineName} numberOfLines={2} ellipsizeMode="tail">{wine.name}</Text>
-            <TouchableOpacity
-              style={styles.bookIconButtonInline}
-              onPress={() => navigation.navigate('FichaExtendidaScreen', { wineId: wine.id })}
-            >
-              <Ionicons name="book-outline" size={18} color="#8B0000" />
-            </TouchableOpacity>
           </View>
           
           {/* País - Uvas (en la misma línea o seguidos) */}
@@ -1984,40 +1899,36 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
           style={styles.pairingsChipButton}
           onPress={() => onOpenPairings(wine)}
           activeOpacity={0.7}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Text style={styles.pairingsChipText}>🍽️ {t('wine.food_pairings')}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Ionicons name="restaurant-outline" size={14} color="#3A3534" />
+            <Text style={styles.pairingsChipText}>{t('wine.food_pairings')}</Text>
+          </View>
         </TouchableOpacity>
       </View>
     );
   };
 
-  // Subcomponente: Bloque de precios y botones de compra
-  const WinePricesBlock = ({ 
-    wine, 
-    hasBottle, 
-    hasGlass, 
-    hasBottleStock, 
-    isGuest, 
-    user, 
-    purchasing, 
-    handlePurchaseMemo, 
-    handleConfigGlassSaleMemo, 
-    t, 
+  // Subcomponente: Bloque de precios (solo informativo; botón config venta por copa para staff)
+  const WinePricesBlock = ({
+    wine,
+    hasBottle,
+    hasGlass,
+    isGuest,
+    user,
+    handleConfigGlassSaleMemo,
+    t,
     isTablet,
-    insets 
-  }: { 
-    wine: Wine; 
-    hasBottle: boolean; 
-    hasGlass: boolean; 
-    hasBottleStock: boolean; 
-    isGuest: boolean; 
-    user: any; 
-    purchasing: string | null; 
-    handlePurchaseMemo: (wine: Wine, isBottle: boolean) => void; 
-    handleConfigGlassSaleMemo: (wine: Wine) => void; 
-    t: (key: string) => string; 
+  }: {
+    wine: Wine;
+    hasBottle: boolean;
+    hasGlass: boolean;
+    isGuest: boolean;
+    user: any;
+    handleConfigGlassSaleMemo: (wine: Wine) => void;
+    t: (key: string) => string;
     isTablet: boolean;
-    insets: any;
   }) => {
     // Helper para formateo robusto de precios
     const toMoney = (v: any): string | null => {
@@ -2104,74 +2015,13 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                   !isTablet && styles.configButtonPhone
                 ]}
                 onPress={() => handleConfigGlassSaleMemo(wine)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               >
-                <Text style={styles.configButtonText}>⚙️</Text>
+                <Ionicons name="settings-outline" size={22} color="rgba(255,255,255,0.92)" />
               </TouchableOpacity>
             )}
           </View>
         </LinearGradient>
-
-      {/* Botones de compra - SOLO PARA COMENSALES CON QR */}
-      {isGuest && (
-        <View style={[
-          styles.purchaseButtonsContainer,
-          { 
-            paddingHorizontal: isTablet ? 20 : 16,
-            paddingBottom: Math.max(insets.bottom, 16),
-            marginBottom: 4, // Sutil margen para evitar roce con barra
-          }
-        ]}>
-          <View style={styles.purchaseButtons}>
-            {/* Botón de comprar copa - SOLO para comensales con QR */}
-            {effectiveHasGlass ? (
-              <TouchableOpacity
-                style={[
-                  styles.purchaseButton, 
-                  styles.purchaseButtonGlass,
-                  { height: isTablet ? 56 : 50 }
-                ]}
-                onPress={() => handlePurchaseMemo(wine, false)}
-                disabled={purchasing === `${wine.id}:glass`}
-              >
-                <Text style={[
-                  styles.purchaseButtonText,
-                  { fontSize: isTablet ? 16 : 15 }
-                ]}>
-                  {purchasing === `${wine.id}:glass` ? '⏳' : '🍷'} {t('wine.buy_glass')}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-              
-              {/* Botón de comprar botella - SOLO para comensales con QR */}
-              {hasBottle && hasBottleStock && (
-                <TouchableOpacity
-                  style={[
-                    styles.purchaseButton, 
-                    styles.purchaseButtonBottle,
-                    { height: isTablet ? 56 : 50 }
-                  ]}
-                  onPress={() => handlePurchaseMemo(wine, true)}
-                  disabled={purchasing === `${wine.id}:bottle`}
-                >
-                  <Text style={[
-                    styles.purchaseButtonText,
-                    { fontSize: isTablet ? 16 : 15 }
-                  ]}>
-                    {purchasing === `${wine.id}:bottle` ? '⏳' : '🍾'} {t('wine.buy_bottle')}
-                  </Text>
-                </TouchableOpacity>
-              )}
-              
-            {/* Mostrar mensaje "Sin stock" cuando stock_quantity === 0 */}
-            {hasBottle && !hasBottleStock && wine.stock_quantity === 0 && (
-              <View style={styles.outOfStockContainer}>
-                <Text style={styles.outOfStockText}>Sin stock</Text>
-              </View>
-            )}
-          </View>
-        </View>
-      )}
     </>
   );
   };
@@ -2180,7 +2030,6 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     // Variables únicas de disponibilidad (fuente de verdad por card)
     const hasBottle = wine.available_by_bottle && isValidPrice(wine.price);
     const hasGlass = wine.available_by_glass && isValidPrice(wine.price_per_glass);
-    const hasBottleStock = wine.stock_quantity == null ? true : wine.stock_quantity > 0;
 
     return (
     <View key={wine.id} style={{ width: carouselDimensions.ITEM_WIDTH }}>
@@ -2227,7 +2076,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                   />
                 </View>
                 <View style={styles.wineAdditionalInfoContent}>
-                  <WineInfoBlock wine={wine} t={t} navigation={navigation} onOpenPairings={openPairingsModal} isTablet={stableIsTablet} />
+                  <WineInfoBlock wine={wine} t={t} onOpenPairings={openPairingsModal} isTablet={stableIsTablet} />
                 </View>
             </ImageBackground>
           );
@@ -2238,7 +2087,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
               stableIsTablet && { minHeight: 240 } // Altura mínima para tablet (reducida, sin maridaje embebido)
             ]}>
               <View style={styles.wineAdditionalInfoContent}>
-                <WineInfoBlock wine={wine} t={t} navigation={navigation} onOpenPairings={openPairingsModal} isTablet={stableIsTablet} />
+                <WineInfoBlock wine={wine} t={t} onOpenPairings={openPairingsModal} isTablet={stableIsTablet} />
               </View>
             </View>
           );
@@ -2250,22 +2099,18 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
             wine={wine}
             hasBottle={!!hasBottle}
             hasGlass={!!hasGlass}
-            hasBottleStock={hasBottleStock}
             isGuest={isGuest}
             user={user}
-            purchasing={purchasing}
-            handlePurchaseMemo={handlePurchaseMemo}
             handleConfigGlassSaleMemo={handleConfigGlassSaleMemo}
             t={t}
             isTablet={stableIsTablet}
-            insets={insets}
           />
         </View>
         {/* Fin del wrapper interno de recorte */}
       </View>
     </View>
     );
-  }, [stableIsTablet, carouselDimensions.ITEM_WIDTH, navigation, t, isGuest, user, purchasing, handlePurchaseMemo, handleConfigGlassSaleMemo, getWineCardBackground, renderSensoryProfile, insets, openPairingsModal]);
+  }, [stableIsTablet, carouselDimensions.ITEM_WIDTH, navigation, t, isGuest, user, handleConfigGlassSaleMemo, getWineCardBackground, renderSensoryProfile, insets, openPairingsModal]);
 
   // Crear renderCatalogItem memoizado
   const renderCatalogItem = useCallback(({ item }: { item: Wine | CocktailDrink }) => {
@@ -2289,6 +2134,42 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     sortOrder,
     language,
   }), [showCocktails, selectedTypeFilter, availabilityFilter, sortOrder, language]);
+
+  // Bloquear catálogo/stock para usuarios pending (solo modo no-guest)
+  if (user && user.status === 'pending' && !isGuest) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#f8f9fa' }}>
+        <PendingApprovalMessage />
+      </View>
+    );
+  }
+
+  // Guest: token faltante o código expirado/inválido
+  if (isGuest && guestMenuError) {
+    return (
+      <SafeAreaView edges={['top', 'bottom']} style={[styles.container, { backgroundColor: '#f8f9fa' }]}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+          <Text style={{ fontSize: 16, color: '#333', textAlign: 'center', marginBottom: 24 }}>
+            {guestMenuError}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <TouchableOpacity
+              style={{ paddingVertical: 12, paddingHorizontal: 20, backgroundColor: '#8B4513', borderRadius: 8 }}
+              onPress={() => navigation.goBack()}
+            >
+              <Text style={{ color: '#fff', fontWeight: '600' }}>{t('catalog.guest_back')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{ paddingVertical: 12, paddingHorizontal: 20, backgroundColor: '#6B4423', borderRadius: 8 }}
+              onPress={() => navigation.navigate('QrProcessor', {})}
+            >
+              <Text style={{ color: '#fff', fontWeight: '600' }}>{t('catalog.guest_scan_again')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.container}>
@@ -2338,20 +2219,21 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                           setBranchNameInput(branchDisplayName);
                         }}
                         disabled={isSavingBranchName}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
-                        <Text style={styles.branchEditButtonText}>Cancelar</Text>
+                        <Text style={styles.branchEditButtonText}>{t('catalog.cancel')}</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.branchEditButton, styles.branchEditSave]}
                         onPress={async () => {
                           if (!activeBranch) {
-                            Alert.alert('Sin sucursal seleccionada', 'Selecciona una sucursal antes de editar el nombre.');
+                            Alert.alert(t('catalog.branch_required'), t('catalog.branch_required_message'));
                             return;
                           }
 
                           const trimmed = branchNameInput.trim();
                           if (!trimmed) {
-                            Alert.alert('Nombre requerido', 'Ingresa un nombre para tu restaurante o centro de consumo.');
+                            Alert.alert(t('catalog.name_required'), t('catalog.name_required_message'));
                             return;
                           }
 
@@ -2376,21 +2258,22 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                                 branch.id === data.id ? data : branch
                               );
                               setAvailableBranches(updatedBranches);
-                              Alert.alert('Nombre actualizado', 'El nombre del restaurante se actualizó correctamente.');
+                              Alert.alert(t('catalog.branch_name_updated'), t('catalog.branch_name_updated_message'));
                             }
 
                             setIsEditingBranchName(false);
                           } catch (error: any) {
                             debugWarn('Error actualizando nombre de sucursal:', error);
-                            Alert.alert('Error', error?.message || 'No se pudo actualizar el nombre del restaurante.');
+                            Alert.alert(t('catalog.error'), error?.message || t('catalog.error_update_branch_name'));
                           } finally {
                             setIsSavingBranchName(false);
                           }
                         }}
                         disabled={isSavingBranchName}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
                         <Text style={styles.branchEditButtonText}>
-                          {isSavingBranchName ? 'Guardando...' : 'Guardar'}
+                          {isSavingBranchName ? t('catalog.saving') : t('catalog.save')}
                         </Text>
                       </TouchableOpacity>
                     </View>
@@ -2434,8 +2317,9 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                     return newValue;
                   });
                 }}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               >
-                <Text style={styles.headerChipText}>🔍</Text>
+                <Ionicons name="search" size={22} color="#3A3534" />
               </TouchableOpacity>
               {/* Botón de admin solo visible si NO es invitado */}
               {!isGuest && (
@@ -2456,8 +2340,9 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                       navigation.navigate('AdminLogin');
                     }
                   }}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                 >
-                  <Text style={styles.headerChipText}>⚙️</Text>
+                  <Ionicons name="settings-outline" size={22} color="#3A3534" />
                 </TouchableOpacity>
               )}
             </View>
@@ -2473,7 +2358,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
           <TextInput
             ref={searchInputRef}
             style={styles.searchInput}
-            placeholder={language === 'es' ? 'Buscar...' : 'Search...'}
+            placeholder={t('catalog.search_placeholder')}
             placeholderTextColor="#999"
             value={searchText}
             onChangeText={setSearchText}
@@ -2486,8 +2371,9 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
               setSearchVisible(false);
             }}
             style={styles.searchClearButton}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Text style={styles.searchClearButtonText}>❌</Text>
+            <Ionicons name="close-circle" size={24} color="#3A3534" />
           </TouchableOpacity>
         </View>
       )}
@@ -2505,6 +2391,34 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
             data={filterBarItems}
             keyExtractor={(item) => item.key}
             showsHorizontalScrollIndicator={false}
+            onLayout={(event) => {
+              const width = event.nativeEvent.layout.width;
+              setFilterContainerWidth(width);
+              const threshold = 12;
+              const maxOffset = Math.max(0, filterContentWidth - width);
+              const offsetX = filterScrollXRef.current;
+              setFilterCanScrollLeft(offsetX > threshold);
+              setFilterCanScrollRight(offsetX < maxOffset - threshold);
+            }}
+            onContentSizeChange={(contentWidth) => {
+              setFilterContentWidth(contentWidth);
+              const threshold = 12;
+              const maxOffset = Math.max(0, contentWidth - filterContainerWidth);
+              const offsetX = filterScrollXRef.current;
+              setFilterCanScrollLeft(offsetX > threshold);
+              setFilterCanScrollRight(offsetX < maxOffset - threshold);
+            }}
+            onScroll={({ nativeEvent }) => {
+              const offsetX = nativeEvent.contentOffset.x;
+              filterScrollXRef.current = offsetX;
+              const threshold = 12;
+              const containerW = filterContainerWidth || nativeEvent.layoutMeasurement.width;
+              const contentW = filterContentWidth || nativeEvent.contentSize?.width || 0;
+              const maxOffset = Math.max(0, contentW - containerW);
+              setFilterCanScrollLeft(offsetX > threshold);
+              setFilterCanScrollRight(offsetX < maxOffset - threshold);
+            }}
+            scrollEventThrottle={16}
             contentContainerStyle={[
               styles.filterBarContent,
               { paddingHorizontal: stableIsTablet ? 18 : 14 }
@@ -2519,6 +2433,16 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
               />
             )}
           />
+          {filterCanScrollLeft && (
+            <View style={[styles.filterBarScrollHint, styles.filterBarScrollHintLeft]} pointerEvents="none">
+              <Ionicons name="chevron-back" size={16} color="rgba(255,255,255,0.92)" />
+            </View>
+          )}
+          {filterCanScrollRight && (
+            <View style={[styles.filterBarScrollHint, styles.filterBarScrollHintRight]} pointerEvents="none">
+              <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.92)" />
+            </View>
+          )}
         </LinearGradient>
       </View>
 
@@ -2555,7 +2479,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
             <View style={styles.loadingContainer}>
               <CellariumLoader 
                 size={120}
-                label="Cargando catálogo..."
+                label={t('catalog.loading')}
                 loop={true}
                 speed={1}
               />
@@ -2617,7 +2541,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                     </ScrollView>
                   ) : (
                     <Text style={styles.pairingsModalSubtitle}>
-                      {language === 'es' ? 'Sin maridaje sugerido' : 'No suggested pairings'}
+                      {t('catalog.pairings_no_suggested')}
                     </Text>
                   )}
                   
@@ -2626,7 +2550,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                     onPress={closePairingsModal}
                   >
                     <Text style={styles.pairingsModalCloseButtonText}>
-                      {language === 'es' ? 'Cerrar' : 'Close'}
+                      {t('catalog.close')}
                     </Text>
                   </TouchableOpacity>
                 </>
@@ -2711,9 +2635,9 @@ const styles = StyleSheet.create({
   },
   headerChipButton: {
     borderRadius: 12,
-    backgroundColor: 'rgba(146, 64, 72, 0.08)',
+    backgroundColor: 'rgba(58, 53, 52, 0.06)',
     borderWidth: 1,
-    borderColor: 'rgba(146, 64, 72, 0.12)',
+    borderColor: 'rgba(58, 53, 52, 0.16)',
     alignItems: 'center',
     justifyContent: 'center',
     // iOS shadow leve
@@ -2806,6 +2730,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   filterBarGradient: {
+    position: 'relative',
     borderRadius: 18,
     paddingVertical: 10,
     borderWidth: 1,
@@ -2818,6 +2743,19 @@ const styles = StyleSheet.create({
     // Android elevation
     elevation: 6,
   },
+  filterBarScrollHint: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterBarScrollHintLeft: {
+    left: 10,
+  },
+  filterBarScrollHintRight: {
+    right: 10,
+  },
   filterBarContent: {
     paddingVertical: 2,
     alignItems: 'center',
@@ -2828,6 +2766,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: 'transparent',
+  },
+  filterChipTextOnly: {
+    paddingHorizontal: 14,
+  },
+  filterChipLabelPremium: {
+    fontFamily: 'Cormorant_600SemiBold_Italic',
+    color: CELLARIUM.textOnDarkMuted,
+    textAlign: 'center',
+  },
+  filterChipLabelPremiumActive: {
+    color: CELLARIUM.textOnDark,
   },
   filterChipActive: {
     backgroundColor: CELLARIUM.chipActiveBg,
@@ -2965,12 +2914,6 @@ const styles = StyleSheet.create({
     color: '#1a1a1a', // Más oscuro para mejor contraste
     flex: 1, // Permite que el texto ocupe el espacio disponible
     lineHeight: 26, // Mejor espaciado de línea
-  },
-  bookIconButtonInline: {
-    padding: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 2, // Pequeño ajuste para alinear con el texto
   },
   wineTypeOrigin: {
     fontSize: 14,
@@ -3264,11 +3207,11 @@ const styles = StyleSheet.create({
     marginHorizontal: 8,
   },
   configButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)', // Fondo ultra-sutil y discreto
+    backgroundColor: 'rgba(255, 255, 255, 0.12)', // Fondo sutil para contraste del icono sobre gradiente
     borderRadius: 13, // Completamente redondeado (chip circular)
     padding: 3, // Padding mínimo para botón pequeño
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)', // Borde sutil sobre gradiente
+    borderColor: 'rgba(255, 255, 255, 0.22)', // Borde sutil sobre gradiente
     minWidth: 26, // Botón ultra-compacto
     minHeight: 26, // Botón ultra-compacto
     justifyContent: 'center',
@@ -3301,59 +3244,6 @@ const styles = StyleSheet.create({
     color: '#000000',
     textAlign: 'left',
     flex: 1,
-  },
-  purchaseButtonsContainer: {
-    backgroundColor: '#fff',
-    paddingVertical: 12,
-    borderTopWidth: 2,
-    borderTopColor: '#e0e0e0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 8,
-  },
-  purchaseButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  purchaseButton: {
-    flex: 1,
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  purchaseButtonGlass: {
-    backgroundColor: '#28a745',
-  },
-  purchaseButtonBottle: {
-    backgroundColor: '#8B0000',
-  },
-  purchaseButtonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  outOfStockContainer: {
-    height: 50,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-  },
-  outOfStockText: {
-    fontSize: 13,
-    color: '#999',
-    fontStyle: 'italic',
   },
   pricesContainer: {
     paddingTop: 8,

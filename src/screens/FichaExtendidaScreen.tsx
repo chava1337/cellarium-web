@@ -269,7 +269,7 @@ const FichaExtendidaScreen: React.FC<Props> = ({ navigation, route }) => {
               <Text style={styles.sectionTitle}>Perfil de Cata</Text>
             </View>
             <View style={styles.sectionContent}>
-              {globalWineData.tasting_profile.body && (
+              {(globalWineData.tasting_profile.body !== undefined && globalWineData.tasting_profile.body !== null) && (
                 <View style={styles.tastingItem}>
                   <Text style={styles.tastingLabel}>Cuerpo:</Text>
                   <Text style={styles.tastingText}>
@@ -277,7 +277,7 @@ const FichaExtendidaScreen: React.FC<Props> = ({ navigation, route }) => {
                   </Text>
                 </View>
               )}
-              {globalWineData.tasting_profile.sweetness && (
+              {(globalWineData.tasting_profile.sweetness !== undefined && globalWineData.tasting_profile.sweetness !== null) && (
                 <View style={styles.tastingItem}>
                   <Text style={styles.tastingLabel}>Dulzura:</Text>
                   <Text style={styles.tastingText}>
@@ -285,7 +285,7 @@ const FichaExtendidaScreen: React.FC<Props> = ({ navigation, route }) => {
                   </Text>
                 </View>
               )}
-              {globalWineData.tasting_profile.acidity && (
+              {(globalWineData.tasting_profile.acidity !== undefined && globalWineData.tasting_profile.acidity !== null) && (
                 <View style={styles.tastingItem}>
                   <Text style={styles.tastingLabel}>Acidez:</Text>
                   <Text style={styles.tastingText}>
@@ -293,7 +293,7 @@ const FichaExtendidaScreen: React.FC<Props> = ({ navigation, route }) => {
                   </Text>
                 </View>
               )}
-              {globalWineData.tasting_profile.tannin && (
+              {(globalWineData.tasting_profile.tannin !== undefined && globalWineData.tasting_profile.tannin !== null) && (
                 <View style={styles.tastingItem}>
                   <Text style={styles.tastingLabel}>Taninos:</Text>
                   <Text style={styles.tastingText}>

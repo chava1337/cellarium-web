@@ -28,6 +28,31 @@ interface Props {
   route: SettingsScreenRouteProp;
 }
 
+/** Extrae status y body de FunctionsHttpError de supabase-js (error.context es la Response). */
+async function extractFunctionsHttpErrorDetails(
+  error: unknown
+): Promise<{ status: number; bodyText: string } | null> {
+  const err = error as { name?: string; context?: unknown };
+  if (err?.name !== 'FunctionsHttpError' || err?.context == null) return null;
+  const ctx = err.context as { status?: number; ok?: boolean };
+  if (ctx.status === undefined && ctx.ok === undefined) return null;
+  const res = err.context as Response;
+  if (typeof res.clone !== 'function') return null;
+  try {
+    const status = res.status;
+    const raw = await res.clone().text();
+    const bodyText = raw.length > 1000 ? raw.slice(0, 1000) + '... [truncated]' : raw;
+    if (__DEV__) {
+      console.log('[delete-user-account] (FunctionsHttpError) response.status:', status);
+      console.log('[delete-user-account] (FunctionsHttpError) response.body (trunc 1000):', bodyText);
+    }
+    return { status, bodyText };
+  } catch (e) {
+    if (__DEV__) console.log('[delete-user-account] extractFunctionsHttpErrorDetails failed:', e);
+    return null;
+  }
+}
+
 const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
   const { status: guardStatus } = useAdminGuard({ navigation, route });
   const { user, signOut, profileReady } = useAuth();
@@ -102,36 +127,81 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
         return;
       }
 
-      // Llamar a Edge Function para eliminar cuenta (elimina también de auth.users)
+      // Llamar a Edge Function para eliminar cuenta (con Bearer explícito para evitar regresiones de auth)
       try {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !session?.access_token) {
+          Alert.alert(t('msg.error'), t('msg.error'));
+          setIsDeleting(false);
+          return;
+        }
         const { data, error } = await supabase.functions.invoke(
           'delete-user-account',
-          { body: {} }
+          {
+            body: {},
+            headers: { authorization: `Bearer ${session.access_token}` },
+          }
         );
 
         if (error) {
-          if (__DEV__) {
-            console.log('[delete-user-account] error name:', (error as any)?.name);
-            console.log('[delete-user-account] error message:', (error as any)?.message);
-            console.log('[delete-user-account] context:', (error as any)?.context);
-            console.log('[delete-user-account] context body:', (error as any)?.context?.body);
-            const ctx = (error as any)?.context;
-            if (ctx && typeof ctx.text === 'function') {
-              const bodyText = await ctx.text();
-              console.log('[delete-user-account] raw response body:', bodyText);
-              try {
-                const parsed = JSON.parse(bodyText);
-                console.log('[delete-user-account] parsed body:', parsed);
-              } catch {}
-            }
+          const err = error as Record<string, unknown>;
+          console.log('[delete-user-account] error.message:', err?.message);
+          console.log('[delete-user-account] error.name:', err?.name);
+          console.log('[delete-user-account] error.code:', err?.code);
+          try {
+            const str = JSON.stringify(error, null, 2);
+            const safe = str.length > 2000 ? str.slice(0, 2000) + '... [truncated]' : str;
+            console.log('[delete-user-account] JSON.stringify(error):', safe);
+          } catch (e) {
+            console.log('[delete-user-account] JSON.stringify(error) failed:', e);
+          }
+          console.log('[delete-user-account] Object.keys(error):', Object.keys(err ?? {}));
+
+          let status: number | undefined;
+          let bodyText = '';
+          const details = await extractFunctionsHttpErrorDetails(error);
+          if (details) {
+            status = details.status;
+            bodyText = details.bodyText;
           } else {
-            console.log('[delete-user-account] error:', (error as any)?.message);
+            console.log('[delete-user-account] no response in error.context (network/cors/platform block)');
           }
 
-          Alert.alert(
-            t('msg.error'),
-            `Error eliminando cuenta: ${(error as any)?.message ?? 'Error desconocido'}`
-          );
+          const first200 = bodyText ? bodyText.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+          const devMessage = __DEV__
+            ? `status: ${status ?? 'n/a'}\nbody: ${first200 || '(none)'}\nmessage: ${err?.message ?? 'n/a'}`
+            : `${err?.message ?? 'Error desconocido'}`;
+
+          if (status === 409) {
+            Alert.alert(
+              'No se puede eliminar la cuenta',
+              "Primero cancela tu suscripción desde 'Administrar suscripción'. Después podrás eliminar tu cuenta.",
+              [
+                {
+                  text: 'OK',
+                  onPress: () => {
+                    setIsDeleting(false);
+                    setIsDeleteModalVisible(false);
+                  },
+                },
+                {
+                  text: 'Ir a Suscripciones',
+                  onPress: () => {
+                    setIsDeleting(false);
+                    setIsDeleteModalVisible(false);
+                    navigation.navigate('Subscriptions');
+                  },
+                },
+              ]
+            );
+            return;
+          }
+
+          if (__DEV__) {
+            Alert.alert(t('msg.error'), `Error eliminando cuenta:\n${devMessage}`);
+          } else {
+            Alert.alert(t('msg.error'), `Error eliminando cuenta: ${err?.message ?? 'Error desconocido'}`);
+          }
 
           setIsDeleting(false);
           return;
@@ -219,7 +289,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('settings.actions')}</Text>
-          
+
           <TouchableOpacity
             style={[styles.actionButton, styles.signOutButton]}
             onPress={handleSignOut}

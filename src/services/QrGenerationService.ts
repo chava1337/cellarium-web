@@ -114,7 +114,17 @@ export const generateQrToken = async (data: QrGenerationData): Promise<Generated
       `)
       .single();
 
-    if (error) throw new Error(`Error creating QR token: ${error.message}`);
+    if (error) {
+      if (__DEV__) {
+        console.warn('[QrGenerationService] qr_tokens insert failed', {
+          branch_id: data.branchId,
+          owner_id: data.ownerId,
+          type: data.type,
+          errorMessage: error.message,
+        });
+      }
+      throw new Error(`Error creating QR token: ${error.message}`);
+    }
 
     return {
       id: qrToken.id,

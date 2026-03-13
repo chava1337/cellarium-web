@@ -11,10 +11,10 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
-  Dimensions,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
@@ -22,10 +22,14 @@ import { RootStackParamList } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useAdminGuard } from '../hooks/useAdminGuard';
 import { PendingApprovalMessage } from '../components/PendingApprovalMessage';
+import CocktailHeader from '../components/CocktailHeader';
+import CocktailCard from '../components/CocktailCard';
+import CropImageModal from '../components/CropImageModal';
 import { useBranch } from '../contexts/BranchContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import {
   getCocktailMenu,
   createCocktailDrink,
@@ -37,6 +41,7 @@ import {
 } from '../services/CocktailService';
 import { getBilingualValue } from '../services/GlobalWineCatalogService';
 import { logger } from '../utils/logger';
+import { getEffectivePlan } from '../utils/effectivePlan';
 import { useDeviceInfo } from '../hooks/useDeviceInfo';
 import { compressCocktailImage } from '../utils/imageCompression';
 
@@ -48,12 +53,12 @@ interface Props {
   route: CocktailManagementScreenRouteProp;
 }
 
-const { width } = Dimensions.get('window');
-const CARD_WIDTH = width - 40;
-const CARD_HEIGHT = 200;
-
 const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
-  const { status: guardStatus } = useAdminGuard({ navigation, route });
+  const { status: guardStatus } = useAdminGuard({
+    navigation,
+    route,
+    allowedRoles: ['owner', 'gerente', 'sommelier', 'supervisor'],
+  });
   const { user } = useAuth();
   const { currentBranch } = useBranch();
   const { t, language } = useLanguage();
@@ -63,6 +68,9 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
   const [loading, setLoading] = useState(true);
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingDrink, setEditingDrink] = useState<CocktailDrink | null>(null);
+  const [previewDrink, setPreviewDrink] = useState<CocktailDrink | null>(null);
+  const [showCropModal, setShowCropModal] = useState(false);
+  const [cropModalUri, setCropModalUri] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [compressingImage, setCompressingImage] = useState(false);
 
@@ -76,7 +84,7 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
     ingredients_en: '',
     price: '',
     imageUri: null as string | null,
-    imageUrl: null as string | undefined,
+    imageUrl: undefined as string | undefined,
   });
 
   useLayoutEffect(() => {
@@ -91,14 +99,14 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 
   if (guardStatus === 'loading' || guardStatus === 'profile_loading') {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
-        <ActivityIndicator size="large" color="#8B0000" />
+      <View style={styles.guardLoading}>
+        <ActivityIndicator size="large" color="#8E2C3A" />
       </View>
     );
   }
   if (guardStatus === 'pending') {
     return (
-      <View style={{ flex: 1, backgroundColor: '#f8f9fa' }}>
+      <View style={styles.guardContainer}>
         <PendingApprovalMessage />
       </View>
     );
@@ -194,94 +202,106 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
     );
   };
 
-  const handleTakePhoto = async () => {
+  const cameraMediaTypes =
+    (ImagePicker as any)?.MediaType?.Images
+      ? [(ImagePicker as any).MediaType.Images]
+      : (ImagePicker as any).MediaTypeOptions?.Images;
+
+  type ImageSource = 'camera' | 'gallery';
+
+  const normalizeImage = async (uri: string): Promise<string> => {
+    const result = await ImageManipulator.manipulateAsync(
+      uri,
+      [],
+      { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    return result.uri;
+  };
+
+  const pickImage = async (source: ImageSource) => {
     try {
-      const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-      
-      if (!permissionResult.granted) {
-        Alert.alert(t('cocktail.permission_required'), t('cocktail.camera_access'));
+      if (source === 'camera') {
+        const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+        if (!permissionResult.granted) {
+          Alert.alert(t('cocktail.permission_required'), t('cocktail.camera_access'));
+          return;
+        }
+      } else {
+        const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!permissionResult.granted) {
+          Alert.alert(t('cocktail.permission_required'), t('cocktail.gallery_access'));
+          return;
+        }
+      }
+
+      const pickerOptions = {
+        mediaTypes: cameraMediaTypes,
+        quality: 0.85,
+        allowsEditing: false,
+        exif: false,
+      };
+
+      const result =
+        source === 'camera'
+          ? await ImagePicker.launchCameraAsync(pickerOptions)
+          : await ImagePicker.launchImageLibraryAsync(pickerOptions);
+
+      if (result.canceled) return;
+
+      const uri = result.assets?.[0]?.uri;
+      if (!uri) {
+        if (__DEV__) {
+          logger.error('[CocktailManagement] No URI in picker result', result);
+          Alert.alert(t('msg.error'), 'No image URI in result. Check logs.');
+        }
         return;
       }
 
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
-        quality: 1.0, // Usar calidad máxima inicial, luego comprimiremos
-        allowsEditing: true,
-        aspect: [1, 1],
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        const originalUri = result.assets[0].uri;
-        
-        // Comprimir imagen antes de guardar
-        setCompressingImage(true);
-        try {
-          const deviceType = deviceInfo.deviceType === 'tablet' ? 'tablet' : 'smartphone';
-          const compressed = await compressCocktailImage(originalUri, deviceType);
-          
-          setFormData(prev => ({ ...prev, imageUri: compressed.uri }));
-          logger.success('[CocktailManagement] Imagen comprimida y lista para subir');
-        } catch (compressionError: any) {
-          logger.error('[CocktailManagement] Error comprimiendo imagen:', compressionError);
-          const errorMessage = compressionError?.message || t('cocktail.error_compress') || 'No se pudo comprimir la imagen. Por favor, intenta con otra imagen.';
-          Alert.alert(
-            t('msg.error'),
-            errorMessage
-          );
-        } finally {
-          setCompressingImage(false);
-        }
+      const normalizedUri = await normalizeImage(uri);
+      if (__DEV__) console.log('[IMG_PIPE] openCrop', { normalizedUri });
+      setCropModalUri(normalizedUri);
+      setShowCropModal(true);
+    } catch (error: any) {
+      logger.error('[CocktailManagement] Error en picker:', error);
+      if (__DEV__) {
+        Alert.alert(t('msg.error'), error?.message ?? String(error));
+      } else {
+        Alert.alert(
+          t('msg.error'),
+          source === 'camera' ? t('cocktail.error_capture') : t('cocktail.error_select')
+        );
       }
-    } catch (error) {
-      logger.error('[CocktailManagement] Error capturando:', error);
-      Alert.alert(t('msg.error'), t('cocktail.error_capture'));
-      setCompressingImage(false);
     }
   };
 
-  const handleSelectFromGallery = async () => {
-    try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
-      if (!permissionResult.granted) {
-        Alert.alert(t('cocktail.permission_required'), t('cocktail.gallery_access'));
-        return;
-      }
+  const handleCropConfirm = (croppedUri: string) => {
+    if (__DEV__) console.log('[IMG_PIPE] croppedUri', { croppedUri });
+    setShowCropModal(false);
+    setCropModalUri(null);
+    setCompressingImage(true);
+    const deviceType = deviceInfo.deviceType === 'tablet' ? 'tablet' : 'smartphone';
+    compressCocktailImage(croppedUri, deviceType)
+      .then(compressed => {
+        if (__DEV__) console.log('[IMG_PIPE] compressedUri', { compressedUri: compressed.uri });
+        setFormData(prev => ({ ...prev, imageUri: compressed.uri }));
+        logger.success('[CocktailManagement] Imagen comprimida y lista para subir');
+      })
+      .catch((err: any) => {
+        logger.error('[CocktailManagement] Error comprimiendo imagen:', err);
+        Alert.alert(
+          t('msg.error'),
+          err?.message || t('cocktail.error_compress') || 'No se pudo comprimir la imagen.'
+        );
+      })
+      .finally(() => setCompressingImage(false));
+  };
 
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
-        quality: 1.0, // Usar calidad máxima inicial, luego comprimiremos
-        allowsEditing: true,
-        aspect: [1, 1],
-      });
+  const handleTakePhoto = () => {
+    pickImage('camera');
+  };
 
-      if (!result.canceled && result.assets[0]) {
-        const originalUri = result.assets[0].uri;
-        
-        // Comprimir imagen antes de guardar
-        setCompressingImage(true);
-        try {
-          const deviceType = deviceInfo.deviceType === 'tablet' ? 'tablet' : 'smartphone';
-          const compressed = await compressCocktailImage(originalUri, deviceType);
-          
-          setFormData(prev => ({ ...prev, imageUri: compressed.uri }));
-          logger.success('[CocktailManagement] Imagen comprimida y lista para subir');
-        } catch (compressionError: any) {
-          logger.error('[CocktailManagement] Error comprimiendo imagen:', compressionError);
-          const errorMessage = compressionError?.message || t('cocktail.error_compress') || 'No se pudo comprimir la imagen. Por favor, intenta con otra imagen.';
-          Alert.alert(
-            t('msg.error'),
-            errorMessage
-          );
-        } finally {
-          setCompressingImage(false);
-        }
-      }
-    } catch (error) {
-      logger.error('[CocktailManagement] Error seleccionando:', error);
-      Alert.alert(t('msg.error'), t('cocktail.error_select'));
-      setCompressingImage(false);
-    }
+  const handleSelectFromGallery = () => {
+    pickImage('gallery');
   };
 
   const handleSave = async () => {
@@ -301,9 +321,31 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
 
-    if (!currentBranch || !user) {
+    if (!user) {
       Alert.alert(t('msg.error'), t('admin.error_no_branch'));
       return;
+    }
+    if (!currentBranch) {
+      if (__DEV__) {
+        console.log('[CocktailManagement] handleSave: currentBranch is null', {
+          userId: user.id,
+          ownerId: user.owner_id,
+          userBranchId: (user as any).branch_id,
+        });
+      }
+      Alert.alert(
+        t('msg.error'),
+        'No hay sucursal seleccionada. Cierra sesión y vuelve a entrar, o crea una sucursal desde el menú.'
+      );
+      return;
+    }
+
+    if (__DEV__) {
+      console.log('[CocktailManagement] handleSave context', {
+        userId: user.id,
+        ownerId: user.owner_id,
+        currentBranchId: currentBranch?.id,
+      });
     }
 
     try {
@@ -327,14 +369,17 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       }
 
       let imageUrl = formData.imageUrl;
+      let imagePath: string | undefined = editingDrink?.image_path;
 
-      // Subir imagen si hay una nueva
+      // Subir solo la imagen final: formData.imageUri (cropped + compressed). Si es null, no subir.
+      if (__DEV__) console.log('[IMG_PIPE] uploadUsingUri', { uploadUri: formData.imageUri });
       if (formData.imageUri) {
         const drinkId = editingDrink?.id || `temp-${Date.now()}`;
-        imageUrl = await uploadCocktailImage(formData.imageUri, drinkId, currentBranch.id);
+        const result = await uploadCocktailImage(formData.imageUri, drinkId, currentBranch.id);
+        imageUrl = result.publicUrl;
+        imagePath = result.path;
       }
 
-      // Obtener owner_id correcto: si el usuario es owner usa su ID, si no usa owner_id
       const ownerId = user.owner_id || user.id;
 
       const drinkData: CreateCocktailDrinkData = {
@@ -344,91 +389,70 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         description: Object.keys(description).length > 0 ? description : undefined,
         ingredients,
         image_url: imageUrl,
+        ...(imagePath != null ? { image_path: imagePath } : {}),
         price: parseFloat(formData.price),
       };
 
       if (editingDrink) {
         await updateCocktailDrink(editingDrink.id, drinkData);
       } else {
-        await createCocktailDrink(drinkData, user.id);
+        const effectivePlan = getEffectivePlan(user);
+        await createCocktailDrink(drinkData, user.id, effectivePlan);
       }
 
       Alert.alert(t('msg.success'), t('cocktail.save_success'));
       setShowFormModal(false);
       loadDrinks();
-    } catch (error) {
-      logger.error('[CocktailManagement] Error guardando:', error);
-      Alert.alert(t('msg.error'), t('cocktail.save_error'));
+    } catch (error: any) {
+      if (__DEV__) {
+        console.log('[CocktailManagement] Error guardando (raw):', error);
+        try {
+          console.log('[CocktailManagement] Error guardando (JSON):', JSON.stringify(error));
+        } catch (_) {
+          console.log('[CocktailManagement] Error guardando (JSON.stringify failed)');
+        }
+        console.log('[CocktailManagement] Error guardando (fields):', {
+          message: error?.message,
+          code: error?.code,
+          details: error?.details,
+          hint: error?.hint,
+          supabaseError: (error as any)?.error,
+          cause: (error as any)?.cause,
+        });
+        logger.error('[CocktailManagement] Error guardando:', error);
+      }
+      const msg = error?.message ?? '';
+      const code = error?.code ?? error?.error?.code;
+      const isLimitError =
+        msg.includes('COCKTAIL_LIMIT_REACHED') ||
+        msg.includes('COCKTAIL plan limit') ||
+        code === 'P0001';
+      if (isLimitError) {
+        Alert.alert(t('msg.limit_reached'), t('cocktail.limit_free_10'));
+        return;
+      }
+      const alertBody = msg || (error?.details ?? error?.hint ?? t('cocktail.save_error'));
+      Alert.alert(t('msg.error'), alertBody);
     } finally {
       setUploadingImage(false);
     }
   };
 
-  const renderDrinkCard = ({ item }: { item: CocktailDrink }) => {
+  const renderDrinkCard = ({ item, index }: { item: CocktailDrink; index: number }) => {
     const drinkName = getBilingualValue(item.name, language);
     const drinkDescription = getBilingualValue(item.description, language);
-    const drinkIngredients = Array.isArray(item.ingredients)
-      ? item.ingredients
-      : (typeof item.ingredients === 'object' && item.ingredients !== null
-          ? (language === 'es' 
-              ? (Array.isArray(item.ingredients.es) ? item.ingredients.es : [])
-              : (Array.isArray(item.ingredients.en) ? item.ingredients.en : []))
-          : []);
 
     return (
-      <View style={styles.card}>
-        <View style={styles.cardImageContainer}>
-          {item.image_url ? (
-            <Image source={{ uri: item.image_url }} style={styles.cardImage} />
-          ) : (
-            <View style={styles.cardImagePlaceholder}>
-              <Ionicons name="wine" size={40} color="#ccc" />
-            </View>
-          )}
-        </View>
-        
-        <View style={styles.cardContent}>
-          {drinkName && (
-            <Text style={styles.cardTitle} numberOfLines={2}>
-              {drinkName}
-            </Text>
-          )}
-          
-          {drinkDescription && (
-            <Text style={styles.cardDescription} numberOfLines={2}>
-              {drinkDescription}
-            </Text>
-          )}
-          
-          {drinkIngredients.length > 0 && (
-            <Text style={styles.cardIngredients} numberOfLines={2}>
-              {drinkIngredients.join(', ')}
-            </Text>
-          )}
-          
-          <Text style={styles.cardPrice}>
-            ${item.price.toFixed(2)}
-          </Text>
-        </View>
-
-        <View style={styles.cardActions}>
-          <TouchableOpacity
-            style={styles.btnEdit}
-            onPress={() => handleEditDrink(item)}
-          >
-            <Ionicons name="pencil" size={18} color="#fff" />
-            <Text style={styles.btnEditText}>{t('btn.edit')}</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={styles.btnDelete}
-            onPress={() => handleDeleteDrink(item)}
-          >
-            <Ionicons name="trash" size={18} color="#fff" />
-            <Text style={styles.btnDeleteText}>{t('btn.delete')}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      <Animated.View entering={FadeIn.duration(280).delay(index * 40)}>
+        <CocktailCard
+          drink={item}
+          drinkName={drinkName ?? ''}
+          drinkDescription={drinkDescription ?? ''}
+          onView={(d) => setPreviewDrink(d)}
+          onEdit={handleEditDrink}
+          onDelete={handleDeleteDrink}
+        />
+      </Animated.View>
     );
   };
 
@@ -474,10 +498,11 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                   <Image
                     source={{ uri: formData.imageUri || formData.imageUrl }}
                     style={styles.formImage}
+                    resizeMode="cover"
                   />
                 ) : (
                   <View style={styles.formImagePlaceholder}>
-                    <Ionicons name="camera" size={40} color="#ccc" />
+                    <Ionicons name="camera" size={40} color="#B0B0B0" />
                   </View>
                 )}
                 <View style={styles.imageButtons}>
@@ -490,8 +515,8 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
-                        <Ionicons name="camera" size={20} color="#fff" />
-                        <Text style={styles.imageButtonText}>{t('cocktail.take_photo')}</Text>
+                        <Ionicons name="camera" size={18} color="#FFFFFF" />
+                        <Text style={styles.imageButtonText} numberOfLines={1}>{t('cocktail.take_photo')}</Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -504,8 +529,12 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
-                        <Ionicons name="images" size={20} color="#fff" />
-                        <Text style={styles.imageButtonText}>{t('cocktail.select_from_gallery')}</Text>
+                        <Ionicons name="images" size={18} color="#FFFFFF" />
+                        <Text style={styles.imageButtonTextTwoLine}>
+                          <Text style={styles.imageButtonTextLine}>{t('cocktail.gallery_line1')}</Text>
+                          {'\n'}
+                          <Text style={styles.imageButtonTextLine}>{t('cocktail.gallery_line2')}</Text>
+                        </Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -524,7 +553,7 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                 value={formData.name_es}
                 onChangeText={(text) => setFormData(prev => ({ ...prev, name_es: text }))}
                 placeholder={t('cocktail.name')}
-                placeholderTextColor="#999"
+                placeholderTextColor="#B0B0B0"
               />
             </View>
 
@@ -535,36 +564,7 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                 value={formData.name_en}
                 onChangeText={(text) => setFormData(prev => ({ ...prev, name_en: text }))}
                 placeholder={t('cocktail.name')}
-                placeholderTextColor="#999"
-              />
-            </View>
-
-            {/* Descripción */}
-            <View style={styles.formSection}>
-              <Text style={styles.formLabel}>{t('cocktail.description_es')}</Text>
-              <TextInput
-                style={[styles.formInput, styles.formTextArea]}
-                value={formData.description_es}
-                onChangeText={(text) => setFormData(prev => ({ ...prev, description_es: text }))}
-                placeholder={t('cocktail.description')}
-                placeholderTextColor="#999"
-                multiline
-                numberOfLines={3}
-                maxLength={200}
-              />
-            </View>
-
-            <View style={styles.formSection}>
-              <Text style={styles.formLabel}>{t('cocktail.description_en')}</Text>
-              <TextInput
-                style={[styles.formInput, styles.formTextArea]}
-                value={formData.description_en}
-                onChangeText={(text) => setFormData(prev => ({ ...prev, description_en: text }))}
-                placeholder={t('cocktail.description')}
-                placeholderTextColor="#999"
-                multiline
-                numberOfLines={3}
-                maxLength={200}
+                placeholderTextColor="#B0B0B0"
               />
             </View>
 
@@ -576,7 +576,7 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                 value={formData.ingredients_es}
                 onChangeText={(text) => setFormData(prev => ({ ...prev, ingredients_es: text }))}
                 placeholder={t('cocktail.ingredient_placeholder')}
-                placeholderTextColor="#999"
+                placeholderTextColor="#B0B0B0"
                 multiline
                 numberOfLines={2}
               />
@@ -589,7 +589,7 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                 value={formData.ingredients_en}
                 onChangeText={(text) => setFormData(prev => ({ ...prev, ingredients_en: text }))}
                 placeholder={t('cocktail.ingredient_placeholder')}
-                placeholderTextColor="#999"
+                placeholderTextColor="#B0B0B0"
                 multiline
                 numberOfLines={2}
               />
@@ -603,7 +603,7 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                 value={formData.price}
                 onChangeText={(text) => setFormData(prev => ({ ...prev, price: text }))}
                 placeholder={t('cocktail.price_placeholder')}
-                placeholderTextColor="#999"
+                placeholderTextColor="#B0B0B0"
                 keyboardType="decimal-pad"
               />
             </View>
@@ -639,9 +639,44 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
     );
   };
 
+  const renderPreviewModal = () => {
+    if (!previewDrink) return null;
+    const previewName = getBilingualValue(previewDrink.name, language);
+    const previewDesc = getBilingualValue(previewDrink.description, language);
+    return (
+      <Modal
+        visible={true}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setPreviewDrink(null)}
+      >
+        <View style={styles.previewBackdrop}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setPreviewDrink(null)} />
+          <View style={styles.previewCard}>
+            <View style={styles.previewImageWrap}>
+              {previewDrink.image_url ? (
+                <Image source={{ uri: previewDrink.image_url }} style={styles.previewImage} resizeMode="contain" />
+              ) : (
+                <View style={styles.previewImagePlaceholder}>
+                  <Ionicons name="wine" size={64} color="#B0B0B0" />
+                </View>
+              )}
+            </View>
+            <Text style={styles.previewName}>{previewName || '—'}</Text>
+            {previewDesc ? <Text style={styles.previewDescription}>{previewDesc}</Text> : null}
+            <Text style={styles.previewPrice}>${previewDrink.price.toFixed(2)}</Text>
+            <TouchableOpacity style={styles.previewCloseBtn} onPress={() => setPreviewDrink(null)}>
+              <Text style={styles.previewCloseText}>{t('btn.close')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   if (!currentBranch) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>{t('admin.error_no_branch')}</Text>
         </View>
@@ -651,37 +686,23 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <Text style={styles.title}>{t('cocktail.title')}</Text>
-          <Text style={styles.subtitle}>
-            {drinks.length} {t('cocktail.subtitle')}
-          </Text>
-        </View>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={handleAddDrink}
-        >
-          <Ionicons name="add-circle" size={32} color="#fff" />
-        </TouchableOpacity>
-      </View>
+      <CocktailHeader
+        title={t('cocktail.title')}
+        subtitle={`${drinks.length} ${t('cocktail.beverages_available')}`}
+        onAddPress={handleAddDrink}
+      />
 
-      {/* Lista de bebidas */}
       {loading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8B0000" />
+          <ActivityIndicator size="large" color="#8E2C3A" />
           <Text style={styles.loadingText}>{t('cocktail.loading')}</Text>
         </View>
       ) : drinks.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Ionicons name="wine-outline" size={64} color="#ccc" />
-          <Text style={styles.emptyText}>{t('cocktail.no_drinks')}</Text>
-          <Text style={styles.emptySubtext}>{t('cocktail.add_first')}</Text>
-          <TouchableOpacity
-            style={styles.emptyButton}
-            onPress={handleAddDrink}
-          >
+          <Ionicons name="wine-outline" size={56} color="#B0B0B0" />
+          <Text style={styles.emptyText}>{t('cocktail.empty_primary')}</Text>
+          <Text style={styles.emptySubtext}>{t('cocktail.empty_secondary')}</Text>
+          <TouchableOpacity style={styles.emptyButton} onPress={handleAddDrink} activeOpacity={0.85}>
             <Text style={styles.emptyButtonText}>{t('cocktail.add_drink')}</Text>
           </TouchableOpacity>
         </View>
@@ -696,6 +717,16 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       )}
 
       {renderFormModal()}
+      {renderPreviewModal()}
+      <CropImageModal
+        visible={showCropModal}
+        imageUri={cropModalUri}
+        onCancel={() => {
+          setShowCropModal(false);
+          setCropModalUri(null);
+        }}
+        onConfirm={handleCropConfirm}
+      />
     </SafeAreaView>
   );
 };
@@ -703,33 +734,17 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#F4F4F6',
   },
-  header: {
-    padding: 20,
-    backgroundColor: '#8B0000',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerContent: {
+  guardLoading: {
     flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F4F4F6',
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 5,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#fff',
-    opacity: 0.9,
-  },
-  addButton: {
-    marginLeft: 12,
+  guardContainer: {
+    flex: 1,
+    backgroundColor: '#F4F4F6',
   },
   loadingContainer: {
     flex: 1,
@@ -738,151 +753,131 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 12,
-    color: '#666',
+    fontSize: 14,
+    color: '#6A6A6A',
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 40,
+    paddingHorizontal: 24,
+    paddingVertical: 40,
   },
   emptyText: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '600',
+    color: '#2C2C2C',
     marginTop: 16,
     textAlign: 'center',
   },
   emptySubtext: {
     fontSize: 14,
-    color: '#666',
+    color: '#888',
     marginTop: 8,
     textAlign: 'center',
   },
   emptyButton: {
-    backgroundColor: '#8B0000',
+    backgroundColor: '#8E2C3A',
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 14,
     marginTop: 24,
   },
   emptyButtonText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '700',
   },
   listContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 40,
+  },
+  previewBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  previewCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
     padding: 20,
-  },
-  card: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    marginBottom: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  previewImageWrap: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    borderRadius: 14,
+    backgroundColor: '#f0f0f0',
     overflow: 'hidden',
+    marginBottom: 16,
   },
-  cardImageContainer: {
-    width: '100%',
-    height: 150,
-    backgroundColor: '#f0f0f0',
-  },
-  cardImage: {
+  previewImage: {
     width: '100%',
     height: '100%',
-    resizeMode: 'cover',
   },
-  cardImagePlaceholder: {
+  previewImagePlaceholder: {
     width: '100%',
     height: '100%',
-    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
   },
-  cardContent: {
-    padding: 16,
-  },
-  cardTitle: {
+  previewName: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
+    fontWeight: '600',
+    color: '#2C2C2C',
+    marginBottom: 6,
   },
-  cardDescription: {
+  previewDescription: {
     fontSize: 14,
-    color: '#666',
+    color: '#6A6A6A',
     marginBottom: 8,
   },
-  cardIngredients: {
-    fontSize: 12,
-    color: '#999',
-    marginBottom: 8,
-    fontStyle: 'italic',
+  previewPrice: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#8E2C3A',
+    marginBottom: 16,
   },
-  cardPrice: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#8B0000',
-    marginTop: 8,
-  },
-  cardActions: {
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    padding: 12,
-  },
-  btnEdit: {
-    flex: 1,
-    backgroundColor: '#17a2b8',
-    flexDirection: 'row',
+  previewCloseBtn: {
+    backgroundColor: '#8E2C3A',
+    paddingVertical: 12,
+    borderRadius: 14,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginRight: 8,
   },
-  btnEditText: {
-    color: '#fff',
-    marginLeft: 6,
-    fontWeight: 'bold',
-  },
-  btnDelete: {
-    flex: 1,
-    backgroundColor: '#dc3545',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  btnDeleteText: {
-    color: '#fff',
-    marginLeft: 6,
-    fontWeight: 'bold',
+  previewCloseText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#F4F4F6',
   },
   modalSafeArea: {
     flex: 1,
   },
   modalHeader: {
-    backgroundColor: 'white',
-    padding: 20,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#E5E5E8',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 21,
+    fontWeight: '700',
+    color: '#2C2C2C',
   },
   modalCloseButton: {
     padding: 4,
@@ -891,109 +886,142 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   modalContentContainer: {
-    padding: 20,
-    paddingBottom: 100, // Espacio extra al final para que los campos no queden ocultos
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 100,
   },
   formSection: {
-    marginBottom: 20,
+    marginBottom: 14,
   },
   formLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
+    color: '#2C2C2C',
+    marginBottom: 6,
   },
   formInput: {
-    backgroundColor: 'white',
+    height: 48,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
+    borderColor: '#E5E5E8',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontSize: 16,
-    color: '#333',
+    color: '#2C2C2C',
   },
   formTextArea: {
-    minHeight: 80,
+    minHeight: 72,
+    paddingTop: 12,
+    paddingBottom: 12,
     textAlignVertical: 'top',
   },
   imageContainer: {
-    marginBottom: 12,
+    alignSelf: 'center',
+    width: '65%',
+    maxWidth: 280,
+    marginBottom: 14,
   },
   formImage: {
     width: '100%',
     height: 200,
-    borderRadius: 8,
-    marginBottom: 12,
-    resizeMode: 'cover',
+    borderRadius: 16,
+    backgroundColor: '#F1F1F3',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+    overflow: 'hidden',
   },
   formImagePlaceholder: {
     width: '100%',
     height: 200,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
+    borderRadius: 16,
+    backgroundColor: '#F1F1F3',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
   },
   imageButtons: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
+    marginTop: 10,
   },
   imageButton: {
     flex: 1,
-    backgroundColor: '#8B0000',
+    minHeight: 46,
+    paddingHorizontal: 14,
+    backgroundColor: '#8E2C3A',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 14,
+    gap: 8,
   },
   imageButtonDisabled: {
     opacity: 0.6,
   },
   imageButtonText: {
-    color: '#fff',
-    marginLeft: 6,
-    fontWeight: '600',
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  imageButtonTextTwoLine: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  imageButtonTextLine: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
   compressingText: {
-    marginTop: 8,
+    marginTop: 6,
     fontSize: 12,
-    color: '#666',
+    color: '#6A6A6A',
     textAlign: 'center',
     fontStyle: 'italic',
   },
   formActions: {
     flexDirection: 'row',
-    gap: 12,
-    marginTop: 20,
+    gap: 10,
+    marginTop: 16,
     marginBottom: 40,
+    paddingHorizontal: 0,
   },
   btnCancel: {
     flex: 1,
-    backgroundColor: '#6c757d',
-    paddingVertical: 14,
-    borderRadius: 8,
+    height: 48,
+    backgroundColor: '#E8E8ED',
+    borderRadius: 14,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   btnCancelText: {
-    color: '#fff',
+    color: '#444',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   btnSave: {
     flex: 1,
-    backgroundColor: '#28a745',
+    height: 48,
+    backgroundColor: '#8E2C3A',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 8,
+    borderRadius: 14,
   },
   btnSaveText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
     marginLeft: 6,
   },
 });

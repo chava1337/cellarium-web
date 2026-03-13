@@ -31,10 +31,11 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
-  // Obtener datos del QR
+  // Obtener datos del QR (ownerId viene de resolve-qr en QrProcessor para flujo staff)
   const qrToken = route.params?.qrToken;
   const branchName = route.params?.branchName;
   const branchId = route.params?.branchId;
+  const ownerIdFromParams = route.params?.ownerId;
 
   const handleUsernameRegister = async () => {
     // Prevenir doble submit
@@ -74,26 +75,24 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
       
       console.log('📝 ==================== INICIO REGISTRO CON QR ====================');
       console.log('📝 Username:', username);
-      console.log('📝 QR Token:', qrToken);
       console.log('📝 Branch ID:', branchId);
       console.log('📝 Branch Name:', branchName);
-      
-      // Obtener owner_id del QR token para generar email único
-      console.log('📝 Obteniendo owner_id del QR token...');
-      const { data: qrData, error: qrError } = await supabase
-        .from('qr_tokens')
-        .select('owner_id')
-        .eq('token', qrToken)
-        .single();
-      
-      if (qrError || !qrData) {
-        console.error('❌ Error obteniendo QR token:', qrError);
-        Alert.alert('Error', 'Token QR inválido o expirado');
+
+      const ownerId = ownerIdFromParams;
+      if (!ownerId) {
+        Alert.alert('Error', 'Datos de invitación incompletos. Escanea el código QR de invitación de nuevo.');
         setLoading(false);
         return;
       }
-      
-      const ownerId = qrData.owner_id;
+      if (__DEV__) {
+        const tokenSuffix = typeof qrToken === 'string' && qrToken.length >= 4 ? qrToken.slice(-4) : '***';
+        console.log('[AdminRegistration] context', {
+          qrTokenSuffix: tokenSuffix,
+          branchId: branchId ?? null,
+          ownerId,
+          username,
+        });
+      }
       console.log('📝 Owner ID:', ownerId);
       
       // Generar email ficticio único: username_ownerid@placeholder.com
@@ -158,6 +157,14 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
         },
       });
 
+      if (__DEV__) {
+        console.log('[AdminRegistration] signUp result', {
+          hasData: !!data,
+          userId: data?.user?.id ?? null,
+          sessionExists: !!data?.session,
+          error: error ? { message: error.message, code: (error as any)?.code, status: (error as any)?.status } : null,
+        });
+      }
       console.log('📝 Respuesta de signUp:');
       console.log('📝 - Error:', error ? JSON.stringify(error, null, 2) : 'null');
       console.log('📝 - User ID:', data?.user?.id || 'null');
@@ -193,6 +200,13 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
             },
           });
 
+          if (__DEV__) {
+            console.log('[AdminRegistration] user-created invoke', {
+              success: functionData?.success,
+              functionData: functionData ? { success: functionData.success, message: (functionData as any)?.message, error: (functionData as any)?.error } : null,
+              functionError: functionError ? { message: functionError.message, status: (functionError as any)?.status, context: (functionError as any)?.context } : null,
+            });
+          }
           console.log('📝 Respuesta de Edge Function:');
           console.log('📝 - Error:', functionError ? JSON.stringify(functionError, null, 2) : 'null');
           console.log('📝 - Data:', functionData ? JSON.stringify(functionData, null, 2) : 'null');
@@ -218,6 +232,12 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
                 });
                 rpcData = result.data;
                 rpcError = result.error;
+                if (__DEV__) {
+                  console.log('[AdminRegistration] create_staff_user RPC (with username)', {
+                    rpcData,
+                    rpcError: rpcError ? { code: rpcError.code, message: rpcError.message, details: rpcError.details } : null,
+                  });
+                }
               } catch (e: any) {
                 // Si falla, intentar sin username (función antigua)
                 console.log('📝 Función RPC no acepta p_username, intentando sin él...');
@@ -229,7 +249,12 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
                 });
                 rpcData = result.data;
                 rpcError = result.error;
-                
+                if (__DEV__) {
+                  console.log('[AdminRegistration] create_staff_user RPC (without username)', {
+                    rpcData,
+                    rpcError: rpcError ? { code: rpcError.code, message: rpcError.message, details: rpcError.details } : null,
+                  });
+                }
                 // Si se creó sin username, actualizar username manualmente
                 if (rpcData?.success && !rpcError) {
                   console.log('📝 Usuario creado sin username, actualizando username...');
@@ -251,7 +276,14 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
               } else if (rpcData?.success) {
                 console.log('✅ Usuario creado via RPC fallback:', rpcData);
               }
-            } catch (rpcErr) {
+            } catch (rpcErr: any) {
+              if (__DEV__) {
+                console.log('[AdminRegistration] create_staff_user RPC catch', {
+                  message: rpcErr?.message,
+                  code: rpcErr?.code,
+                  stringified: typeof rpcErr === 'object' ? JSON.stringify(rpcErr, Object.getOwnPropertyNames(rpcErr)) : String(rpcErr),
+                });
+              }
               console.error('❌ Error en RPC fallback:', rpcErr);
             }
             
@@ -438,11 +470,13 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
   const handleGoogleAuth = async () => {
     if (googleLoading) return;
     setGoogleLoading(true);
+    const redirectTo = 'cellarium://auth-callback';
+    if (__DEV__) console.log('[OAUTH] redirectTo:', redirectTo);
     try {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: 'cellarium://auth-callback',
+          redirectTo,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
@@ -450,6 +484,7 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
         },
       });
 
+      if (__DEV__) console.log('[OAUTH] data.url exists:', !!data?.url);
       if (error) {
         Alert.alert('Error', error.message);
         return;
@@ -461,49 +496,84 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
 
       const result = await WebBrowser.openAuthSessionAsync(
         data.url,
-        'cellarium://auth-callback'
+        redirectTo
       );
 
       if (__DEV__) {
-        console.log('[OAuth] openAuthSession result type:', result.type);
+        console.log('[OAUTH] result.type:', result.type);
+        console.log('[OAUTH] result.url exists:', !!result.url);
+        if (result.url) console.log('[OAUTH] callback raw URL:', result.url);
       }
 
-      if (result.type !== 'success' || !result.url) {
+      if (result.type === 'cancel' || !result.url) {
+        setGoogleLoading(false);
+        return;
+      }
+      if (result.type !== 'success') {
+        setGoogleLoading(false);
         return;
       }
 
-      const url = result.url;
-      const fragment = url.includes('#') ? url.split('#')[1] : '';
-      const params = new URLSearchParams(fragment);
-      const accessToken = params.get('access_token');
-      const refreshToken = params.get('refresh_token');
-
-      if (!accessToken || !refreshToken) {
-        if (__DEV__) console.log('[OAuth] callback url (missing tokens):', url);
-        Alert.alert('Error', 'OAuth callback missing tokens');
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(result.url);
+      } catch {
+        if (__DEV__) console.log('[OAuth] invalid callback url');
+        Alert.alert('Error', 'No se pudo procesar la respuesta de inicio de sesión.');
+        setGoogleLoading(false);
         return;
       }
 
-      const { error: sessionError } = await supabase.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      });
-
-      if (sessionError) {
-        if (__DEV__) console.log('[OAuth] setSession error:', sessionError.message);
-        Alert.alert('Error', sessionError.message);
+      const errorParam = parsedUrl.searchParams.get('error');
+      if (errorParam) {
+        Alert.alert('Error', 'No se pudo completar el inicio de sesión con Google. Intenta de nuevo.');
+        setGoogleLoading(false);
         return;
       }
 
-      if (__DEV__) {
-        console.log('[OAuth] setSession success');
-        const { data: { session } } = await supabase.auth.getSession();
-        console.log('[OAuth] SESSION USER ID', session?.user?.id ?? null);
-        console.log('[OAuth] SESSION EMAIL', session?.user?.email ?? null);
+      const code = parsedUrl.searchParams.get('code');
+      if (__DEV__) console.log('[OAUTH] has code:', !!code);
+      if (code) {
+        const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+        if (__DEV__) console.log('[OAuth] exchangeCodeForSession', { hasSession: !!exchangeData?.session, error: exchangeError?.message ?? null });
+        if (exchangeError) {
+          Alert.alert('Error', 'No se pudo completar el inicio de sesión con Google. Intenta de nuevo.');
+          setGoogleLoading(false);
+          return;
+        }
+        if (exchangeData?.session) {
+          setGoogleLoading(false);
+          return;
+        }
       }
+
+      const fragment = parsedUrl.hash ? parsedUrl.hash.slice(1) : '';
+      const hashParams = new URLSearchParams(fragment);
+      const accessToken = hashParams.get('access_token');
+      const refreshToken = hashParams.get('refresh_token');
+      if (__DEV__) console.log('[OAUTH] has access_token:', !!accessToken);
+      if (accessToken && refreshToken) {
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        if (sessionError) {
+          if (__DEV__) console.log('[OAuth] setSession error:', sessionError.message);
+          Alert.alert('Error', 'No se pudo completar el inicio de sesión con Google. Intenta de nuevo.');
+          setGoogleLoading(false);
+          return;
+        }
+        if (__DEV__) console.log('[OAuth] setSession success');
+        setGoogleLoading(false);
+        return;
+      }
+
+      if (__DEV__) console.log('[OAuth] callback missing tokens and code', result.url);
+      Alert.alert('Error', 'No se pudo completar el inicio de sesión con Google. Intenta de nuevo.');
       setGoogleLoading(false);
       return;
     } catch (error: any) {
+      if (__DEV__) console.log('[OAUTH ERROR]', error?.message);
       Alert.alert('Error', error.message || 'Error iniciando sesión con Google');
     } finally {
       setGoogleLoading(false);

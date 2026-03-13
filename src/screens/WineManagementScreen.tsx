@@ -10,20 +10,19 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
+  Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
 import * as ImagePicker from 'expo-image-picker';
-import { evidenceFirstWineService } from '../services/EvidenceFirstWineService';
 import { WineService } from '../services/WineService';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranch } from '../contexts/BranchContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import CellariumLoader from '../components/CellariumLoader';
 import { ProWineCamera } from '../modules/camera';
-import { processWineLabel } from '../services/WineAIService';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useAdminGuard } from '../hooks/useAdminGuard';
 import { PendingApprovalMessage } from '../components/PendingApprovalMessage';
@@ -46,7 +45,6 @@ interface WineFormData {
   region?: string;
   country: string;
   alcohol_content?: number;
-  description: string;
   tasting_notes: string;
   food_pairings: string;
   serving_temperature: string;
@@ -65,26 +63,24 @@ interface WineFormData {
 }
 
 const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
-  const { status: guardStatus } = useAdminGuard({ navigation, route });
+  const { status: guardStatus } = useAdminGuard({
+    navigation,
+    route,
+    allowedRoles: ['owner', 'gerente', 'sommelier', 'supervisor'],
+  });
   const { user } = useAuth();
   const { currentBranch } = useBranch();
   const { t } = useLanguage();
-  const [step, setStep] = useState<'capture' | 'processing' | 'review' | 'images'>('capture');
-  const [labelImage, setLabelImage] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
   const [frontLabelImage, setFrontLabelImage] = useState<string | null>(null);
-  const [backLabelImage, setBackLabelImage] = useState<string | null>(null);
-  const [additionalImages, setAdditionalImages] = useState<string[]>([]);
   const [processing, setProcessing] = useState(false);
   const [wineData, setWineData] = useState<Partial<WineFormData>>({});
-  const [suggestedImages, setSuggestedImages] = useState<any[]>([]);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showProCamera, setShowProCamera] = useState(false);
-  const [proCameraMode, setProCameraMode] = useState<'front' | 'back' | null>(null);
 
   if (guardStatus === 'loading' || guardStatus === 'profile_loading') {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
-        <ActivityIndicator size="large" color="#8B0000" />
+        <ActivityIndicator size="large" color="#8E2C3A" />
         <Text style={{ marginTop: 12, color: '#666' }}>{guardStatus === 'profile_loading' ? (t('msg.loading') || 'Cargando perfil…') : ''}</Text>
       </View>
     );
@@ -109,7 +105,7 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 0.8,
         allowsEditing: true,
         aspect: [3, 4],
@@ -117,120 +113,10 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 
       if (!result.canceled && result.assets[0]) {
         setFrontLabelImage(result.assets[0].uri);
-        setLabelImage(result.assets[0].uri); // Mantener compatibilidad
       }
     } catch (error) {
       console.error('Error seleccionando imagen del anverso:', error);
       Alert.alert(t('msg.error'), t('wine_mgmt.error_select_front'));
-    }
-  };
-
-  // Seleccionar foto del reverso desde galería
-  const handleSelectBackFromGallery = async () => {
-    try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
-      if (!permissionResult.granted) {
-        Alert.alert(t('wine_mgmt.permission_required'), t('wine_mgmt.gallery_access'));
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
-        quality: 0.8,
-        allowsEditing: true,
-        aspect: [3, 4],
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        setBackLabelImage(result.assets[0].uri);
-      }
-    } catch (error) {
-      console.error('Error seleccionando imagen del reverso:', error);
-      Alert.alert(t('msg.error'), t('wine_mgmt.error_select_back'));
-    }
-  };
-  const handleCaptureFrontLabel = async () => {
-    try {
-      const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-      
-      if (!permissionResult.granted) {
-        Alert.alert(t('wine_mgmt.permission_required'), t('wine_mgmt.camera_access'));
-        return;
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
-        quality: 0.8,
-        allowsEditing: true,
-        aspect: [3, 4],
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        setFrontLabelImage(result.assets[0].uri);
-        setLabelImage(result.assets[0].uri); // Mantener compatibilidad
-      }
-    } catch (error) {
-      console.error('Error capturando imagen del anverso:', error);
-      Alert.alert(t('msg.error'), t('wine_mgmt.error_capture_front'));
-    }
-  };
-
-  // Capturar foto del reverso de la etiqueta
-  const handleCaptureBackLabel = async () => {
-    try {
-      const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-      
-      if (!permissionResult.granted) {
-        Alert.alert(t('wine_mgmt.permission_required'), t('wine_mgmt.camera_access'));
-        return;
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
-        quality: 0.8,
-        allowsEditing: true,
-        aspect: [3, 4],
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        setBackLabelImage(result.assets[0].uri);
-      }
-    } catch (error) {
-      console.error('Error capturando imagen del reverso:', error);
-      Alert.alert(t('msg.error'), t('wine_mgmt.error_capture_back'));
-    }
-  };
-
-  // Capturar foto adicional con cámara profesional
-  const handleCaptureAdditionalImage = () => {
-    setProCameraMode('additional');
-    setShowProCamera(true);
-  };
-
-  // Seleccionar imagen adicional de galería
-  const handleSelectAdditionalFromGallery = async () => {
-    try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
-      if (!permissionResult.granted) {
-        Alert.alert(t('wine_mgmt.permission_required'), t('wine_mgmt.gallery_access'));
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
-        quality: 0.8,
-        allowsEditing: true,
-        aspect: [3, 4],
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        setAdditionalImages(prev => [...prev, result.assets[0].uri]);
-      }
-    } catch (error) {
-      console.error('Error seleccionando imagen adicional:', error);
-      Alert.alert(t('msg.error'), t('wine_mgmt.error_select_additional'));
     }
   };
 
@@ -257,285 +143,42 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   };
 
-  // Procesar múltiples fotos con IA
-  const processMultipleLabels = async () => {
-    if (!frontLabelImage) {
-      Alert.alert(t('msg.error'), t('wine_mgmt.error_no_front'));
-      return;
-    }
-
-    setStep('processing');
-    setProcessing(true);
-
-    try {
-      console.log('🔄 Iniciando procesamiento múltiple de fotos...');
-      
-      // Procesar imagen frontal
-      console.log('📸 Procesando foto frontal...');
-      const frontResult = await processWineLabel(frontLabelImage);
-      
-      // Procesar imagen del reverso si existe
-      let backResult = null;
-      if (backLabelImage) {
-        console.log('📸 Procesando foto del reverso...');
-        backResult = await processWineLabel(backLabelImage);
-      }
-      
-      // Procesar fotos adicionales si existen
-      const additionalResults = [];
-      if (additionalImages && additionalImages.length > 0) {
-        console.log(`📸 Procesando ${additionalImages.length} fotos adicionales...`);
-        for (let i = 0; i < additionalImages.length; i++) {
-          console.log(`📸 Procesando foto adicional ${i + 1}/${additionalImages.length}...`);
-          try {
-            const additionalResult = await processWineLabel(additionalImages[i]);
-            additionalResults.push(additionalResult);
-          } catch (error) {
-            console.warn(`⚠️ Error procesando foto adicional ${i + 1}:`, error);
-            // Continuar con las demás fotos
-          }
-        }
-      }
-      
-      // Combinar todos los resultados (frontal, reverso y adicionales)
-      console.log('🔄 Combinando resultados de todas las fotos...');
-      const allResults = [frontResult, backResult, ...additionalResults].filter(Boolean);
-      
-      // Función para obtener el mejor valor de un campo
-      const getBestValue = (field: string, defaultValue: any = 'No especificado') => {
-        for (const result of allResults) {
-          const value = result.recognition[field] || result.description[field];
-          if (value && value !== 'No especificado' && value !== defaultValue) {
-            return value;
-          }
-        }
-        return defaultValue;
-      };
-      
-      const result = {
-        name: getBestValue('name'),
-        winery: getBestValue('winery'),
-        vintage: getBestValue('vintage', new Date().getFullYear()),
-        grape_variety: getBestValue('grape_variety'),
-        type: getBestValue('type', 'red'),
-        region: getBestValue('region'),
-        country: getBestValue('country'),
-        alcohol_content: getBestValue('alcohol_content', 0),
-        description: getBestValue('description'),
-        tasting_notes: getBestValue('tasting_notes'),
-        food_pairings: getBestValue('food_pairings'),
-        serving_temperature: getBestValue('serving_temperature', '16-18°C'),
-        body_level: getBestValue('body_level', 3),
-        sweetness_level: getBestValue('sweetness_level', 3),
-        acidity_level: getBestValue('acidity_level', 3),
-        intensity_level: getBestValue('intensity_level', 3),
-      };
-      
-      console.log('✅ Resultado combinado:', result);
-      
-      // Mapear datos del servicio híbrido
-      const combinedData: Partial<WineFormData> = {
-        name: result.name,
-        winery: result.winery,
-        vintage: result.vintage,
-        grape_variety: result.grape_variety || 'No especificado',
-        type: result.type,
-        region: result.region,
-        country: result.country,
-        alcohol_content: result.alcohol_content,
-        description: result.description,
-        tasting_notes: result.tasting_notes,
-        food_pairings: Array.isArray(result.food_pairings) 
-          ? result.food_pairings.join(', ')
-          : result.food_pairings,
-        serving_temperature: result.serving_temperature || '16-18°C',
-        body_level: result.body_level,
-        sweetness_level: result.sweetness_level,
-        acidity_level: result.acidity_level,
-        intensity_level: result.intensity_level,
-        initial_stock: 0, // El admin debe ingresar esto
-        front_label_image: frontLabelImage,
-        back_label_image: backLabelImage,
-        additional_images: additionalImages,
-      };
-
-      setWineData(combinedData);
-      setStep('review');
-    } catch (error) {
-      console.error('Error procesando múltiples etiquetas:', error);
-      Alert.alert(t('msg.error'), t('wine_mgmt.error_process_labels'));
-      setStep('capture');
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  // Capturar foto de la etiqueta (función original - mantener para compatibilidad)
-  const handleCaptureLabel = async () => {
-    try {
-      const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-      
-      if (!permissionResult.granted) {
-        Alert.alert(t('wine_mgmt.permission_required'), t('wine_mgmt.camera_access'));
-        return;
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
-        quality: 0.8,
-        allowsEditing: true,
-        aspect: [3, 4],
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        setLabelImage(result.assets[0].uri);
-        console.log('📸 Imagen capturada y guardada, esperando procesamiento manual');
-      }
-    } catch (error) {
-      console.error('Error capturando imagen:', error);
-      Alert.alert(t('msg.error'), t('wine_mgmt.error_capture'));
-    }
-  };
-
-  // Abrir cámara profesional para anverso
+  // Abrir cámara profesional para foto frontal
   const handleOpenProCameraFront = () => {
-    setProCameraMode('front');
     setShowProCamera(true);
   };
 
-  // Abrir cámara profesional para reverso
-  const handleOpenProCameraBack = () => {
-    setProCameraMode('back');
-    setShowProCamera(true);
-  };
-
-  // Manejar captura exitosa de la cámara profesional
+  // Manejar captura exitosa de la cámara profesional (solo foto frontal)
   const handleProCameraCapture = async (uri: string) => {
-    console.log('📸 Captura profesional exitosa:', uri);
-    
-    // Convertir a URI válida
     const correctedUri = await convertLocalImageToUri(uri);
-    console.log('🔧 URI final:', correctedUri);
-    
-    if (proCameraMode === 'front') {
-      setFrontLabelImage(correctedUri);
-      setLabelImage(correctedUri); // Mantener compatibilidad
-      console.log('✅ Imagen frontal guardada:', correctedUri);
-    } else if (proCameraMode === 'back') {
-      setBackLabelImage(correctedUri);
-      console.log('✅ Imagen del reverso guardada:', correctedUri);
-    } else if (proCameraMode === 'additional') {
-      setAdditionalImages(prev => [...prev, correctedUri]);
-      console.log('✅ Imagen adicional guardada:', correctedUri);
-    }
-    
+    setFrontLabelImage(correctedUri);
     setShowProCamera(false);
-    setProCameraMode(null);
-    
-    // Solo guardar la imagen, no procesar automáticamente
-    console.log('📸 Imagen capturada y guardada, esperando procesamiento manual');
   };
 
   // Manejar error de la cámara profesional
   const handleProCameraError = (error: string) => {
-    console.error('❌ Error en cámara profesional:', error);
-      Alert.alert(t('wine_mgmt.error_camera'), error);
+    Alert.alert(t('wine_mgmt.error_camera'), error);
     setShowProCamera(false);
-    setProCameraMode(null);
-  };
-
-  // Seleccionar imagen de galería
-  const handleSelectFromGallery = async () => {
-    try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
-      if (!permissionResult.granted) {
-        Alert.alert(t('wine_mgmt.permission_required'), t('wine_mgmt.gallery_access'));
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
-        quality: 0.8,
-        allowsEditing: true,
-        aspect: [3, 4],
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        setLabelImage(result.assets[0].uri);
-        console.log('📸 Imagen seleccionada y guardada, esperando procesamiento manual');
-      }
-    } catch (error) {
-      console.error('Error seleccionando imagen:', error);
-      Alert.alert('Error', 'No se pudo seleccionar la imagen');
-    }
-  };
-
-  // Procesar etiqueta con IA
-  const processLabel = async (imageUri: string) => {
-    setStep('processing');
-    setProcessing(true);
-
-    try {
-      const result = await processWineLabel(imageUri);
-      
-      // Mapear datos del servicio original
-      const combinedData: Partial<WineFormData> = {
-        name: result.recognition.name,
-        winery: result.recognition.winery,
-        vintage: result.recognition.vintage,
-        grape_variety: result.recognition.grape_variety || 'No especificado',
-        type: result.recognition.type,
-        region: result.recognition.region,
-        country: result.recognition.country,
-        alcohol_content: result.recognition.alcohol_content,
-        description: result.description.description,
-        tasting_notes: result.description.tasting_notes,
-        food_pairings: Array.isArray(result.description.food_pairings) 
-          ? result.description.food_pairings.join(', ')
-          : result.description.food_pairings,
-        serving_temperature: result.description.serving_temperature || '16-18°C',
-        body_level: result.description.body_level,
-        sweetness_level: result.description.sweetness_level,
-        acidity_level: result.description.acidity_level,
-        intensity_level: result.description.intensity_level,
-        initial_stock: 0, // El admin debe ingresar esto
-      };
-
-      setWineData(combinedData);
-      setStep('review');
-    } catch (error) {
-      Alert.alert(t('msg.error'), t('wine_mgmt.error_process'));
-      setStep('capture');
-    } finally {
-      setProcessing(false);
-    }
   };
 
   // Guardar vino
   const handleSaveWine = async () => {
-    // Validaciones de campos obligatorios (labels traducidos)
+    // Solo validar campos obligatorios: name, grape_variety, type, initial_stock
     const requiredFields = [
       { field: 'name', label: t('wine_mgmt.name') },
-      { field: 'winery', label: t('wine_mgmt.winery') },
       { field: 'grape_variety', label: t('wine_mgmt.grape_variety') },
-      { field: 'vintage', label: t('wine_mgmt.vintage') },
       { field: 'type', label: t('wine_mgmt.wine_type') },
-      { field: 'region', label: t('wine_mgmt.region') },
-      { field: 'country', label: t('wine_mgmt.country') },
-      { field: 'alcohol_content', label: t('wine_mgmt.alcohol_content') },
-      { field: 'description', label: t('wine_mgmt.description') },
     ];
 
     const missingFields = requiredFields.filter(({ field }) => {
       const value = wineData[field as keyof typeof wineData];
-      return !value || value === 'No especificado' || value === 0;
+      return !value || value === 'No especificado';
     });
 
     if (missingFields.length > 0) {
       const fieldNames = missingFields.map(({ label }) => label).join(', ');
       Alert.alert(
-        t('wine_mgmt.missing_fields'), 
+        t('wine_mgmt.missing_fields'),
         `${t('wine_mgmt.missing_fields_msg')}\n\n${fieldNames}`,
         [{ text: t('wine_mgmt.understood'), style: 'default' }]
       );
@@ -561,8 +204,8 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       setProcessing(true);
       console.log('🍷 Guardando vino:', wineData.name);
 
-      // Resolver imagen: captura, selector manual o ya en wineData (ej. IA)
-      const imageSource = wineData.front_label_image || wineData.image_url || frontLabelImage || labelImage || selectedImage;
+      // Resolver imagen: solo foto frontal
+      const imageSource = frontLabelImage || wineData.front_label_image || wineData.image_url;
       let finalImageUrl: string | null = null;
 
       if (imageSource) {
@@ -605,30 +248,30 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         }
       }
 
-      // Preparar datos del vino para Supabase
+      // Preparar datos del vino para Supabase (campos opcionales con valores por defecto)
       const wineToSave = {
         name: wineData.name!,
-        winery: wineData.winery!,
+        winery: wineData.winery ?? '',
         vintage: wineData.vintage || null,
         grape_variety: wineData.grape_variety!,
         type: wineData.type || 'red',
-        region: wineData.region || 'No especificado',
-        country: wineData.country || 'No especificado',
+        region: wineData.region ?? '',
+        country: wineData.country ?? '',
         alcohol_content: wineData.alcohol_content || null,
-        description: wineData.description || null,
-        tasting_notes: wineData.tasting_notes || null,
-        food_pairings: wineData.food_pairings 
+        description: '',
+        tasting_notes: null,
+        food_pairings: wineData.food_pairings
           ? wineData.food_pairings.split(',').map(p => p.trim()).filter(p => p.length > 0)
           : [],
         serving_temperature: wineData.serving_temperature || null,
-        body_level: wineData.body_level || 3,
-        sweetness_level: wineData.sweetness_level || 2,
-        acidity_level: wineData.acidity_level || 3,
-        intensity_level: wineData.intensity_level || 4,
+        body_level: wineData.body_level ?? 3,
+        sweetness_level: wineData.sweetness_level ?? 2,
+        acidity_level: wineData.acidity_level ?? 3,
+        intensity_level: wineData.intensity_level ?? 4,
         front_label_image: finalImageUrl,
-        back_label_image: wineData.back_label_image || null,
+        back_label_image: null,
         image_url: finalImageUrl,
-        price: wineData.price_bottle || 0,
+        price: wineData.price_bottle ?? 0, // wines.price (display); venta por botella en wine_branch_stock
         created_by: user.id,
         updated_by: user.id,
       };
@@ -640,10 +283,10 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       const savedWine = await WineService.createWineWithStock(
         wineToSave,
         currentBranch.id,
-        user.owner_id || user.id, // ownerId
+        user.owner_id || user.id,
         wineData.initial_stock,
-        wineData.price_glass || 0,
-        wineData.price_bottle || 0
+        wineData.price_glass ?? null,
+        wineData.price_bottle ?? null
       );
 
       console.log('✅ Vino guardado exitosamente:', savedWine.id);
@@ -653,19 +296,9 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         `${wineData.name} ${t('wine_mgmt.success_msg')} ${wineData.initial_stock} ${t('wine_mgmt.success_bottles')}`,
         [
           {
-            text: t('wine_mgmt.add_another'),
-            onPress: () => {
-              setStep('capture');
-              setLabelImage(null);
-              setWineData({});
-              setSuggestedImages([]);
-              setSelectedImage(null);
-            }
+            text: t('btn.back'),
+            onPress: () => navigation.navigate('AdminDashboard'),
           },
-          {
-            text: t('wine_mgmt.view_catalog'),
-            onPress: () => navigation.goBack()
-          }
         ]
       );
     } catch (error: any) {
@@ -690,12 +323,7 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   };
 
-  // Función helper para eliminar imagen adicional
-  const handleRemoveAdditionalImage = (index: number) => {
-    setAdditionalImages(prev => prev.filter((_, i) => i !== index));
-  };
-
-  // Renderizar pantalla de captura
+  // Renderizar contenido: sección foto frontal + formulario cuando hay foto
   const renderCaptureScreen = () => (
     <ScrollView 
       style={styles.captureContainer} 
@@ -712,22 +340,19 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       {/* Sección: Anverso de la etiqueta */}
       <View style={styles.photoSectionCard}>
         <Text style={styles.photoSectionTitle}>{t('wine_mgmt.front_label')}</Text>
-        <Text style={styles.photoSectionHint}>Usa una foto frontal, bien enfocada y sin reflejos.</Text>
+        <Text style={styles.photoSectionHint}>{t('wine_mgmt.photo_hint')}</Text>
         
         {frontLabelImage ? (
           <View style={styles.imagePreviewContainer}>
             <Image 
               source={{ uri: frontLabelImage }} 
               style={styles.previewImage}
-              onLoad={() => console.log('✅ Imagen frontal cargada exitosamente:', frontLabelImage)}
-              onError={(error) => console.log('❌ Error cargando imagen frontal:', error.nativeEvent.error)}
+              onLoad={() => {}}
+              onError={() => {}}
             />
             <TouchableOpacity 
               style={styles.removeImageButton}
-              onPress={() => {
-                console.log('🗑️ Eliminando imagen frontal');
-                setFrontLabelImage(null);
-              }}
+              onPress={() => setFrontLabelImage(null)}
             >
               <Text style={styles.removeImageText}>✕</Text>
             </TouchableOpacity>
@@ -751,138 +376,10 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         )}
       </View>
 
-      {/* Sección: Reverso de la etiqueta */}
-      <View style={styles.photoSectionCard}>
-        <Text style={styles.photoSectionTitle}>{t('wine_mgmt.back_label')}</Text>
-        <Text style={styles.photoSectionHint}>Inclúyela si hay información de uvas, alcohol o notas de cata.</Text>
-        
-        {backLabelImage ? (
-          <View style={styles.imagePreviewContainer}>
-            <Image 
-              source={{ uri: backLabelImage }} 
-              style={styles.previewImage}
-              onLoad={() => console.log('✅ Imagen del reverso cargada exitosamente:', backLabelImage)}
-              onError={(error) => console.log('❌ Error cargando imagen del reverso:', error.nativeEvent.error)}
-            />
-            <TouchableOpacity 
-              style={styles.removeImageButton}
-              onPress={() => {
-                console.log('🗑️ Eliminando imagen del reverso');
-                setBackLabelImage(null);
-              }}
-            >
-              <Text style={styles.removeImageText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.photoButtonsRow}>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={handleOpenProCameraBack}
-            >
-              <Text style={styles.primaryButtonText}>{t('wine_mgmt.pro_camera')}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={handleSelectBackFromGallery}
-            >
-              <Text style={styles.secondaryButtonText}>{t('wine_mgmt.gallery')}</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-
-      {/* Sección: Fotos adicionales */}
-      <View style={styles.photoSectionCard}>
-        <Text style={styles.photoSectionTitle}>{t('wine_mgmt.additional_photos')}</Text>
-        <Text style={styles.photoSectionHint}>Puedes añadir el cuello de la botella, cápsula o detalles del envase.</Text>
-        
-        {/* Lista de fotos adicionales */}
-        {additionalImages.length > 0 && (
-          <View style={styles.additionalImagesGrid}>
-            {additionalImages.map((imageUri, index) => (
-              <View key={index} style={styles.additionalImagePreview}>
-                <Image source={{ uri: imageUri }} style={styles.additionalPreviewImage} />
-                <TouchableOpacity 
-                  style={styles.removeAdditionalImageButton}
-                  onPress={() => handleRemoveAdditionalImage(index)}
-                >
-                  <Text style={styles.removeImageText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Botones para agregar fotos adicionales */}
-        <View style={styles.photoButtonsRow}>
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={handleCaptureAdditionalImage}
-          >
-            <Text style={styles.primaryButtonText}>Cámara Pro</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={handleSelectAdditionalFromGallery}
-          >
-            <Text style={styles.secondaryButtonText}>Galería</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Botón de procesamiento */}
+      {/* Formulario visible cuando ya hay foto frontal */}
       {frontLabelImage && (
-        <TouchableOpacity
-          style={styles.processButton}
-          onPress={processMultipleLabels}
-        >
-          <Text style={styles.processButtonText}>{t('wine_mgmt.process_ai')}</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Botón de modo manual */}
-      <TouchableOpacity
-        style={styles.manualButton}
-        onPress={() => {
-          setStep('review');
-          setWineData({});
-        }}
-      >
-        <Text style={styles.manualButtonText}>Agregar manualmente</Text>
-      </TouchableOpacity>
-    </ScrollView>
-  );
-
-  // Renderizar pantalla de procesamiento
-  const renderProcessingScreen = () => (
-    <View style={styles.processingContainer}>
-      <CellariumLoader 
-        size={200}
-        label="Procesando etiqueta..."
-        loop={true}
-        speed={1}
-      />
-      <Text style={styles.processingSubtext}>
-        La IA está reconociendo el vino y generando la descripción
-      </Text>
-      
-      {labelImage && (
-        <Image source={{ uri: labelImage }} style={styles.processingImage} />
-      )}
-    </View>
-  );
-
-  // Renderizar formulario de revisión
-  const renderReviewScreen = () => (
-    <ScrollView style={styles.reviewContainer}>
-      <Text style={styles.sectionTitle}>📋 {t('wine_mgmt.section_wine_info')}</Text>
-      
-      {(labelImage || wineData.front_label_image || wineData.image_url) && (
-        <Image source={{ uri: labelImage || wineData.front_label_image || wineData.image_url! }} style={styles.labelPreview} />
-      )}
+        <>
+      <Text style={styles.sectionTitle}>{t('wine_mgmt.section_wine_info')}</Text>
 
       <View style={styles.formGroup}>
         <Text style={styles.label}>{t('wine_mgmt.name')} *</Text>
@@ -986,30 +483,6 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       </View>
 
       <View style={styles.formGroup}>
-        <Text style={styles.label}>{t('wine_mgmt.description')}</Text>
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          value={wineData.description || ''}
-          onChangeText={(text) => setWineData({ ...wineData, description: text })}
-          placeholder={t('wine_mgmt.placeholder_desc')}
-          multiline
-          numberOfLines={4}
-        />
-      </View>
-
-      <View style={styles.formGroup}>
-        <Text style={styles.label}>{t('wine_mgmt.tasting_notes')}</Text>
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          value={wineData.tasting_notes || ''}
-          onChangeText={(text) => setWineData({ ...wineData, tasting_notes: text })}
-          placeholder={t('wine_mgmt.placeholder_tasting')}
-          multiline
-          numberOfLines={3}
-        />
-      </View>
-
-      <View style={styles.formGroup}>
         <Text style={styles.label}>{t('wine_mgmt.pairings')}</Text>
         <TextInput
           style={styles.input}
@@ -1029,7 +502,7 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         />
       </View>
 
-      <Text style={styles.sectionTitle}>🍷 {t('wine_mgmt.section_sensory')}</Text>
+      <Text style={styles.sectionTitle}>{t('wine_mgmt.section_sensory')}</Text>
       <Text style={styles.helpText}>{t('wine_mgmt.sensory_help')}</Text>
       {[
         { key: 'body_level' as const, label: t('sensory.body') },
@@ -1059,7 +532,7 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         );
       })}
 
-      <Text style={styles.sectionTitle}>💰 {t('wine_mgmt.section_prices')}</Text>
+      <Text style={styles.sectionTitle}>{t('wine_mgmt.section_prices')}</Text>
 
       <View style={styles.formRow}>
         <View style={[styles.formGroup, { flex: 1, marginRight: 10 }]}>
@@ -1074,7 +547,7 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         </View>
 
         <View style={[styles.formGroup, { flex: 1 }]}>
-          <Text style={styles.label}>{t('wine_mgmt.price_bottle')}</Text>
+          <Text style={styles.label}>{t('wine_mgmt.price_bottle_optional')}</Text>
           <TextInput
             style={styles.input}
             value={wineData.price_bottle?.toString() || ''}
@@ -1101,15 +574,6 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 
       <View style={styles.actionButtons}>
         <TouchableOpacity
-          style={styles.imageButton}
-          onPress={() => setStep('images')}
-        >
-          <Text style={styles.imageButtonText}>
-            🖼️ {selectedImage || wineData.front_label_image || labelImage ? t('wine_mgmt.change_image') : t('wine_mgmt.select_image_btn')}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
           style={[styles.saveButton, processing && styles.saveButtonDisabled]}
           onPress={handleSaveWine}
           disabled={processing}
@@ -1121,72 +585,27 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
           )}
         </TouchableOpacity>
       </View>
+        </>
+      )}
     </ScrollView>
   );
 
-  // Renderizar selector de imágenes
-  const renderImagesScreen = () => (
-    <View style={styles.imagesContainer}>
-      <Text style={styles.sectionTitle}>{t('wine_mgmt.bottle_image')}</Text>
-      <Text style={styles.subtitle}>
-        {t('wine_mgmt.select_image')}
-      </Text>
-
-      {suggestedImages.length > 0 && (
-        <>
-          <Text style={styles.suggestedTitle}>{t('wine_mgmt.suggested_images')}</Text>
-          <ScrollView horizontal style={styles.suggestedImages}>
-            {suggestedImages.map((img, index) => (
-              <TouchableOpacity
-                key={index}
-                style={[
-                  styles.suggestedImage,
-                  selectedImage === img.url && styles.selectedImage
-                ]}
-                onPress={() => setSelectedImage(img.url)}
-              >
-                <Image source={{ uri: img.url }} style={styles.bottleImage} />
-                <Text style={styles.imageSource}>{img.source}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </>
-      )}
-
-      <TouchableOpacity
-        style={styles.uploadButton}
-        onPress={handleSelectFromGallery}
-      >
-        <Text style={styles.uploadButtonText}>{t('wine_mgmt.upload_own')}</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.continueButton}
-        onPress={() => {
-          const imageToUse = selectedImage || labelImage;
-          if (imageToUse) setWineData(prev => ({ ...prev, front_label_image: imageToUse, image_url: imageToUse }));
-          setStep('review');
-        }}
-      >
-        <Text style={styles.continueButtonText}>{t('wine_mgmt.continue')}</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      <LinearGradient
+        colors={['#6D1F2B', '#8E2C3A']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={[styles.headerGradient, { paddingTop: Math.max(insets.top, 16) }]}
+      >
         <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>{t('wine_mgmt.title')}</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>{t('wine_mgmt.title')}</Text>
         </View>
-      </View>
+      </LinearGradient>
 
-      {step === 'capture' && renderCaptureScreen()}
-      {step === 'processing' && renderProcessingScreen()}
-      {step === 'review' && renderReviewScreen()}
-      {step === 'images' && renderImagesScreen()}
+      {renderCaptureScreen()}
 
-      {/* Modal de carga */}
+      {/* Modal de carga al guardar */}
       {processing && (
         <Modal
           visible={processing}
@@ -1195,7 +614,7 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <CellariumLoader />
+              <ActivityIndicator size="large" color="#8E2C3A" />
               <Text style={styles.modalText}>{t('wine_mgmt.processing')}</Text>
             </View>
           </View>
@@ -1229,17 +648,14 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
             <View style={styles.proCameraControls}>
               <TouchableOpacity 
                 style={styles.proCameraCloseButton}
-                onPress={() => {
-                  setShowProCamera(false);
-                  setProCameraMode(null);
-                }}
+                onPress={() => setShowProCamera(false)}
               >
                 <Text style={styles.proCameraCloseText}>✕ {t('wine_mgmt.close')}</Text>
               </TouchableOpacity>
               
               <View style={styles.proCameraInfo}>
                 <Text style={styles.proCameraInfoText}>
-                  {proCameraMode === 'front' ? t('wine_mgmt.front_label_camera') : t('wine_mgmt.back_label_camera')}
+                  {t('wine_mgmt.front_label_camera')}
                 </Text>
                 <Text style={styles.proCameraInfoSubtext}>
                   {t('wine_mgmt.camera_auto_capture')}
@@ -1256,45 +672,51 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#f8f9fa',
   },
-  header: {
-    padding: 20,
-    backgroundColor: '#8B0000',
+  headerGradient: {
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+    ...(Platform.OS === 'android' && { overflow: 'hidden' as const }),
+  },
+  headerContent: {
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: 26,
+    fontWeight: '700',
+    color: '#FFFFFF',
     textAlign: 'center',
   },
   captureContainer: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#f8f9fa',
   },
   captureContent: {
     padding: 20,
     paddingBottom: 40,
   },
-  // Hero card styles
+  // Hero card — estilo catálogo (WineCatalogScreen: fondo gris, cards con borderRadius/sombras)
   heroCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 24,
-    marginBottom: 20,
+    padding: 20,
+    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.04)',
   },
   heroDescription: {
     fontSize: 14,
-    color: '#666',
+    color: '#555',
     lineHeight: 20,
-    fontStyle: 'italic',
   },
   captureOptions: {
     flexDirection: 'row',
@@ -1357,11 +779,12 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 15,
-    marginTop: 10,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#444',
+    marginBottom: 12,
+    marginTop: 20,
+    letterSpacing: 0.3,
   },
   labelPreview: {
     width: '100%',
@@ -1404,8 +827,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   typeChipSelected: {
-    borderColor: '#8B0000',
-    backgroundColor: 'rgba(139, 0, 0, 0.08)',
+    borderColor: '#8E2C3A',
+    backgroundColor: 'rgba(142, 44, 58, 0.08)',
   },
   typeChipText: {
     fontSize: 14,
@@ -1413,7 +836,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   typeChipTextSelected: {
-    color: '#8B0000',
+    color: '#8E2C3A',
     fontWeight: '600',
   },
   sensoryRow: {
@@ -1432,8 +855,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sensoryBtnSelected: {
-    borderColor: '#8B0000',
-    backgroundColor: 'rgba(139, 0, 0, 0.12)',
+    borderColor: '#8E2C3A',
+    backgroundColor: 'rgba(142, 44, 58, 0.12)',
   },
   sensoryBtnText: {
     fontSize: 16,
@@ -1441,7 +864,7 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   sensoryBtnTextSelected: {
-    color: '#8B0000',
+    color: '#8E2C3A',
   },
   textArea: {
     height: 100,
@@ -1472,9 +895,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   saveButton: {
-    backgroundColor: '#8B0000',
-    borderRadius: 8,
-    padding: 16,
+    backgroundColor: '#8E2C3A',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
     alignItems: 'center',
   },
   saveButtonDisabled: {
@@ -1546,7 +970,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
   },
-  // Photo section card styles
+  // Photo section card — mismo estilo que catálogo (borderRadius/sombras)
   photoSectionCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -1555,9 +979,11 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.04)',
   },
   photoSectionTitle: {
     fontSize: 18,
@@ -1579,10 +1005,11 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     flex: 1,
-    backgroundColor: '#8B0000',
+    backgroundColor: '#8E2C3A',
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 20,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
     minWidth: '48%',
@@ -1598,16 +1025,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 20,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#8B0000',
+    borderColor: '#8E2C3A',
     minWidth: '48%',
   },
   secondaryButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#8B0000',
+    color: '#8E2C3A',
   },
   proCameraContainer: {
     flex: 1,

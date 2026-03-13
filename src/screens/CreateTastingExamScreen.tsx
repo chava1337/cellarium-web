@@ -16,6 +16,7 @@ import { RootStackParamList, Wine } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranch } from '../contexts/BranchContext';
 import { TastingExamService } from '../services/TastingExamService';
+import { canCreateTastingExam } from '../utils/rolePermissions';
 
 type CreateTastingExamScreenNavigationProp = StackNavigationProp<RootStackParamList, 'CreateTastingExam'>;
 
@@ -27,6 +28,20 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
   const { user } = useAuth();
   const { currentBranch } = useBranch();
   const [name, setName] = useState('');
+
+  if (user && !canCreateTastingExam(user.role as 'owner' | 'gerente' | 'sommelier' | 'supervisor' | 'personal')) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa', padding: 24 }}>
+        <Text style={{ fontSize: 18, fontWeight: '600', color: '#333', textAlign: 'center' }}>Sin permiso</Text>
+        <Text style={{ marginTop: 8, fontSize: 14, color: '#666', textAlign: 'center' }}>
+          Solo propietarios, gerentes y sommeliers pueden crear exámenes de cata.
+        </Text>
+        <TouchableOpacity style={{ marginTop: 16, paddingVertical: 10, paddingHorizontal: 20, backgroundColor: '#8B0000', borderRadius: 8 }} onPress={() => navigation.goBack()}>
+          <Text style={{ color: '#fff', fontWeight: '600' }}>Volver</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
   const [description, setDescription] = useState('');
   const [availableWines, setAvailableWines] = useState<Wine[]>([]);
   const [selectedWineIds, setSelectedWineIds] = useState<Set<string>>(new Set());

@@ -16,8 +16,10 @@ function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise
   return fetch(input, { ...init, signal: ourSignal }).finally(() => clearTimeout(timeoutId));
 }
 
-console.log('Supabase URL:', supabaseUrl);
-console.log('Supabase Key (first 20 chars):', supabaseAnonKey.substring(0, 20) + '...');
+if (__DEV__) {
+  console.log('Supabase URL:', supabaseUrl);
+  console.log('Supabase Key (first 20 chars):', supabaseAnonKey.substring(0, 20) + '...');
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {

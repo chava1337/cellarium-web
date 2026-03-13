@@ -11,18 +11,20 @@ const MAX_FILE_SIZE_KB = 300;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_KB * 1024; // 300 KB en bytes
 
 /**
- * Comprime y redimensiona una imagen de coctel según el tipo de dispositivo
- * 
- * @param uri - URI de la imagen original
+ * Comprime y redimensiona una imagen de coctel según el tipo de dispositivo.
+ * La URI de entrada DEBE ser ya el resultado del crop (croppedUri); esta función
+ * solo hace resize + encode, NUNCA crop, aspect ni cover.
+ *
+ * @param uri - URI de la imagen ya recortada (croppedUri del modal)
  * @param deviceType - Tipo de dispositivo ('smartphone' | 'tablet')
  * @returns URI de la imagen comprimida y sus dimensiones
- * 
+ *
  * Dimensiones objetivo:
  * - Smartphone: maxWidth ~512px (2x del ancho visible ~256px)
  * - Tablet: maxWidth ~736px (2x del ancho visible ~368px)
- * 
+ *
  * Proceso:
- * 1. Redimensiona manteniendo aspect ratio
+ * 1. Redimensiona manteniendo aspect ratio (resize: { width })
  * 2. Comprime con quality inicial 0.5
  * 3. Si > 300KB, reduce quality a 0.4
  * 4. Si aún > 350KB, reduce quality a 0.35 (máximo)

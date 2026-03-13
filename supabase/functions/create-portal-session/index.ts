@@ -76,7 +76,7 @@ Deno.serve(async (req: Request) => {
     const userId = user.id;
     const { data: row, error: rowErr } = await supabaseAdmin
       .from('users')
-      .select('stripe_customer_id, role, owner_id')
+      .select('stripe_customer_id, role, owner_id, signup_method, owner_email_verified')
       .eq('id', userId)
       .maybeSingle();
 
@@ -92,6 +92,13 @@ Deno.serve(async (req: Request) => {
     if (row.role !== 'owner' || userId !== ownerId) {
       return jsonResponse(
         { code: 'FORBIDDEN', message: 'Only owner can access customer portal' },
+        403
+      );
+    }
+
+    if (row.signup_method === 'password' && row.owner_email_verified !== true) {
+      return jsonResponse(
+        { code: 'EMAIL_VERIFICATION_REQUIRED', message: 'Debes verificar tu correo antes de acceder al portal.' },
         403
       );
     }

@@ -295,8 +295,8 @@ export class WineService {
     branchId: string,
     ownerId: string,
     initialStock: number,
-    priceByGlass: number,
-    priceByBottle: number,
+    priceByGlass: number | null,
+    priceByBottle: number | null,
     // TODO: DB ENFORCEMENT REQUIRED
     // Parámetros opcionales para validación de límites (preparación para enforcement real)
     // En el futuro, estos valores deben venir de RPC/trigger que valide en backend
@@ -356,8 +356,8 @@ export class WineService {
           branch_id: branchId,
           owner_id: ownerId, // AGREGAR owner_id
           stock_quantity: initialStock,
-          price_by_glass: priceByGlass,
-          price_by_bottle: priceByBottle,
+          price_by_glass: priceByGlass ?? null,
+          price_by_bottle: priceByBottle ?? null,
           min_stock: Math.max(1, Math.floor(initialStock * 0.2)), // 20% del stock como mínimo
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),

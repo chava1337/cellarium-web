@@ -245,7 +245,7 @@ Deno.serve(async (req: Request) => {
     // Obtener datos del usuario desde public.users
     const { data: userData, error: userDataError } = await supabaseAdmin
       .from('users')
-      .select('id, role, owner_id, stripe_customer_id, email, subscription_active, subscription_id, subscription_plan')
+      .select('id, role, owner_id, stripe_customer_id, email, subscription_active, subscription_id, subscription_plan, signup_method, owner_email_verified')
       .eq('id', authUser.id)
       .single();
 
@@ -289,6 +289,16 @@ Deno.serve(async (req: Request) => {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 403,
         }
+      );
+    }
+
+    if (userData.signup_method === 'password' && userData.owner_email_verified !== true) {
+      return new Response(
+        JSON.stringify({
+          code: 'EMAIL_VERIFICATION_REQUIRED',
+          message: 'Debes verificar tu correo antes de suscribirte. Abre la app y ve a Verificar correo.',
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403 }
       );
     }
 

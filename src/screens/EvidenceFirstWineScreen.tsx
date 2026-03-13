@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { evidenceFirstWineService, WineEvidence, CanonicalWine, WineDescription } from '../services/EvidenceFirstWineService';
-import { CellariumLoader } from '../components/CellariumLoader';
+import CellariumLoader from '../components/CellariumLoader';
 
 interface EvidenceFirstWineFormData {
   // Campos obligatorios
@@ -63,7 +63,7 @@ export default function EvidenceFirstWineScreen({ navigation }: any) {
   const handleCaptureLabelBack = async () => {
     try {
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
@@ -86,7 +86,7 @@ export default function EvidenceFirstWineScreen({ navigation }: any) {
   const handleSelectFromGallery = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,

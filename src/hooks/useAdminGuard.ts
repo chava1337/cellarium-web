@@ -5,6 +5,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import { useGuest } from '../contexts/GuestContext';
 import { useAuth } from '../contexts/AuthContext';
+import { canAccessAdminPanel, type Role } from '../utils/rolePermissions';
 
 type NavigationProp = StackNavigationProp<RootStackParamList>;
 type RoutePropType<T extends keyof RootStackParamList> = RNRouteProp<RootStackParamList, T>;
@@ -19,19 +20,21 @@ interface UseAdminGuardOptions<T extends keyof RootStackParamList> {
   navigation: NavigationProp;
   route: RoutePropType<T>;
   requireAuth?: boolean;
-  allowedRoles?: ('owner' | 'gerente' | 'personal')[];
+  /** Si no se pasa, se usa canAccessAdminPanel(role): owner, gerente, sommelier, supervisor, personal. */
+  allowedRoles?: Role[];
 }
 
 /**
  * Guard para pantallas administrativas. Expone estado claro para evitar redirects
  * incorrectos con usuario optimista (role/status no hidratados) o staff pending.
+ * Por defecto permite todos los roles con acceso al panel (sommelier incluido).
  * Solo redirige a AdminLogin cuando profileReady y usuario sin permisos o inactivo.
  */
 export function useAdminGuard<T extends keyof RootStackParamList>({
   navigation,
   route,
   requireAuth = true,
-  allowedRoles = ['owner', 'gerente', 'personal'],
+  allowedRoles,
 }: UseAdminGuardOptions<T>): UseAdminGuardResult {
   const { session: guestSession, currentBranch: guestBranch } = useGuest();
   const { user, loading: authLoading, profileReady } = useAuth();
@@ -55,7 +58,10 @@ export function useAdminGuard<T extends keyof RootStackParamList>({
     if (!profileReady) return 'profile_loading';
 
     if (user.status === 'inactive') return 'denied';
-    if (allowedRoles.length > 0 && !allowedRoles.includes(user.role as any)) return 'denied';
+    const roleAllowed = allowedRoles != null
+      ? allowedRoles.length > 0 && allowedRoles.includes(user.role as Role)
+      : canAccessAdminPanel(user.role as Role);
+    if (!roleAllowed) return 'denied';
     return 'allowed';
   }, [isGuest, requireAuth, authLoading, user, profileReady, allowedRoles]);
 
@@ -89,10 +95,7 @@ export function useAdminGuard<T extends keyof RootStackParamList>({
             {
               text: 'OK',
               onPress: () => {
-                navigation.reset({
-                  index: 0,
-                  routes: [{ name: 'AdminLogin' }],
-                });
+                navigation.navigate('AdminLogin');
               },
             },
           ],

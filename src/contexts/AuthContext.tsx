@@ -18,12 +18,18 @@ interface AuthProviderProps {
   children: React.ReactNode;
 }
 
-const USERS_SELECT_COLUMNS = 'id, email, name, role, status, branch_id, owner_id, created_at, updated_at, subscription_plan, subscription_active, subscription_expires_at, subscription_branches_count, subscription_branch_addons_count, subscription_id, stripe_customer_id';
+const USERS_SELECT_COLUMNS = 'id, email, name, role, status, branch_id, owner_id, created_at, updated_at, subscription_plan, subscription_active, subscription_expires_at, subscription_cancel_at_period_end, subscription_branches_count, subscription_branch_addons_count, subscription_id, stripe_customer_id, signup_method, owner_email_verified';
 
 /** Select mínimo para bootstrap rápido; incluye campos de suscripción para que la UI muestre el plan correcto al arranque. */
-const USERS_BOOTSTRAP_SELECT = 'id,email,name,role,status,owner_id,branch_id,created_at,updated_at,subscription_plan,subscription_active,subscription_expires_at';
+const USERS_BOOTSTRAP_SELECT = 'id,email,name,role,status,owner_id,branch_id,created_at,updated_at,subscription_plan,subscription_active,subscription_expires_at,subscription_cancel_at_period_end,signup_method,owner_email_verified';
 
 const HYDRATE_BACKOFF_MS = [300, 600, 1200, 2500, 4000];
+
+/** Suffix del uid para logs (sin PII). */
+function uidSuffix(uid: string): string {
+  if (!uid || uid.length < 8) return '***';
+  return uid.slice(-6);
+}
 
 function optimisticUserFromAuth(authUser: any): User {
   const name = authUser.user_metadata?.name ?? authUser.email?.split('@')[0] ?? '';
@@ -77,6 +83,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const retryCountRef = useRef(0);
   const authSubRef = useRef<{ unsubscribe: () => void } | null>(null);
   const loadUserDataFlightRef = useRef<Promise<void> | null>(null);
+  const isSigningOutRef = useRef(false);
+  const [profileMissingMessage, setProfileMissingMessage] = useState<string | null>(null);
 
   const isAbortOrTimeout = (e: unknown) =>
     (e as any)?.name === 'AbortError' ||
@@ -145,11 +153,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  /** Hydrata perfil desde public.users en background; reintentos con backoff. Si data==null tras 2 intentos, ensureUserRow una vez. */
+  /** Hydrata perfil desde public.users en background; reintentos con backoff. Si data==null tras 2 intentos, ensureUserRow una vez. Si no hay fila al final de reintentos → signOut y mensaje (evitar loop). */
   const hydrateProfile = async (authUser: any) => {
     const uid = authUser?.id;
     if (!uid) return;
     let didEnsureUserRow = false;
+    let lastWasNoRow = false;
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
         if (__DEV__) console.log('[hydrateProfile] start', uid, 'attempt', attempt + 1);
@@ -160,8 +169,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           .select(USERS_BOOTSTRAP_SELECT)
           .eq('id', uid)
           .maybeSingle();
-        if (error) throw error;
+        if (error) {
+          if ((error as any)?.code === 'PGRST116') lastWasNoRow = true;
+          throw error;
+        }
         if (!data) {
+          lastWasNoRow = true;
           if (__DEV__) console.log('[hydrateProfile] done (no row)', uid);
           if (attempt >= 1 && !didEnsureUserRow) {
             didEnsureUserRow = true;
@@ -171,6 +184,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           await new Promise(r => setTimeout(r, delay));
           continue;
         }
+        const normalizedRole = normalizeRole(data.role);
         if (__DEV__) {
           const effective = data.subscription_active === true
             && (data.subscription_expires_at == null || new Date(data.subscription_expires_at) > new Date())
@@ -178,6 +192,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             : 'free';
           console.log('[hydrateProfile] done', {
             uid,
+            'data.role (raw from DB)': data.role,
+            'normalizeRole(data.role)': normalizedRole,
             subscription_plan: data.subscription_plan ?? null,
             subscription_active: data.subscription_active ?? null,
             subscription_expires_at: data.subscription_expires_at ?? null,
@@ -191,7 +207,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             ...prev,
             email: data.email ?? prev.email,
             username: (data.name || data.email?.split('@')[0]) ?? prev.username,
-            role: normalizeRole(data.role) ?? prev.role,
+            role: normalizedRole ?? prev.role,
             status: (data.status as User['status']) ?? 'active',
             branch_id: data.branch_id ?? prev.branch_id,
             owner_id: data.owner_id ?? prev.owner_id,
@@ -200,6 +216,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             subscription_plan: data.subscription_plan ?? prev.subscription_plan,
             subscription_active: data.subscription_active ?? prev.subscription_active,
             subscription_expires_at: data.subscription_expires_at ?? prev.subscription_expires_at,
+            subscription_cancel_at_period_end: data.subscription_cancel_at_period_end ?? prev.subscription_cancel_at_period_end,
+            signup_method: data.signup_method ?? prev.signup_method,
+            owner_email_verified: data.owner_email_verified ?? prev.owner_email_verified,
           };
         });
         if (data.branch_id) {
@@ -216,7 +235,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           await new Promise(r => setTimeout(r, delay));
           continue;
         }
+        if (lastWasNoRow && attempt < 4) {
+          const delay = HYDRATE_BACKOFF_MS[attempt] ?? 4000;
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
         return;
+      }
+    }
+    // Agotados los reintentos sin perfil (no row): cerrar sesión y llevar al login para evitar loop
+    if (lastWasNoRow) {
+      if (isSigningOutRef.current) return;
+      isSigningOutRef.current = true;
+      setProfileMissingMessage('Tu sesión expiró o tu cuenta ya no existe. Inicia sesión de nuevo.');
+      if (__DEV__) console.log('[AUTH_RECOVERY] profile missing -> signOut', uidSuffix(uid));
+      try {
+        await forcedSignOut();
+      } finally {
+        isSigningOutRef.current = false;
       }
     }
   };
@@ -227,6 +263,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, authSession) => {
         try {
+          if (isSigningOutRef.current) {
+            setSession(null);
+            setUser(null);
+            setLoading(false);
+            return;
+          }
           if (__DEV__) {
             console.log('[Auth] event:', event);
             console.log('[Auth] authSession user:', authSession?.user?.id ?? null);
@@ -363,6 +405,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         email: authUser.email,
         name: authUser.user_metadata?.name || authUser.email.split('@')[0],
         role: 'owner',
+        signup_method: 'password',
+        owner_email_verified: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }).select().single();
@@ -525,6 +569,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const signIn = async (email: string, password: string) => {
+    setProfileMissingMessage(null);
     try {
       setLoading(true);
       
@@ -620,10 +665,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           subscription_plan: plan ?? undefined,
           subscription_active: userData.subscription_active ?? prev?.subscription_active,
           subscription_expires_at: userData.subscription_expires_at ?? prev?.subscription_expires_at,
+          subscription_cancel_at_period_end: userData.subscription_cancel_at_period_end ?? prev?.subscription_cancel_at_period_end,
           subscription_branches_count,
           subscription_branch_addons_count: userData.subscription_branch_addons_count ?? prev?.subscription_branch_addons_count,
           subscription_id: userData.subscription_id ?? prev?.subscription_id,
           stripe_customer_id: userData.stripe_customer_id ?? prev?.stripe_customer_id,
+          signup_method: userData.signup_method ?? prev?.signup_method,
+          owner_email_verified: userData.owner_email_verified ?? prev?.owner_email_verified,
         };
       });
     } catch (error) {
@@ -637,6 +685,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     session,
     userDataStatus,
     profileReady: userDataStatus === 'ok',
+    profileMissingMessage,
     signIn,
     signOut,
     refreshUser,

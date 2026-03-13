@@ -98,6 +98,66 @@ const STATUS_MAP: Record<string, string> = {
 function mapStatus(stripeStatus: string): string {
   return STATUS_MAP[stripeStatus] ?? 'active';
 }
+function toUnix(v: any): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (v && typeof v === 'object') {
+    const candidates = [v.unix, v.value, v.timestamp, v.time, v.seconds];
+    for (const c of candidates) {
+      if (typeof c === 'number' && Number.isFinite(c)) return c;
+      if (typeof c === 'string') {
+        const n = Number(c);
+        if (Number.isFinite(n)) return n;
+      }
+    }
+  }
+  return null;
+}
+
+/** true si la suscripción está cancelada o tiene cancelación programada (period_end o cancel_at). */
+function computeCancelScheduled(subscription: any): boolean {
+  const cancel_at_period_end = subscription?.cancel_at_period_end === true;
+  const hasCancelAt = typeof subscription?.cancel_at === 'number';
+  const hasCanceledAt = typeof subscription?.canceled_at === 'number';
+  const status = subscription?.status;
+  return cancel_at_period_end || hasCancelAt || hasCanceledAt || status === 'canceled';
+}
+
+// Metadata de cancelación para subscriptions.metadata (cancel_scheduled, cancel_at_*, stripe_status).
+function computeCancelMeta(subscription: any): Record<string, unknown> {
+  const status = subscription?.status ?? null;
+  const cap = subscription?.cancel_at_period_end === true;
+  const cancelAt = toUnix(subscription?.cancel_at);
+  const canceledAt = toUnix(subscription?.canceled_at);
+  const cancelScheduled = computeCancelScheduled(subscription);
+
+  const subIdSuffix =
+    typeof subscription?.id === 'string'
+      ? subscription.id.slice(-6)
+      : '***';
+  if (cancelScheduled) {
+    console.log('[CANCEL_RAW]', {
+      subIdSuffix,
+      raw_cancel_at: subscription?.cancel_at ?? null,
+      raw_canceled_at: subscription?.canceled_at ?? null,
+    });
+  }
+
+  return {
+    cancel_scheduled: cancelScheduled,
+    ...(cap ? { cancel_at_period_end: true } : {}),
+    ...(cancelAt != null
+      ? {
+          cancel_at_unix: cancelAt,
+          cancel_at_iso: new Date(cancelAt * 1000).toISOString(),
+        }
+      : {}),
+    stripe_status: status,
+  };
+}
 
 function extractSubscriptionIdFromInvoice(invoice: any): string | null {
   if (!invoice) return null;
@@ -300,16 +360,18 @@ Deno.serve(async (req: Request) => {
 
   if (req.method !== 'POST') return json(405, { error: 'Method not allowed' });
 
-  const auth = req.headers.get('authorization');
-  if (!auth?.startsWith('Bearer ')) return json(401, { error: 'Unauthorized' });
-
-  if (INTERNAL_WEBHOOK_SHARED_SECRET) {
-    const got = req.headers.get('x-internal-webhook-secret');
-    if (got !== INTERNAL_WEBHOOK_SHARED_SECRET) return json(403, { error: 'Forbidden' });
+  const signature = req.headers.get('stripe-signature') ?? req.headers.get('Stripe-Signature') ?? '';
+  const hasStripeSignature = signature.length > 0;
+  if (!hasStripeSignature) {
+    const auth = req.headers.get('authorization');
+    if (!auth?.startsWith('Bearer ')) return json(401, { error: 'Unauthorized' });
+    if (INTERNAL_WEBHOOK_SHARED_SECRET) {
+      const got = req.headers.get('x-internal-webhook-secret');
+      if (got !== INTERNAL_WEBHOOK_SHARED_SECRET) return json(403, { error: 'Forbidden' });
+    }
   }
 
   const rawBody = await req.text();
-  const signature = req.headers.get('stripe-signature') ?? req.headers.get('Stripe-Signature') ?? '';
   if (!signature) {
     console.error('No stripe-signature header');
     return json(400, { error: 'No stripe-signature header' });
@@ -325,11 +387,12 @@ Deno.serve(async (req: Request) => {
     await verifyStripeWebhookSignature(rawBody, signature, webhookSecret);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Invalid signature';
-    console.error('Error verificando firma Stripe:', message);
+    const stack = err instanceof Error && err.stack ? truncate(err.stack, 300) : '';
+    console.error('Error verificando firma Stripe:', message, stack ? { stack } : '');
     return json(400, { error: 'Invalid signature' });
   }
 
-  let event: { type: string; id: string; data?: { object?: Record<string, unknown> } };
+  let event: { type: string; id: string; livemode?: boolean; created?: number; data?: { object?: Record<string, unknown> } };
   try {
     event = JSON.parse(rawBody);
   } catch {
@@ -339,7 +402,12 @@ Deno.serve(async (req: Request) => {
 
   const eventType = normalizeEventType(event.type);
   const eventId = event.id ?? 'unknown';
-  console.log('[WEBHOOK]', { eventType: event.type, eventId });
+  console.log('[WEBHOOK]', {
+    eventId,
+    eventType: event.type,
+    livemode: event.livemode ?? null,
+    created: event.created ?? null,
+  });
 
   // DIAG ONLY: log which flags are active (no secret values)
   const diagFlags = {
@@ -412,6 +480,7 @@ Deno.serve(async (req: Request) => {
           stripe_subscription_id: null,
           subscription_expires_at: null,
           subscription_plan: 'free',
+          subscription_cancel_at_period_end: false,
         })
         .eq('stripe_customer_id', customerId),
     ];
@@ -427,14 +496,17 @@ Deno.serve(async (req: Request) => {
 
   // ——— customer.subscription.updated / created: fuente de verdad del PLAN (lookup_key desde subscription price) ———
   if ((eventType === 'customer.subscription.updated' || eventType === 'customer.subscription.created') && obj) {
+    console.log('[SUB_UPDATED] handler entered', { eventType, eventId });
     if (envTrue('DIAG_SKIP_STRIPE_API_FETCH')) {
       console.log('[DIAG] DIAG_SKIP_STRIPE_API_FETCH=true (skipping subscription.updated/created Stripe fetch)', { eventType, eventId });
       return json(200, { received: true, diag: 'skip_stripe_fetch' });
     }
     const customerId = typeof obj.customer === 'string' ? obj.customer : (obj.customer as { id?: string })?.id ?? '';
     const subId = typeof obj.id === 'string' ? obj.id : '';
+    const subIdSuffix = subId.length >= 6 ? subId.slice(-6) : '***';
+    const custIdSuffix = customerId.length >= 6 ? customerId.slice(-6) : '***';
     if (!customerId || !subId) {
-      console.log('[SUB_UPDATED] missing customerId or subscriptionId');
+      console.log('[SUB_UPDATED] missing customerId or subscriptionId', { subIdSuffix, hasCustomerId: !!customerId });
       return json(200, { received: true });
     }
     // Siempre obtener subscription desde Stripe con expand items.data.price para lookup_key fiable
@@ -446,12 +518,27 @@ Deno.serve(async (req: Request) => {
       { 'expand[0]': 'items.data.price' }
     );
     if (subResult.error || !subResult.data) {
-      console.error('[SUB_UPDATED] failed to fetch subscription', subResult.error?.message);
+      console.error('[SUB_UPDATED] failed to fetch subscription', subResult.error?.message ?? 'unknown');
       return json(200, { received: true });
     }
-    const subscription = subResult.data as { status?: string; current_period_end?: number; cancel_at?: number; items?: { data?: Array<{ price?: { lookup_key?: string }; current_period_end?: number }> } };
+    const subscription = subResult.data as { status?: string; current_period_end?: number; cancel_at?: number; cancel_at_period_end?: boolean; items?: { data?: Array<{ price?: { lookup_key?: string }; current_period_end?: number }> } };
     const status = subscription.status ?? 'active';
-    const periodEndUnix = getSubscriptionPeriodEndUnix(subscription);
+    const cancelScheduled = computeCancelScheduled(subscription);
+    console.log('[WEBHOOK_SYNC] cancelScheduled', {
+      subIdSuffix,
+      cancel_at_period_end: subscription.cancel_at_period_end ?? null,
+      hasCancelAt: typeof (subscription as any)?.cancel_at === 'number',
+      hasCanceledAt: typeof (subscription as any)?.canceled_at === 'number',
+      status: subscription?.status ?? null,
+      cancelScheduled,
+    });
+    console.log('[SUB_UPDATED] Stripe subscription', {
+      subIdSuffix,
+      custIdSuffix,
+      status,
+      cancel_at_period_end: subscription.cancel_at_period_end ?? null,
+    });
+    const periodEndUnix = toUnix((subscription as any)?.cancel_at) ?? getSubscriptionPeriodEndUnix(subscription);
     const expiresAt = periodEndUnix ? new Date(periodEndUnix * 1000).toISOString() : null;
     const statusIsActiveOrTrialing = status === 'active' || status === 'trialing';
     const periodNotExpired = !expiresAt || new Date(expiresAt) > new Date();
@@ -475,11 +562,11 @@ Deno.serve(async (req: Request) => {
     const subscriptionPlan = active ? plan : 'free';
     const { data: userRow, error: findErr } = await supabaseAdmin
       .from('users')
-      .select('id')
+      .select('id, owner_id')
       .eq('stripe_customer_id', customerId)
       .maybeSingle();
     if (findErr || !userRow) {
-      console.log('[SUB_UPDATED] no user for stripe_customer_id, ack 200', customerId);
+      console.log('[SUB_UPDATED] no user for stripe_customer_id, ack 200', { custIdSuffix });
       return json(200, { received: true });
     }
     console.log('[stripe-webhook] period_end resolution', {
@@ -489,7 +576,30 @@ Deno.serve(async (req: Request) => {
       cancel_at: subscription?.cancel_at ?? null,
       chosenUnix: periodEndUnix ?? null,
     });
-    const dbOpsUpdated = [
+    const ownerId = (userRow as { owner_id?: string }).owner_id ?? userRow.id;
+    const nowSub = new Date().toISOString();
+    const cancelMeta = computeCancelMeta(subscription);
+    const subRow = {
+      owner_id: ownerId,
+      user_id: userRow.id,
+      plan_id: subscriptionPlan,
+      plan_name: getFinalPlanName(subscriptionPlan),
+      status: mapStatus(subscription.status ?? 'active'),
+      current_period_start: unixToIso(subscription.current_period_start) ?? nowSub,
+      current_period_end: expiresAt ?? unixToIso(subscription.current_period_end) ?? nowSub,
+      cancel_at_period_end: !!(subscription.cancel_at_period_end === true),
+      canceled_at: unixToIso((subscription as { canceled_at?: number }).canceled_at ?? null),
+      stripe_subscription_id: subId,
+      stripe_customer_id: customerId || null,
+      metadata: {
+        ...cancelMeta,
+        lastEventType: event.type,
+        lastEventId: event.id,
+        lastEventAt: nowSub,
+      } as Record<string, unknown>,
+      updated_at: nowSub,
+    };
+    const [updateResult, upsertSubResult] = await Promise.all([
       supabaseAdmin
         .from('users')
         .update({
@@ -497,15 +607,22 @@ Deno.serve(async (req: Request) => {
           subscription_active: active,
           subscription_expires_at: expiresAt,
           subscription_plan: subscriptionPlan,
+          subscription_cancel_at_period_end: subscriptionPlan === 'free' ? false : cancelScheduled,
         })
         .eq('stripe_customer_id', customerId),
-    ];
-    const [updateResult] = await Promise.all(dbOpsUpdated);
+      supabaseAdmin
+        .from('subscriptions')
+        .upsert(subRow, { onConflict: 'stripe_subscription_id' }),
+    ]);
     if (updateResult.error) {
-      console.error('[SUB_UPDATED] update failed', updateResult.error.message);
+      console.error('[SUB_UPDATED] users update failed', updateResult.error.message, updateResult.error.code ?? '');
     } else {
-      console.log('[SUB_UPDATED]', { customerId, subscriptionId: subId, status, lookupKey: lookupKey ?? '(none)', mappedPlan: subscriptionPlan, expiresAt });
-      console.log('[USER_UPDATED]', { payload: { stripe_subscription_id: subId, subscription_active: active, subscription_expires_at: expiresAt, subscription_plan: subscriptionPlan } });
+      console.log('[SUB_UPDATED] users update ok', { subIdSuffix, custIdSuffix, subscription_active: active, subscription_cancel_at_period_end: cancelScheduled });
+    }
+    if (upsertSubResult.error) {
+      console.error('[SUB_UPDATED] subscriptions upsert failed', upsertSubResult.error.message, upsertSubResult.error.code ?? '');
+    } else {
+      console.log('[SUB_UPDATED] subscriptions upsert ok', { subIdSuffix, cancel_at_period_end: subRow.cancel_at_period_end });
     }
     await new Promise((resolve) => setTimeout(resolve, 0));
     return json(200, { received: true });
@@ -602,6 +719,16 @@ Deno.serve(async (req: Request) => {
     subscription = subResult.data as typeof subscription;
   }
 
+  console.log('[CANCEL_FIELDS]', {
+    subIdSuffix: subscriptionId?.slice?.(-6) ?? '***',
+    status: (subscription as any)?.status ?? null,
+    cancel_at_period_end: (subscription as any)?.cancel_at_period_end ?? null,
+    cancel_at_type: typeof (subscription as any)?.cancel_at,
+    cancel_at_is_number: typeof (subscription as any)?.cancel_at === 'number',
+    canceled_at_type: typeof (subscription as any)?.canceled_at,
+    canceled_at_is_number: typeof (subscription as any)?.canceled_at === 'number',
+  });
+
   const subMeta = (subscription.metadata || {}) as Record<string, string>;
   let owner_id = subMeta.owner_id ?? sessionMetadata.owner_id ?? '';
   let user_id = subMeta.user_id ?? sessionMetadata.user_id ?? '';
@@ -665,6 +792,7 @@ Deno.serve(async (req: Request) => {
   const finalPlanId = normalizePlanId(mappedPlan?.plan_id, lookupKeyFromSubscription ?? planLookupKey);
   const finalPlanName = getFinalPlanName(finalPlanId);
   console.log('✅ FINAL PLAN', { planLookupKey, lookupKeyFromSubscription, mappedPlan, finalPlanId, finalPlanName });
+  const cancelMeta = computeCancelMeta(subscription);
   const row = {
     owner_id,
     user_id,
@@ -678,10 +806,11 @@ Deno.serve(async (req: Request) => {
     stripe_subscription_id: subscriptionId,
     stripe_customer_id: stripeCustomerId || null,
     metadata: {
+      ...subMeta,
+      ...cancelMeta,
       lastEventType: event.type,
       lastEventId: event.id,
       lastEventAt: now,
-      ...subMeta,
     } as Record<string, unknown>,
     updated_at: now,
   };
@@ -744,18 +873,32 @@ Deno.serve(async (req: Request) => {
   const statusIsActiveOrTrialing = row.status === 'active' || row.status === 'trialing';
   const periodNotExpired = !currentPeriodEnd || new Date(currentPeriodEnd) > new Date();
   const subscriptionActive = statusIsActiveOrTrialing && periodNotExpired;
+  const cancelScheduled = computeCancelScheduled(subscription);
+  const subIdSuffixSync = subscriptionId?.slice?.(-6) ?? '***';
+  console.log('[WEBHOOK_SYNC] cancelScheduled', {
+    subIdSuffix: subIdSuffixSync,
+    cancel_at_period_end: subscription?.cancel_at_period_end ?? null,
+    hasCancelAt: typeof (subscription as any)?.cancel_at === 'number',
+    hasCanceledAt: typeof (subscription as any)?.canceled_at === 'number',
+    status: subscription?.status ?? null,
+    cancelScheduled,
+  });
+  const userExpiresAtUnix = toUnix((subscription as any)?.cancel_at) ?? endUnix;
   const userUpdatePayload: Record<string, unknown> = {
     stripe_subscription_id: subscriptionId,
     subscription_active: subscriptionActive,
+    subscription_cancel_at_period_end: cancelScheduled,
   };
-  if (periodEndIso) {
+  if (userExpiresAtUnix != null) {
+    userUpdatePayload.subscription_expires_at = new Date(userExpiresAtUnix * 1000).toISOString();
+  } else if (periodEndIso) {
     userUpdatePayload.subscription_expires_at = periodEndIso;
   }
   console.log('[stripe-webhook] period_end resolution', {
     subscriptionId,
     topLevel: subscription?.current_period_end ?? null,
-    itemLevel: subscription?.items?.data?.[0]?.current_period_end ?? null,
-    cancel_at: subscription?.cancel_at ?? null,
+    itemLevel: (subscription?.items?.data?.[0] as { current_period_end?: number } | undefined)?.current_period_end ?? null,
+    cancel_at: (subscription as any)?.cancel_at ?? null,
     chosenUnix: endUnix ?? null,
   });
 

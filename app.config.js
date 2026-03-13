@@ -1,59 +1,73 @@
-export default {
+// Plugins requeridos por Expo (SDK 54); Stripe como tuple con merchantIdentifier (iOS)
+const STRIPE_PLUGIN = [
+  "@stripe/stripe-react-native",
+  {
+    merchantIdentifier: "merchant.com.cellarium.app",
+    enableGooglePay: true,
+  },
+];
+const OTHER_PLUGINS = ["expo-font", "expo-secure-store", "expo-web-browser"];
+
+// Icono principal: ./assets/icon.png debe ser PNG 1024x1024, sin bordes redondeados ni padding interno excesivo.
+const config = {
   expo: {
     name: "Cellarium",
     slug: "cellarium-wine-catalog",
     version: "1.0.0",
     orientation: "default",
     userInterfaceStyle: "light",
-    
+    icon: "./assets/icon.png",
+
     // Deep Linking Configuration
     scheme: "cellarium",
-    
+
     // Universal Links / App Links
     associatedDomains: [
-      "applinks:cellarium.app",
-      "applinks:www.cellarium.app"
+      "applinks:cellarium.net",
+      "applinks:www.cellarium.net"
     ],
-    
-    // Configuración para manejar OAuth callbacks
+
+    // Configuración para manejar OAuth callbacks (prefix dinámico en runtime vía App.tsx)
     linking: {
-      prefixes: [
-        "exp://192.168.1.100:8081",
-        "cellarium://"
-      ]
+      prefixes: ["cellarium://"]
     },
-    
+
     updates: {
       enabled: false
     },
-    
+
     runtimeVersion: {
       policy: "sdkVersion"
     },
-    
+
     // Configuración para orientación adaptativa
     orientation: "default",
-    
+
     // Configuración específica para iOS
     ios: {
       supportsTablet: true,
+      merchantIdentifier: "merchant.com.cellarium.app",
       orientation: "default",
       bundleIdentifier: "com.cellarium.winecatalog",
       associatedDomains: [
-        "applinks:cellarium.app",
-        "applinks:www.cellarium.app"
+        "applinks:cellarium.net",
+        "applinks:www.cellarium.net"
       ],
       infoPlist: {
         NSCameraUsageDescription: "Esta app necesita acceso a la cámara para capturar etiquetas de vino.",
         NSMicrophoneUsageDescription: "Esta app necesita acceso al micrófono para grabar videos."
       }
     },
-    
+
     // Configuración específica para Android
     android: {
       supportsTablet: true,
       orientation: "default",
       package: "com.cellarium.winecatalog",
+      adaptiveIcon: {
+        foregroundImage: "./assets/icon.png",
+        backgroundColor: "#6D1F2B"
+      },
       permissions: [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
@@ -67,12 +81,12 @@ export default {
           data: [
             {
               scheme: "https",
-              host: "cellarium.app",
+              host: "cellarium.net",
               pathPrefix: "/qr"
             },
             {
               scheme: "https",
-              host: "www.cellarium.app",
+              host: "www.cellarium.net",
               pathPrefix: "/qr"
             }
           ],
@@ -81,11 +95,14 @@ export default {
         {
           action: "VIEW",
           category: ["BROWSABLE", "DEFAULT"],
-          data: [{ scheme: "cellarium" }]
+          data: [
+            { scheme: "cellarium" },
+            { scheme: "cellarium", host: "auth-callback", pathPrefix: "/" }
+          ]
         }
       ]
     },
-    
+
     // App Store / Play Store URLs
     extra: {
       appStoreUrl: "https://apps.apple.com/app/cellarium/id123456789",
@@ -96,3 +113,24 @@ export default {
     }
   }
 };
+
+// Merge plugins sin duplicados: Stripe como tuple; sin string simple "@stripe/stripe-react-native"
+const existingPlugins = config.expo.plugins ?? [];
+const withoutStripe = existingPlugins.filter(
+  (p) =>
+    p !== "@stripe/stripe-react-native" &&
+    !(Array.isArray(p) && p[0] === "@stripe/stripe-react-native")
+);
+const pluginName = (p) => (Array.isArray(p) ? p[0] : p);
+const hasPlugin = (name) => withoutStripe.some((p) => pluginName(p) === name);
+const withRequired = [...withoutStripe];
+if (!hasPlugin("@stripe/stripe-react-native")) withRequired.push(STRIPE_PLUGIN);
+for (const name of OTHER_PLUGINS) {
+  if (!hasPlugin(name)) withRequired.push(name);
+}
+config.expo.plugins = withRequired;
+
+// Tras cambiar el icono: eas build --profile development --platform android
+// e instalar el nuevo dev client en el dispositivo.
+
+export default config;

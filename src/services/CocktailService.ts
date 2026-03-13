@@ -3,8 +3,10 @@
  * Accede a la tabla cocktail_menu en Supabase
  */
 
+import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '../lib/supabase';
 import { logger } from '../utils/logger';
+import { PLAN_LIMITS, type SubscriptionPlan } from '../utils/subscriptionPermissions';
 
 export interface CocktailDrink {
   id: string;
@@ -14,6 +16,7 @@ export interface CocktailDrink {
   description?: { en?: string; es?: string } | string;
   ingredients: { en?: string[]; es?: string[] } | string[];
   image_url?: string;
+  image_path?: string;
   price: number;
   is_active: boolean;
   display_order: number;
@@ -29,6 +32,7 @@ export interface CreateCocktailDrinkData {
   description?: { en?: string; es?: string };
   ingredients: { en?: string[]; es?: string[] };
   image_url?: string;
+  image_path?: string;
   price: number;
   display_order?: number;
 }
@@ -38,9 +42,15 @@ export interface UpdateCocktailDrinkData {
   description?: { en?: string; es?: string };
   ingredients?: { en?: string[]; es?: string[] };
   image_url?: string;
+  image_path?: string;
   price?: number;
   is_active?: boolean;
   display_order?: number;
+}
+
+export interface UploadCocktailImageResult {
+  publicUrl: string;
+  path: string;
 }
 
 /**
@@ -93,13 +103,31 @@ export async function getCocktailDrink(id: string): Promise<CocktailDrink | null
 
 /**
  * Crea una nueva bebida en el menú
+ * @param effectivePlan - Plan efectivo del owner para aplicar límite Free (10 cocteles). Si no se pasa, no se aplica límite en app.
  */
 export async function createCocktailDrink(
   drinkData: CreateCocktailDrinkData,
-  userId: string
+  userId: string,
+  effectivePlan?: SubscriptionPlan
 ): Promise<CocktailDrink> {
   try {
-    // Obtener el siguiente display_order
+    const allowed: SubscriptionPlan[] = ['free', 'basic', 'additional-branch'];
+    const plan = effectivePlan && allowed.includes(effectivePlan) ? effectivePlan : 'free';
+    const maxCocktails = PLAN_LIMITS[plan].maxCocktails;
+
+    if (maxCocktails !== -1) {
+      const { count: activeCount } = await supabase
+        .from('cocktail_menu')
+        .select('*', { count: 'exact', head: true })
+        .eq('branch_id', drinkData.branch_id)
+        .eq('owner_id', drinkData.owner_id)
+        .eq('is_active', true);
+
+      if ((activeCount ?? 0) >= maxCocktails) {
+        throw new Error('COCKTAIL_LIMIT_REACHED');
+      }
+    }
+
     const { count } = await supabase
       .from('cocktail_menu')
       .select('*', { count: 'exact', head: true })
@@ -118,15 +146,30 @@ export async function createCocktailDrink(
       .single();
 
     if (error) {
+      if (__DEV__) {
+        console.log('[createCocktailDrink] Supabase error:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        });
+      }
       logger.error('[createCocktailDrink] Error:', error);
-      throw error;
+      const msg = [error.code, error.message].filter(Boolean).join(': ') || error.message || 'Error creando bebida';
+      throw new Error(msg);
     }
 
     logger.success('[createCocktailDrink] Bebida creada:', data.id);
     return data;
-  } catch (error) {
+  } catch (error: any) {
     logger.error('[createCocktailDrink] Excepción:', error);
-    throw error;
+    const msg =
+      typeof error?.message === 'string' && error.message
+        ? (error?.code ? `${error.code}: ${error.message}` : error.message)
+        : error?.code
+          ? `${error.code}: ${String(error)}`
+          : String(error) || 'Error creando bebida';
+    throw new Error(msg);
   }
 }
 
@@ -187,53 +230,47 @@ export async function uploadCocktailImage(
   imageUri: string,
   drinkId: string,
   branchId: string
-): Promise<string> {
+): Promise<UploadCocktailImageResult> {
   try {
-    // Importar FileSystem dinámicamente
-    const FileSystem = require('expo-file-system/legacy');
-    
-    // Generar nombre único
     const fileExt = imageUri.split('.').pop() || 'jpg';
     const fileName = `${drinkId}.${fileExt}`;
     const filePath = `cocktails/${branchId}/${fileName}`;
 
-    // Convertir imagen a base64 para React Native
-    let base64: string;
-    if (imageUri.startsWith('file://') || imageUri.startsWith('/')) {
-      // URI local: usar FileSystem
-      const fileUri = imageUri.startsWith('file://') ? imageUri : `file://${imageUri}`;
-      base64 = await FileSystem.readAsStringAsync(fileUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-    } else {
-      // URI remota: usar fetch y convertir a base64
-      const response = await fetch(imageUri);
-      const arrayBuffer = await response.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      base64 = btoa(String.fromCharCode(...uint8Array));
+    const base64 = await FileSystem.readAsStringAsync(imageUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
     }
 
-    // Convertir base64 a ArrayBuffer para Supabase (React Native compatible)
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
+    if (__DEV__) {
+      console.log('[CocktailUpload]', { uri: imageUri, path: filePath });
     }
 
-    // Subir a storage (bucket dedicado para coctelería)
     const { data, error } = await supabase.storage
       .from('cocktail-images')
-      .upload(filePath, bytes.buffer, {
-        contentType: `image/${fileExt}`,
+      .upload(filePath, bytes, {
+        contentType: 'image/jpeg',
         upsert: true,
       });
 
     if (error) {
+      if (__DEV__) {
+        console.log('[uploadCocktailImage] Storage error:', {
+          message: error.message,
+          code: (error as any)?.code,
+          details: (error as any)?.details,
+          hint: (error as any)?.hint,
+        });
+      }
       logger.error('[uploadCocktailImage] Error subiendo:', error);
-      throw error;
+      const msg = [(error as any)?.code, error.message].filter(Boolean).join(': ') || error.message || 'Error subiendo imagen';
+      throw new Error(msg);
     }
 
-    // Obtener URL pública
     const { data: { publicUrl } } = supabase.storage
       .from('cocktail-images')
       .getPublicUrl(filePath);
@@ -243,9 +280,15 @@ export async function uploadCocktailImage(
     }
 
     logger.success('[uploadCocktailImage] Imagen subida:', publicUrl);
-    return publicUrl;
-  } catch (error) {
+    return { publicUrl, path: filePath };
+  } catch (error: any) {
     logger.error('[uploadCocktailImage] Excepción:', error);
-    throw error;
+    const msg =
+      typeof error?.message === 'string' && error.message
+        ? (error?.code ? `${error.code}: ${error.message}` : error.message)
+        : error?.code
+          ? `${error.code}: ${String(error)}`
+          : String(error) || 'Error subiendo imagen';
+    throw new Error(msg);
   }
 }

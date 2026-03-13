@@ -1,10 +1,18 @@
 import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Linking from 'expo-linking';
 import { useAuth } from '../contexts/AuthContext';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import Rive from 'rive-react-native';
+
+/** Extrae el segmento encoded de una URL cellarium qr (dobles o triples slash) */
+function getQrEncodedFromUrl(url: string | null): string | null {
+  if (!url || typeof url !== 'string') return null;
+  const match = url.match(/cellarium:\/\/\/?qr\/([^?#]+)/i) || url.match(/cellarium:\/\/qr\/([^?#]+)/i);
+  return match ? match[1] : null;
+}
 
 type BootstrapScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Bootstrap'>;
 
@@ -31,35 +39,40 @@ const BootstrapScreen: React.FC<Props> = ({ navigation }) => {
   const [riveError, setRiveError] = React.useState(false);
 
   useEffect(() => {
-    // Limpiar timeout si existe
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
 
-    // Solo navegar cuando termine la verificación de sesión
     if (!loading) {
-      // Pequeño delay opcional (300ms) para suavizar transición si se ve brusco
       const delay = 300;
-      
+
       timeoutRef.current = setTimeout(() => {
-        if (user) {
-          // Usuario autenticado → reset hacia AppAuth (que mostrará AppNavigator)
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'AppAuth' }],
-          });
-        } else {
-          // No hay usuario → reset hacia Welcome
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'Welcome' }],
-          });
-        }
+        Linking.getInitialURL().then((url) => {
+          const qrEncoded = getQrEncodedFromUrl(url);
+          if (qrEncoded) {
+            if (__DEV__) console.log('[Bootstrap] initial URL is QR link, redirecting to QrProcessor');
+            navigation.reset({
+              index: 0,
+              routes: [{ name: 'QrProcessor', params: { qrData: qrEncoded } }],
+            });
+            return;
+          }
+          if (user) {
+            navigation.reset({
+              index: 0,
+              routes: [{ name: 'AppAuth' }],
+            });
+          } else {
+            navigation.reset({
+              index: 0,
+              routes: [{ name: 'Welcome' }],
+            });
+          }
+        });
       }, delay);
     }
 
-    // Cleanup: limpiar timeout si el componente se desmonta
     return () => {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);

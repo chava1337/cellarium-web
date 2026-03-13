@@ -3,13 +3,16 @@ import { GlobalWine } from '../services/GlobalWineCatalogService';
 
 /**
  * Normaliza el rol de usuario para compatibilidad con BD
- * Convierte 'staff' (legacy) a 'personal' (canonical)
+ * Convierte 'staff' (legacy) a 'personal' (canonical).
+ * Insensible a mayúsculas para evitar fallback a 'personal' si la BD devuelve 'Supervisor', etc.
  */
 export function normalizeRole(role: string | null | undefined): User['role'] {
-  if (!role) return 'personal';
-  if (role === 'staff') return 'personal';
+  if (role == null || typeof role !== 'string') return 'personal';
+  const r = role.trim().toLowerCase();
+  if (!r) return 'personal';
+  if (r === 'staff') return 'personal';
   const validRoles: User['role'][] = ['owner', 'gerente', 'sommelier', 'supervisor', 'personal'];
-  return validRoles.includes(role as User['role']) ? (role as User['role']) : 'personal';
+  return validRoles.includes(r as User['role']) ? (r as User['role']) : 'personal';
 }
 
 export interface Wine {
@@ -115,12 +118,17 @@ export interface User {
   subscription_expires_at?: string;
   subscription_branches_count?: number;
   subscription_active?: boolean;
+  subscription_cancel_at_period_end?: boolean;
   subscription_branch_addons_count?: number;
   // Nuevos campos de suscripción y pagos
   subscription_id?: string;
   stripe_customer_id?: string;
   payment_method_id?: string;
   billing_email?: string;
+  /** password | google | admin_invite. Set by trigger or Edge. */
+  signup_method?: string | null;
+  /** For owners: true when email verified (Google or after verify-owner-email). */
+  owner_email_verified?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -132,9 +140,9 @@ export type RootStackParamList = {
   OwnerRegistration: undefined;
   Login: undefined;
   AdminLogin: undefined;
-  AdminRegistration: { qrToken?: string; branchName?: string; branchId?: string };
+  AdminRegistration: { qrToken?: string; branchName?: string; branchId?: string; ownerId?: string };
   AdminDashboard: undefined;
-  WineCatalog: { branchId?: string; isGuest?: boolean };
+  WineCatalog: { branchId?: string; isGuest?: boolean; guestToken?: string };
   QrProcessor: { qrData?: any; token?: string };
   UserManagement: undefined;
   TastingNotes: undefined;
@@ -154,7 +162,8 @@ export type RootStackParamList = {
   AddWineToCatalog: { wine: GlobalWine };
   AppAuth: { mode?: 'login' | 'register' };
   AppNavigator: undefined;
-  Subscriptions: undefined;
+  Subscriptions: { openVerifyEmail?: boolean } | undefined;
+  OwnerEmailVerification: undefined;
 };
 
 // Tipos para el contexto de autenticación
@@ -169,6 +178,8 @@ export interface AuthContextType {
   userDataStatus?: UserDataStatus;
   /** true cuando el perfil está hidratado (userDataStatus==='ok'). Fuente de verdad para permitir acciones owner/staff. */
   profileReady?: boolean;
+  /** Mensaje cuando la sesión se cerró por perfil faltante (no row en public.users). Ej: "Tu sesión expiró o tu cuenta ya no existe." */
+  profileMissingMessage?: string | null;
   signIn: (email: string, password: string, roleData?: any) => Promise<void>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;

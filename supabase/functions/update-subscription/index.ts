@@ -70,7 +70,7 @@ Deno.serve(async (req: Request) => {
     // Cargar usuario desde public.users (fuente de verdad para plan)
     const { data: userData, error: userDataError } = await supabaseAdmin
       .from('users')
-      .select('id, role, owner_id, subscription_plan, stripe_customer_id')
+      .select('id, role, owner_id, subscription_plan, stripe_customer_id, signup_method, owner_email_verified')
       .eq('id', authUser.id)
       .single();
 
@@ -83,6 +83,13 @@ Deno.serve(async (req: Request) => {
       return json(403, {
         error: 'Solo el owner puede actualizar la suscripción',
         code: 'FORBIDDEN',
+      });
+    }
+
+    if (userData.signup_method === 'password' && userData.owner_email_verified !== true) {
+      return json(403, {
+        error: 'Debes verificar tu correo antes de actualizar la suscripción.',
+        code: 'EMAIL_VERIFICATION_REQUIRED',
       });
     }
 

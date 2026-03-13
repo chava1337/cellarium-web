@@ -2,7 +2,7 @@
 // NO se ha alterado lógica de negocio, permisos, navegación, guards ni suscripciones.
 // Cambios: header compacto, sin emoticons, sin flechas, cards elegantes.
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,12 +18,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { RootStackParamList, Branch } from '../types';
+import { RootStackParamList, Branch, normalizeRole } from '../types';
 import { useBranch } from '../contexts/BranchContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import { checkSubscriptionFeature } from '../utils/subscriptionPermissions';
+import { checkSubscriptionFeatureByPlan } from '../utils/subscriptionPermissions';
+import { getEffectivePlan, getOwnerEffectivePlan, type EffectivePlanId } from '../utils/effectivePlan';
 import { mapMenuItemIdToFeatureId } from '../constants/adminMenuFeatureMap';
+import { canAccessFullAdminScreens } from '../utils/rolePermissions';
 import { useAdminGuard } from '../hooks/useAdminGuard';
 import { PendingApprovalMessage } from '../components/PendingApprovalMessage';
 import { CELLARIUM_THEME } from '../theme/cellariumTheme';
@@ -56,6 +58,8 @@ const AdminDashboardScreen: React.FC<Props> = ({ navigation, route }) => {
   const { user, profileReady } = useAuth();
   const { t } = useLanguage();
   const [isBranchSelectorVisible, setIsBranchSelectorVisible] = useState(false);
+  /** Plan del owner para gating de menú cuando el usuario es staff (gerente/supervisor/etc). Null = aún no cargado. */
+  const [ownerPlanForGating, setOwnerPlanForGating] = useState<EffectivePlanId | null>(null);
 
   if (guardStatus === 'loading' || guardStatus === 'profile_loading') {
     return (
@@ -74,10 +78,39 @@ const AdminDashboardScreen: React.FC<Props> = ({ navigation, route }) => {
   }
   if (guardStatus === 'denied') return null;
 
-  const currentUserRole = user?.role ?? 'personal';
+  // No calcular menú hasta que el rol esté hidratado (evita fallback a 'personal' y menú reducido)
+  if (profileReady && (user?.role == null || user?.role === undefined)) {
+    if (__DEV__) console.log('[AdminDashboard] waiting for role', { user_id: user?.id, 'user?.role': user?.role });
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
+        <ActivityIndicator size="large" color="#8B0000" />
+        <Text style={{ marginTop: 12, color: '#666' }}>{t('msg.loading') || 'Cargando perfil…'}</Text>
+      </View>
+    );
+  }
+
+  const currentUserRole = normalizeRole(user?.role);
   const isOwner = profileReady && currentUserRole === 'owner';
   const isManager = profileReady && (currentUserRole === 'owner' || currentUserRole === 'gerente');
-  const isPersonal = currentUserRole === 'personal';
+
+  const roleReadyForMenu = profileReady && user?.role != null;
+
+  // Cargar plan efectivo del owner para staff (gerente, etc.) y usarlo en gating del menú
+  useEffect(() => {
+    if (!user || !profileReady) {
+      setOwnerPlanForGating(null);
+      return;
+    }
+    if (user.role === 'owner') {
+      setOwnerPlanForGating(null);
+      return;
+    }
+    if (user.owner_id) {
+      getOwnerEffectivePlan(user).then(setOwnerPlanForGating);
+    } else {
+      setOwnerPlanForGating('free');
+    }
+  }, [user?.id, user?.role, user?.owner_id, profileReady]);
 
   const handleBranchSelect = useCallback((branch: Branch) => {
     setCurrentBranch(branch);
@@ -218,35 +251,59 @@ const AdminDashboardScreen: React.FC<Props> = ({ navigation, route }) => {
     },
   ], [t, handleGlobalWineCatalog, handleCocktailMenu, handleWineManagement, handleInventoryAnalytics, handleQrGeneration, handleTastingExams, handleUserManagement, handleBranchManagement, handleSubscriptions, handleSettings]);
 
-  // Filtrar items del menú por rol
+  // Filtrar items del menú por rol (alineado con rolePermissions.ADMIN_FULL_ACCESS_ROLES)
   const filteredMenuItems = useMemo(() => {
-    return menuItems.filter(item => {
-      // Personal solo puede ver Catas y Degustaciones
-      if (isPersonal) {
-        return item.id === 'tasting-exams';
+    const hasFullMenuAccess = canAccessFullAdminScreens(currentUserRole as 'owner' | 'gerente' | 'sommelier' | 'supervisor' | 'personal');
+    const filtered = menuItems.filter(item => {
+      // Solo personal tiene menú reducido (Catas + Configuración). Supervisor, sommelier, gerente y owner ven el resto según requiresOwner/requiresManager.
+      if (!hasFullMenuAccess) {
+        return item.id === 'tasting-exams' || item.id === 'settings';
       }
-      
-      // Lógica normal para otros roles
       if (item.requiresOwner && !isOwner) return false;
       if (item.requiresManager && !isManager) return false;
       return true;
     });
-  }, [menuItems, isPersonal, isOwner, isManager]);
+    if (__DEV__) {
+      const menuReducedToTwo = filtered.length === 2 && filtered.every(i => i.id === 'tasting-exams' || i.id === 'settings');
+      console.log('[AdminDashboard] menu role check', {
+        user_id: user?.id,
+        user_email: user?.email,
+        'user?.role': user?.role,
+        currentUserRole,
+        profileReady,
+        roleReadyForMenu,
+        hasFullMenuAccess,
+        MENU_REDUCED_REASON: !hasFullMenuAccess ? `hasFullMenuAccess=false (currentUserRole=${currentUserRole})` : null,
+        menuItemIdsBefore: menuItems.map(i => i.id),
+        menuItemIdsAfter: filtered.map(i => i.id),
+        menuReducedToTwo,
+      });
+    }
+    return filtered;
+  }, [menuItems, currentUserRole, isOwner, isManager, user?.id, user?.email, user?.role, profileReady, roleReadyForMenu]);
 
-  // Precalcular features bloqueadas para optimizar render (solo items visibles)
-  // Mapea menuItem.id a FeatureId estable antes de verificar gating
+  // Precalcular features bloqueadas para optimizar render (solo items visibles).
+  // Owner: plan de su propia fila. Staff: plan del owner (ownerPlanForGating); si aún no cargó, tratamos como 'free'.
   const blockedFeatureIds = useMemo(() => {
     const set = new Set<string>();
+    const effectivePlan: EffectivePlanId = isOwner
+      ? getEffectivePlan(user)
+      : (ownerPlanForGating ?? 'free');
     for (const item of filteredMenuItems) {
       const featureId = mapMenuItemIdToFeatureId(item.id);
-      // Si el item tiene FeatureId y está bloqueado, agregarlo al set
       if (featureId) {
-        const blocked = !checkSubscriptionFeature(user, featureId);
-        if (blocked) set.add(item.id); // Guardamos menuItem.id para el render
+        const blocked = !checkSubscriptionFeatureByPlan(effectivePlan, featureId);
+        if (blocked) set.add(item.id);
       }
     }
     return set;
-  }, [user, filteredMenuItems]);
+  }, [user, isOwner, ownerPlanForGating, filteredMenuItems]);
+
+  // Staff no debe ver tarjetas bloqueadas por suscripción; owner sí las ve (con candado).
+  const visibleMenuItems = useMemo(() => {
+    if (isOwner) return filteredMenuItems;
+    return filteredMenuItems.filter(item => !blockedFeatureIds.has(item.id));
+  }, [isOwner, filteredMenuItems, blockedFeatureIds]);
 
   // Renderizar item del menú
   const renderMenuItem = useCallback(({ item }: { item: MenuItem }) => {
@@ -400,7 +457,7 @@ const AdminDashboardScreen: React.FC<Props> = ({ navigation, route }) => {
 
       {/* Menú principal */}
       <FlatList
-        data={filteredMenuItems}
+        data={visibleMenuItems}
         keyExtractor={(item) => item.id}
         renderItem={renderMenuItem}
         showsVerticalScrollIndicator={false}

@@ -11,6 +11,7 @@ import {
   Modal,
   TextInput,
 } from 'react-native';
+import ViewShot from 'react-native-view-shot';
 import QRCode from 'react-native-qrcode-svg';
 import Share from 'react-native-share';
 import * as FileSystem from 'expo-file-system';
@@ -20,7 +21,11 @@ import { useBranch } from '../contexts/BranchContext';
 import { useAuth } from '../contexts/AuthContext';
 import { generateUniversalQrUrl } from '../services/QrTokenService';
 import { createGuestQrToken, generateQrToken, getUserQrTokens, GeneratedQrToken, type GuestQrDuration } from '../services/QrGenerationService';
+import { useNavigation } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { RootStackParamList } from '../types';
 import { canGenerateGuestQr, canGenerateAdminInviteQr } from '../utils/permissions';
+import { isSensitiveAllowed } from '../utils/sensitiveActionGating';
 
 interface QrData {
   id: string;
@@ -39,6 +44,7 @@ const GUEST_DURATION_LABELS: Record<GuestQrDuration, string> = {
 };
 
 const QrGenerationScreen: React.FC = () => {
+  const navigation = useNavigation<StackNavigationProp<RootStackParamList, 'QrGeneration'>>();
   const { currentBranch } = useBranch();
   const { user, profileReady } = useAuth();
   const [qrType, setQrType] = useState<'guest' | 'admin'>('guest');
@@ -51,10 +57,27 @@ const QrGenerationScreen: React.FC = () => {
   const [qrUrlToShare, setQrUrlToShare] = useState('');
   const [sharingImage, setSharingImage] = useState(false);
   const qrSvgRef = useRef<any>(null);
+  const viewShotRef = useRef<any>(null);
 
   const canGenerateGuest = canGenerateGuestQr(user ?? null, currentBranch?.id ?? null);
+  const canGenerateAdmin =
+    user?.status === 'active' &&
+    canGenerateAdminInviteQr((user?.role ?? 'personal') as 'owner' | 'gerente' | 'sommelier' | 'supervisor' | 'personal');
   const isWrongBranchForStaff = (user?.role === 'gerente' || user?.role === 'supervisor') &&
     currentBranch?.id != null && user?.branch_id != null && currentBranch.id !== user.branch_id;
+
+  useEffect(() => {
+    if (!__DEV__ || !user || !profileReady) return;
+    console.log('[QR_GUEST_PERM]', {
+      role: user.role,
+      status: user.status,
+      owner_id: user.owner_id ?? null,
+      branch_id: user.branch_id ?? null,
+      selectedBranchId: currentBranch?.id ?? null,
+      canGenerateGuest,
+      isWrongBranchForStaff,
+    });
+  }, [user?.role, user?.status, user?.owner_id, user?.branch_id, currentBranch?.id, canGenerateGuest, isWrongBranchForStaff, profileReady]);
 
   const loadUserTokens = useCallback(async () => {
     if (!user?.id) return;
@@ -74,6 +97,11 @@ const QrGenerationScreen: React.FC = () => {
     if (user?.id) loadUserTokens();
   }, [user?.id, loadUserTokens]);
 
+  // Supervisor solo tiene guest: mantener pestaña en guest para no mostrar contenido admin
+  useEffect(() => {
+    if (!canGenerateAdmin && qrType === 'admin') setQrType('guest');
+  }, [canGenerateAdmin, qrType]);
+
   if (!profileReady) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
@@ -82,9 +110,35 @@ const QrGenerationScreen: React.FC = () => {
     );
   }
 
+  const canEnterQrScreen = user && (
+    canGenerateGuestQr(user, currentBranch?.id ?? null) ||
+    canGenerateAdminInviteQr((user.role ?? 'personal') as 'owner' | 'gerente' | 'sommelier' | 'supervisor' | 'personal')
+  );
+  if (!user || !canEnterQrScreen) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa', padding: 24 }}>
+        <Text style={{ fontSize: 18, fontWeight: '600', color: '#333', textAlign: 'center' }}>🚫 Sin permiso</Text>
+        <Text style={{ marginTop: 8, fontSize: 14, color: '#666', textAlign: 'center' }}>
+          Solo propietarios, gerentes y supervisores pueden generar QR para comensales. Solo propietarios y gerentes pueden generar QR de invitación admin.
+        </Text>
+      </View>
+    );
+  }
+
   const handleGenerateGuestQr = async () => {
     if (!currentBranch || !user?.id) {
       Alert.alert('Error', 'No hay sucursal seleccionada o usuario no autenticado');
+      return;
+    }
+    if (!isSensitiveAllowed(user)) {
+      Alert.alert(
+        'Verificación requerida',
+        'Para generar QR debes verificar tu correo desde Suscripciones.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Ir a Suscripciones', onPress: () => navigation.navigate('Subscriptions', { openVerifyEmail: true }) },
+        ]
+      );
       return;
     }
     if (!canGenerateGuest || isWrongBranchForStaff) {
@@ -102,7 +156,17 @@ const QrGenerationScreen: React.FC = () => {
         'QR Generado',
         `QR para comensales de ${currentBranch.name} generado correctamente.\nDuración: ${GUEST_DURATION_LABELS[guestDuration]}`
       );
-    } catch (error) {
+    } catch (error: any) {
+      if (__DEV__) {
+        console.warn('[QR Guest] create failed', {
+          userId: user?.id,
+          ownerId: user?.owner_id,
+          role: user?.role,
+          status: user?.status,
+          branch_id: currentBranch?.id,
+          errorMessage: error?.message ?? String(error),
+        });
+      }
       console.error('Error generating guest QR:', error);
       Alert.alert('Error', 'No se pudo generar el código QR para comensales');
     } finally {
@@ -115,14 +179,30 @@ const QrGenerationScreen: React.FC = () => {
       Alert.alert('Error', 'No hay sucursal seleccionada o usuario no autenticado');
       return;
     }
+    if (!isSensitiveAllowed(user)) {
+      Alert.alert(
+        'Verificación requerida',
+        'Para generar QR de invitación debes verificar tu correo desde Suscripciones.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Ir a Suscripciones', onPress: () => navigation.navigate('Subscriptions', { openVerifyEmail: true }) },
+        ]
+      );
+      return;
+    }
+    if (!canGenerateAdmin || isWrongBranchForStaff) {
+      Alert.alert('Error', 'No tienes permiso para generar QR de invitación en esta sucursal.');
+      return;
+    }
 
+    const ownerId = user.owner_id ?? user.id;
     setLoading(true);
     try {
       const newQr = await generateQrToken({
         type: 'admin_invite',
         branchId: currentBranch.id,
         createdBy: user.id,
-        ownerId: user.owner_id || user.id, // Owner del usuario (o el mismo si es owner)
+        ownerId,
         expiresInHours: 24 * 7, // 7 días
         maxUses: 1, // Uso único para admin
       });
@@ -133,11 +213,20 @@ const QrGenerationScreen: React.FC = () => {
         'QR Generado',
         `QR de invitación para ${currentBranch.name} generado.\n\n⚠️ IMPORTANTE:\nLos admins que usen este QR solo tendrán acceso a esta sucursal.\n\nUso único. Duración: 7 días`
       );
-    } catch (error) {
+    } catch (error: any) {
+      if (__DEV__) {
+        console.warn('[QR Admin] create failed', {
+          userId: user.id,
+          ownerId: user.owner_id,
+          role: user.role,
+          status: user.status,
+          branch_id: currentBranch.id,
+          owner_id_sent: ownerId,
+          errorMessage: error?.message ?? String(error),
+        });
+      }
       console.error('Error generating admin QR:', error);
-      
-      // Mensaje específico según el rol del usuario
-      if (user.role === 'sommelier' || user.role === 'supervisor') {
+      if (user.role === 'sommelier' || user.role === 'supervisor' || user.role === 'personal') {
         Alert.alert(
           'Permisos Insuficientes',
           'No tienes los permisos suficientes para generar códigos QR de invitación de administradores.\n\nSolo los propietarios y gerentes pueden crear este tipo de códigos.'
@@ -182,27 +271,37 @@ const QrGenerationScreen: React.FC = () => {
 
     setSharingImage(true);
     try {
-      const svg = qrSvgRef.current;
-      if (!svg || typeof svg.toDataURL !== 'function') {
-        throw new Error('QR no listo');
+      let fileUri: string | null = null;
+
+      if (viewShotRef.current?.capture) {
+        try {
+          const path = await viewShotRef.current.capture();
+          fileUri = path?.startsWith('file://') ? path : path ? `file://${path}` : null;
+        } catch (_) {
+          fileUri = null;
+        }
       }
 
-      const dataURL: string = await new Promise((resolve, reject) => {
-        svg.toDataURL((data: string) => {
-          if (data) resolve(data);
-          else reject(new Error('No se pudo generar la imagen del QR'));
+      if (!fileUri) {
+        const svg = qrSvgRef.current;
+        if (!svg || typeof svg.toDataURL !== 'function') {
+          throw new Error('QR no listo');
+        }
+        const dataURL: string = await new Promise((resolve, reject) => {
+          svg.toDataURL((data: string) => {
+            if (data) resolve(data);
+            else reject(new Error('No se pudo generar la imagen del QR'));
+          });
         });
-      });
-
-      const base64 = dataURL.startsWith('data:image')
-        ? dataURL.replace(/^data:image\/\w+;base64,/, '')
-        : dataURL;
-
-      const filename = `cellarium-qr-${Date.now()}.png`;
-      const fileUri = `${FileSystem.cacheDirectory}${filename}`;
-      await FileSystem.writeAsStringAsync(fileUri, base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+        const base64 = dataURL.startsWith('data:image')
+          ? dataURL.replace(/^data:image\/\w+;base64,/, '')
+          : dataURL;
+        const filename = `cellarium-qr-${Date.now()}.png`;
+        fileUri = `${FileSystem.cacheDirectory}${filename}`;
+        await FileSystem.writeAsStringAsync(fileUri, base64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      }
 
       const isSharingAvailable = await Sharing.isAvailableAsync();
       if (!isSharingAvailable) {
@@ -215,7 +314,9 @@ const QrGenerationScreen: React.FC = () => {
       });
 
       try {
-        await FileSystem.deleteAsync(fileUri, { idempotent: true });
+        if (fileUri?.startsWith(FileSystem.cacheDirectory)) {
+          await FileSystem.deleteAsync(fileUri, { idempotent: true });
+        }
       } catch (_) {}
     } catch (error: any) {
       if (error?.message === 'User did not share') {
@@ -257,36 +358,40 @@ const QrGenerationScreen: React.FC = () => {
       </View>
 
       <ScrollView style={styles.content}>
-        {/* Selector de tipo de QR */}
+        {/* Selector de tipo de QR: solo se muestran las opciones permitidas por rol */}
         <View style={styles.typeSelector}>
-          <TouchableOpacity
-            style={[
-              styles.typeButton,
-              qrType === 'guest' && styles.typeButtonActive
-            ]}
-            onPress={() => setQrType('guest')}
-          >
-            <Text style={[
-              styles.typeButtonText,
-              qrType === 'guest' && styles.typeButtonTextActive
-            ]}>
-              🍽️ Comensales
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.typeButton,
-              qrType === 'admin' && styles.typeButtonActive
-            ]}
-            onPress={() => setQrType('admin')}
-          >
-            <Text style={[
-              styles.typeButtonText,
-              qrType === 'admin' && styles.typeButtonTextActive
-            ]}>
-              👥 Invitación Admin
-            </Text>
-          </TouchableOpacity>
+          {canGenerateGuest && (
+            <TouchableOpacity
+              style={[
+                styles.typeButton,
+                qrType === 'guest' && styles.typeButtonActive
+              ]}
+              onPress={() => setQrType('guest')}
+            >
+              <Text style={[
+                styles.typeButtonText,
+                qrType === 'guest' && styles.typeButtonTextActive
+              ]}>
+                🍽️ Comensales
+              </Text>
+            </TouchableOpacity>
+          )}
+          {canGenerateAdmin && (
+            <TouchableOpacity
+              style={[
+                styles.typeButton,
+                qrType === 'admin' && styles.typeButtonActive
+              ]}
+              onPress={() => setQrType('admin')}
+            >
+              <Text style={[
+                styles.typeButtonText,
+                qrType === 'admin' && styles.typeButtonTextActive
+              ]}>
+                👥 Invitación Admin
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Información del tipo de QR seleccionado */}
@@ -351,8 +456,14 @@ const QrGenerationScreen: React.FC = () => {
                 Uso único{'\n'}
                 Requiere aprobación de owner/gerente
               </Text>
-              {/* Solo mostrar botón si el usuario tiene permisos */}
-              {canGenerateAdminInviteQr((user?.role ?? 'personal') as 'owner' | 'gerente' | 'sommelier' | 'supervisor' | 'personal') ? (
+              {isWrongBranchForStaff ? (
+                <View style={styles.restrictedAccessCard}>
+                  <Text style={styles.restrictedAccessTitle}>Sucursal no asignada</Text>
+                  <Text style={styles.restrictedAccessText}>
+                    Solo puedes generar QR para tu sucursal asignada.
+                  </Text>
+                </View>
+              ) : canGenerateAdmin ? (
                 <TouchableOpacity
                   style={[styles.generateButton, loading && styles.generateButtonDisabled]}
                   onPress={handleGenerateAdminQr}
@@ -382,24 +493,48 @@ const QrGenerationScreen: React.FC = () => {
         {/* Mostrar QR generado */}
         {selectedQr && (
           <View style={styles.qrDisplayCard}>
+            <ViewShot
+              ref={viewShotRef}
+              options={{ format: 'png', quality: 1, result: 'tmpfile' }}
+              style={styles.shareCardContainer}
+            >
+              <View style={styles.shareCardInner}>
+                <Text style={styles.shareCardTitle}>Cellarium – Menú de vinos</Text>
+                <Text style={styles.shareCardSubtitle}>
+                  {selectedQr.branchName || 'Sucursal'}
+                </Text>
+                <Text style={styles.shareCardExpiry}>
+                  Válido hasta{' '}
+                  {selectedQr.expiresAt
+                    ? new Date(selectedQr.expiresAt).toLocaleString('es-MX', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : '—'}
+                </Text>
+                <View style={styles.qrContainerShare}>
+                  <QRCode
+                    getRef={(c: any) => { qrSvgRef.current = c; }}
+                    value={generateUniversalQrUrl({
+                      type: selectedQr.type === 'admin_invite' ? 'admin' : selectedQr.type,
+                      token: selectedQr.token,
+                      branchId: selectedQr.branchId,
+                      branchName: selectedQr.branchName,
+                    })}
+                    size={240}
+                    color="#8B0000"
+                    backgroundColor="white"
+                  />
+                </View>
+              </View>
+            </ViewShot>
+
             <Text style={styles.qrDisplayTitle}>
               {selectedQr.type === 'guest' ? '🍽️ QR para Comensales' : '👥 QR Invitación Admin'}
             </Text>
-            
-            <View style={styles.qrContainer}>
-              <QRCode
-                getRef={(c: any) => { qrSvgRef.current = c; }}
-                value={generateUniversalQrUrl({
-                  type: selectedQr.type === 'admin_invite' ? 'admin' : selectedQr.type,
-                  token: selectedQr.token,
-                  branchId: selectedQr.branchId,
-                  branchName: selectedQr.branchName,
-                })}
-                size={200}
-                color="#8B0000"
-                backgroundColor="white"
-              />
-            </View>
 
             <View style={styles.qrInfoContainer}>
               <Text style={styles.qrInfoLabel}>Sucursal:</Text>
@@ -457,6 +592,14 @@ const QrGenerationScreen: React.FC = () => {
                   <Text style={styles.shareButtonTextSecondary}>📋 Copiar mensaje</Text>
                 </TouchableOpacity>
               </View>
+              {__DEV__ && selectedQr.type === 'guest' && (
+                <TouchableOpacity
+                  style={[styles.shareButton, styles.devOnlyButton]}
+                  onPress={() => navigation.navigate('WineCatalog', { isGuest: true, guestToken: selectedQr.token })}
+                >
+                  <Text style={styles.devOnlyButtonText}>Ver como comensal en app</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         )}
@@ -675,6 +818,44 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  shareCardContainer: {
+    alignSelf: 'stretch',
+    marginBottom: 16,
+  },
+  shareCardInner: {
+    backgroundColor: 'white',
+    padding: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#8B0000',
+    alignItems: 'center',
+  },
+  shareCardTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  shareCardSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  shareCardExpiry: {
+    fontSize: 12,
+    color: '#888',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  qrContainerShare: {
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   qrDisplayTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -748,6 +929,16 @@ const styles = StyleSheet.create({
   },
   shareButtonTextSecondary: {
     color: '#333',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  devOnlyButton: {
+    backgroundColor: '#b45309',
+    width: '100%',
+    marginTop: 8,
+  },
+  devOnlyButtonText: {
+    color: '#fff',
     fontSize: 13,
     fontWeight: '600',
   },

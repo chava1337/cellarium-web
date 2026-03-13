@@ -1,9 +1,13 @@
 import React, { useEffect } from 'react';
+import { View, ActivityIndicator } from 'react-native';
 import { NavigationContainer, LinkingOptions } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useFonts } from '@expo-google-fonts/cormorant/useFonts';
+import { Cormorant_600SemiBold_Italic } from '@expo-google-fonts/cormorant/600SemiBold_Italic';
 import { AuthProvider } from './src/contexts/AuthContext';
 import { GuestProvider } from './src/contexts/GuestContext';
 import { BranchProvider } from './src/contexts/BranchContext';
@@ -27,21 +31,28 @@ import SubscriptionsScreen from './src/screens/SubscriptionsScreen';
 
 const Stack = createStackNavigator<RootStackParamList>();
 
-// Configuración de Deep Linking
-const prefix = Linking.createURL('/');
+// Configuración de Deep Linking (sin IP fija; Dev Client usa Linking.createURL)
+// Incluir cellarium:// y cellarium:/// para compatibilidad web (doble y triple slash)
+const linkingPrefixes = Array.from(
+  new Set([
+    'cellarium://',
+    'cellarium:///',
+    Linking.createURL('/'),
+    'https://cellarium.net',
+    'https://www.cellarium.net',
+  ])
+);
+if (__DEV__) {
+  console.log('[Linking] prefixes:', linkingPrefixes);
+}
 
 const linking: LinkingOptions<RootStackParamList> = {
-  prefixes: [
-    prefix,
-    'cellarium://',
-    'https://cellarium.app',
-    'https://www.cellarium.app',
-  ],
+  prefixes: linkingPrefixes,
   config: {
     screens: {
       Login: 'login',
       QrProcessor: {
-        path: 'qr',
+        path: 'qr/:qrData?',
       },
       WineCatalog: 'catalog',
       AdminLogin: 'admin/login',
@@ -60,9 +71,36 @@ const AppContent: React.FC = () => {
   const deviceInfo = useDeviceInfo();
 
   useEffect(() => {
-    // Configurar orientación según el tipo de dispositivo
     configureOrientation(deviceInfo.deviceType);
   }, [deviceInfo.deviceType]);
+
+  // Log en __DEV__ de la URL inicial (deep link) para depurar QrProcessor
+  useEffect(() => {
+    if (!__DEV__) return;
+    Linking.getInitialURL().then((url) => {
+      if (url) console.log('[App] initial URL (deep link)', url);
+    });
+  }, []);
+
+  // Listener global de deep links solo en __DEV__ para diagnosticar redirect tras Stripe Checkout
+  useEffect(() => {
+    if (!__DEV__) return;
+
+    console.log('[DEEPLINK DEBUG] listener mounted');
+
+    const subscription = Linking.addEventListener('url', (event) => {
+      console.log('[DEEPLINK RECEIVED]', event.url);
+    });
+
+    Linking.getInitialURL().then((url) => {
+      console.log('[INITIAL URL]', url);
+    });
+
+    return () => {
+      console.log('[DEEPLINK DEBUG] listener removed');
+      subscription.remove();
+    };
+  }, []);
 
   return (
     <NavigationContainer linking={linking}>
@@ -142,17 +180,31 @@ const AppContent: React.FC = () => {
 };
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    Cormorant_600SemiBold_Italic,
+  });
+
+  if (!fontsLoaded) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF' }}>
+        <ActivityIndicator size="large" color="#8B0000" />
+      </View>
+    );
+  }
+
   return (
-    <SafeAreaProvider>
-      <LanguageProvider>
-        <AuthProvider>
-          <BranchProvider>
-            <GuestProvider>
-              <AppContent />
-            </GuestProvider>
-          </BranchProvider>
-        </AuthProvider>
-      </LanguageProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <BranchProvider>
+              <GuestProvider>
+                <AppContent />
+              </GuestProvider>
+            </BranchProvider>
+          </AuthProvider>
+        </LanguageProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

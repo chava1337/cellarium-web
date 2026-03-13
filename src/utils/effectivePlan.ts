@@ -5,8 +5,44 @@
  */
 
 import type { User } from '../types';
+import { supabase } from '../lib/supabase';
 
 export type EffectivePlanId = 'free' | 'basic' | 'additional-branch';
+
+function mapRpcPlanToEffective(rpcPlan: string | null | undefined): EffectivePlanId {
+  if (!rpcPlan) return 'free';
+  const p = String(rpcPlan).toLowerCase();
+  if (p === 'pro') return 'basic';
+  if (p === 'business') return 'additional-branch';
+  if (p === 'free' || p === 'basic' || p === 'additional-branch') return p;
+  return 'free';
+}
+
+/**
+ * Plan efectivo del OWNER (para gerente/supervisor). Preferir RPC get_plan_id_effective;
+ * si no está disponible, consultar public.users por owner_id y usar getEffectivePlan del row.
+ */
+export async function getOwnerEffectivePlan(user: User | null): Promise<EffectivePlanId> {
+  const ownerId = user?.owner_id;
+  if (!ownerId) return 'free';
+
+  try {
+    const { data, error } = await supabase.rpc('get_plan_id_effective', { p_owner: ownerId });
+    if (!error && data != null) return mapRpcPlanToEffective(data);
+  } catch (_) {}
+
+  try {
+    const { data: ownerRow, error } = await supabase
+      .from('users')
+      .select('subscription_plan, subscription_active, subscription_expires_at')
+      .eq('id', ownerId)
+      .single();
+    if (!error && ownerRow) {
+      return getEffectivePlan(ownerRow as User);
+    }
+  } catch (_) {}
+  return 'free';
+}
 
 /**
  * Plan efectivo para el usuario.
