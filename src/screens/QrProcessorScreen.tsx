@@ -15,6 +15,7 @@ import { RootStackParamList } from '../types';
 import { getPublicMenuByToken } from '../services/PublicMenuService';
 import { supabase } from '../config/supabase';
 import { parseQrLink } from '../utils/parseQrLink';
+import { consumePendingQrPayload } from '../utils/pendingQrPayload';
 
 /** Temporal: overlay de diagnóstico QR en pantalla (sin ADB). Poner a false para producción. */
 const QR_DEBUG_OVERLAY = true;
@@ -184,10 +185,36 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
       }
 
       if (qrData || token) {
-        setDebug({ tokenFound: 'yes', tokenLength: token ? String(token.length) : (qrData && typeof qrData === 'object' && (qrData as any).token ? String((qrData as any).token.length) : '?') });
+        setDebug({ tokenFound: 'yes', source: 'route.params', tokenLength: token ? String(token.length) : (qrData && typeof qrData === 'object' && (qrData as any).token ? String((qrData as any).token.length) : '?') });
+        if (__DEV__) console.log('[QrProcessor] fuente final: route.params', { hasQrData: !!qrData, hasToken: !!token });
       }
-      if (__DEV__) {
-        console.log('[QrProcessor] tras A) params normalizados:', { hasQrData: !!qrData, hasToken: !!token, tokenMask: token ? maskToken(token) : undefined });
+      if (__DEV__ && !qrData && !token) {
+        console.log('[QrProcessor] tras A) sin payload en route.params');
+      }
+
+      // A2) Pending payload (listener guardó payload antes de reset; params pueden no llegar en dev client)
+      if (!qrData && !token) {
+        const pendingPayload = consumePendingQrPayload();
+        if (__DEV__) console.log('[QrProcessor] route.params vacíos, consumePendingQrPayload:', pendingPayload == null ? 'null' : { hasQrData: pendingPayload.qrData != null, hasToken: !!pendingPayload.token });
+        if (pendingPayload) {
+          qrData = pendingPayload.qrData;
+          token = pendingPayload.token;
+          if (pendingPayload.rawUrl) {
+            deepLinkUrlRef.current = pendingPayload.rawUrl;
+            setDeepLinkUrl(pendingPayload.rawUrl);
+          }
+          if (typeof qrData === 'string' && qrData.trim()) {
+            const result = decodeMaybeJson(qrData);
+            if (result?.type === 'object') qrData = result.data;
+            else if (result?.type === 'token') token = result.data;
+            else token = qrData;
+          }
+          if (qrData && typeof qrData === 'object' && 'token' in qrData) {
+            token = (qrData as any).token;
+          }
+          setDebug({ source: 'pendingPayload', tokenFound: qrData || token ? 'yes' : 'no', tokenLength: token ? String(token.length) : '?' });
+          if (__DEV__) console.log('[QrProcessor] fuente final: pendingPayload', { hasQrData: !!qrData, hasToken: !!token, tokenMask: token ? maskToken(token) : undefined });
+        }
       }
 
       // B) Fallback: URL (state ref or getInitialURL) — parseQrLink prioriza ?data=
@@ -206,7 +233,7 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         if (payload) {
           if (payload.qrData) qrData = payload.qrData;
           if (payload.token) token = payload.token;
-          if (__DEV__) console.log('[QrProcessor] token recibido desde URL', { hasQrData: !!qrData, hasToken: !!token, tokenMask: token ? maskToken(token) : undefined });
+          if (__DEV__) console.log('[QrProcessor] fuente final: URL fallback (deepLinkUrl/initialURL)', { hasQrData: !!qrData, hasToken: !!token });
         }
       }
 
@@ -220,8 +247,8 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         if (payloadRetry) {
           if (payloadRetry.qrData) qrData = payloadRetry.qrData;
           if (payloadRetry.token) token = payloadRetry.token;
-          setDebug({ tokenFound: 'yes', tokenLength: token ? String(token.length) : '?' });
-          if (__DEV__) console.log('[QrProcessor] token obtenido en retry', { hasQrData: !!qrData, hasToken: !!token, tokenMask: token ? maskToken(token) : undefined });
+          setDebug({ tokenFound: 'yes', source: 'retryInitialURL', tokenLength: token ? String(token.length) : '?' });
+          if (__DEV__) console.log('[QrProcessor] fuente final: retryInitialURL', { hasQrData: !!qrData, hasToken: !!token });
         }
       }
 
@@ -239,7 +266,7 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
 
       if (!qrData && !token) {
         setDebug({ currentStep: 'error', finalError: 'sin payload' });
-        if (__DEV__) console.log('[QrProcessor] error real: sin payload (params, URL, retry URL ni storage)');
+        if (__DEV__) console.log('[QrProcessor] fuente final: none — sin payload (params, pending, URL, retry, storage)');
         setStatus('error');
         setMessage('Código QR inválido. Por favor, escanea de nuevo.');
         setTimeout(() => navigation.navigate('Welcome'), 3000);
@@ -329,7 +356,7 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         return;
       }
 
-      // Guest payload (type === 'guest'): load menu via Edge public-menu in WineCatalog
+      // Guest payload (type === 'guest'): validar con public-menu antes de navegar (mismo criterio que legacy)
       const isGuestPayload = qrData && typeof qrData === 'object' && (qrData as any).type === 'guest';
       if (isGuestPayload && tokenToValidate) {
         const trimmed = tokenToValidate.trim();
@@ -343,15 +370,32 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
           return;
         }
         setDebug({ currentStep: 'requesting', requestStarted: 'started', endpointUsed: 'public-menu' });
-        if (__DEV__) console.log('[QrProcessor] request resuelto (guest) → WineCatalog');
+        let guestMenuOk = false;
+        let guestMenuStatus = '-';
+        try {
+          if (__DEV__) console.log('[QrProcessor] guest path: validando token con public-menu tokenLen:', trimmed.length);
+          await getPublicMenuByToken(trimmed);
+          guestMenuOk = true;
+          guestMenuStatus = '200';
+          if (__DEV__) console.log('[QrProcessor] guest path public-menu ok → WineCatalog');
+        } catch (err) {
+          guestMenuStatus = (err as Error)?.message ?? 'err';
+          if (__DEV__) console.log('[QrProcessor] guest path public-menu error:', (err as Error)?.message ?? err);
+        }
+        setDebug({ currentStep: 'response', requestStarted: 'done', httpStatus: guestMenuStatus, responseSummary: guestMenuOk ? 'ok' : 'error', navigationTriggered: guestMenuOk ? 'triggered' : undefined });
+        if (!guestMenuOk) {
+          setStatus('error');
+          setMessage('Código expirado o inválido');
+          setTimeout(() => navigation.navigate('Welcome'), 3000);
+          return;
+        }
         setStatus('success');
         setMessage('Cargando menú...');
-        setDebug({ currentStep: 'response', requestStarted: 'done', httpStatus: '200', responseSummary: 'ok', navigationTriggered: 'triggered' });
+        const guestParams = { isGuest: true as const, guestToken: trimmed };
+        if (__DEV__) console.log('[QrProcessor] NAV antes replace(WineCatalog)', { guestTokenLen: trimmed.length });
         setTimeout(() => {
-          navigation.replace('WineCatalog', {
-            isGuest: true,
-            guestToken: trimmed,
-          });
+          navigation.replace('WineCatalog', guestParams);
+          if (__DEV__) console.log('[QrProcessor] NAV después replace(WineCatalog) llamada');
         }, 800);
         return;
       }
@@ -387,8 +431,11 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         setDebug({ navigationTriggered: 'triggered', currentStep: 'navigating' });
         setStatus('success');
         setMessage('Cargando menú...');
+        const legacyGuestParams = { isGuest: true as const, guestToken: trimmed };
+        if (__DEV__) console.log('[QrProcessor] NAV antes replace(WineCatalog) legacy', { guestTokenLen: trimmed.length });
         setTimeout(() => {
-          navigation.replace('WineCatalog', { isGuest: true, guestToken: trimmed });
+          navigation.replace('WineCatalog', legacyGuestParams);
+          if (__DEV__) console.log('[QrProcessor] NAV después replace(WineCatalog) llamada legacy');
         }, 800);
         return;
       }

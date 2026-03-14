@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { View, ActivityIndicator } from 'react-native';
-import { NavigationContainer, LinkingOptions } from '@react-navigation/native';
+import { NavigationContainer, LinkingOptions, useNavigationContainerRef } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
@@ -14,6 +14,8 @@ import { BranchProvider } from './src/contexts/BranchContext';
 import { LanguageProvider } from './src/contexts/LanguageContext';
 import { RootStackParamList } from './src/types';
 import { useDeviceInfo, configureOrientation } from './src/hooks/useDeviceInfo';
+import { parseQrLink } from './src/utils/parseQrLink';
+import { setPendingQrPayload } from './src/utils/pendingQrPayload';
 
 // Importar pantallas
 import BootstrapScreen from './src/screens/BootstrapScreen';
@@ -22,6 +24,7 @@ import AppNavigator from './src/screens/AppNavigator';
 import WelcomeScreen from './src/screens/WelcomeScreen';
 import AdminRegistrationScreen from './src/screens/AdminRegistrationScreen';
 import QrProcessorScreen from './src/screens/QrProcessorScreen';
+import WineCatalogScreen from './src/screens/WineCatalogScreen';
 import SubscriptionsScreen from './src/screens/SubscriptionsScreen';
 // Pantallas de desarrollo - comentadas (no necesarias con usuarios reales)
 // import OwnerRegistrationScreen from './src/screens/OwnerRegistrationScreen';
@@ -69,6 +72,7 @@ const linking: LinkingOptions<RootStackParamList> = {
 // Componente wrapper para manejar la configuración de dispositivo
 const AppContent: React.FC = () => {
   const deviceInfo = useDeviceInfo();
+  const navigationRef = useNavigationContainerRef<RootStackParamList>();
 
   useEffect(() => {
     configureOrientation(deviceInfo.deviceType);
@@ -82,28 +86,50 @@ const AppContent: React.FC = () => {
     });
   }, []);
 
-  // Listener global de deep links solo en __DEV__ para diagnosticar redirect tras Stripe Checkout
+  // Listener global: propagar deep link QR a QrProcessor (fuente principal cuando app abierta o dev-client recibe enlace tras arranque)
   useEffect(() => {
-    if (!__DEV__) return;
+    const handleUrl = (event: { url: string }) => {
+      const url = event?.url;
+      if (__DEV__) console.log('[DEEPLINK] listener recibió URL', url == null ? 'null' : url.length > 80 ? url.slice(0, 80) + '...' : url);
+      if (!url) return;
+      const payload = parseQrLink(url);
+      if (__DEV__) console.log('[DEEPLINK] parseQrLink(result)', payload == null ? 'null' : { hasQrData: payload.qrData != null, hasToken: !!payload.token });
+      if (!payload || (!payload.qrData && !payload.token)) return;
+      setPendingQrPayload({ rawUrl: url, qrData: payload.qrData, token: payload.token });
+      if (__DEV__) console.log('[DEEPLINK] payload guardado en pendingQrPayload');
+      const params = payload.qrData != null
+        ? { qrData: payload.qrData }
+        : payload.token
+          ? { token: payload.token }
+          : {};
+      if (!navigationRef.isReady()) {
+        if (__DEV__) console.log('[DEEPLINK] nav no ready, omitiendo reset a QrProcessor');
+        return;
+      }
+      if (__DEV__) console.log('[DEEPLINK] reset a QrProcessor disparado desde listener, params keys:', Object.keys(params));
+      navigationRef.reset({
+        index: 0,
+        routes: [{ name: 'QrProcessor', params }],
+      });
+    };
 
-    console.log('[DEEPLINK DEBUG] listener mounted');
+    if (__DEV__) console.log('[DEEPLINK] listener mounted');
+    const subscription = Linking.addEventListener('url', handleUrl);
 
-    const subscription = Linking.addEventListener('url', (event) => {
-      console.log('[DEEPLINK RECEIVED]', event.url);
-    });
-
-    Linking.getInitialURL().then((url) => {
-      console.log('[INITIAL URL]', url);
-    });
+    if (__DEV__) {
+      Linking.getInitialURL().then((url) => {
+        console.log('[DEEPLINK] initial URL', url == null ? 'null' : url.slice(0, 80) + (url.length > 80 ? '...' : ''));
+      });
+    }
 
     return () => {
-      console.log('[DEEPLINK DEBUG] listener removed');
+      if (__DEV__) console.log('[DEEPLINK] listener removed');
       subscription.remove();
     };
   }, []);
 
   return (
-    <NavigationContainer linking={linking}>
+    <NavigationContainer ref={navigationRef} linking={linking}>
       <StatusBar style="auto" />
       <Stack.Navigator
         initialRouteName="Bootstrap"
@@ -141,6 +167,11 @@ const AppContent: React.FC = () => {
         <Stack.Screen 
           name="QrProcessor" 
           component={QrProcessorScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="WineCatalog" 
+          component={WineCatalogScreen}
           options={{ headerShown: false }}
         />
         <Stack.Screen 

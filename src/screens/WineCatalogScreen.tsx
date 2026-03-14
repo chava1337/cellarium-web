@@ -129,12 +129,32 @@ interface Props {
 }
 
 const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
-  // TODO: Implementar guard admin si esta pantalla tiene funciones administrativas
-  // useAdminGuard({ navigation, route, requireAuth: false }); // Solo bloquear guests, no requerir auth
-  
   // Verificar si es un invitado (acceso por QR de comensal)
   const isGuest = route.params?.isGuest || false;
   const guestToken = route.params?.guestToken;
+
+  // Trazabilidad guest: params y token al montar y cuando cambian
+  useEffect(() => {
+    if (!__DEV__) return;
+    const params = route.params ?? {};
+    const keys = Object.keys(params);
+    console.log('[WineCatalog] route.params', {
+      keys,
+      isGuest: params?.isGuest,
+      hasGuestToken: !!(params as any)?.guestToken,
+      guestTokenLen: typeof (params as any)?.guestToken === 'string' ? (params as any).guestToken.length : 0,
+      guestTokenSuffix: typeof (params as any)?.guestToken === 'string' && (params as any).guestToken.length > 4
+        ? (params as any).guestToken.slice(-4)
+        : 'n/a',
+    });
+  }, [route.params]);
+
+  useEffect(() => {
+    if (__DEV__) console.log('[WineCatalog] mount', { isGuest, hasGuestToken: !!guestToken, guestTokenLen: guestToken?.length ?? 0 });
+  }, []);
+
+  // TODO: Implementar guard admin si esta pantalla tiene funciones administrativas
+  // useAdminGuard({ navigation, route, requireAuth: false }); // Solo bloquear guests, no requerir auth
   const { user } = useAuth(); // Obtener usuario autenticado
   const { currentBranch, setCurrentBranch, availableBranches, setAvailableBranches, isInitialized } = useBranch(); // Obtener sucursal actual y estado de inicialización
   const { session: guestSession, currentBranch: guestBranch } = useGuest(); // Obtener sesión e información de sucursal si existe
@@ -888,6 +908,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
   /** Load menu via Edge public-menu (guest only; no qr_tokens / wine_branch_stock from client). */
   const loadGuestMenuByToken = useCallback(async () => {
     const token = guestToken?.trim();
+    if (__DEV__) console.log('[WineCatalog] loadGuestMenuByToken called', { tokenLen: token?.length ?? 0, tokenSuffix: token && token.length > 4 ? token.slice(-4) : 'n/a' });
     if (!token) {
       setGuestMenuError(t('catalog.guest_token_missing'));
       setLoading(false);
@@ -913,10 +934,13 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
       const stockMap = new Map<string, { wines: Wine; stock_quantity?: number; price_by_glass?: number; price_by_bottle?: number }>();
       wines.forEach((w) => stockMap.set(w.id, { wines: w, stock_quantity: w.stock_quantity, price_by_glass: w.price_per_glass, price_by_bottle: w.price }));
       stockByWineIdRef.current = stockMap;
+      if (__DEV__) console.log('[WineCatalog] loadGuestMenuByToken success', { branchId: branch?.id, winesCount: wines.length });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (__DEV__) console.warn('[GUEST_MENU] fetch failed', msg);
-      setGuestMenuError(t('catalog.guest_code_expired'));
+      if (__DEV__) console.warn('[GUEST_MENU] fetch failed', msg, err);
+      // En __DEV__ mostrar error real para diagnosticar; en prod mensaje genérico
+      const displayError = __DEV__ ? `${t('catalog.guest_code_expired')} [${msg}]` : t('catalog.guest_code_expired');
+      setGuestMenuError(displayError);
       setWines([]);
       setFilteredWines([]);
       setGuestBranchFromMenu(null);

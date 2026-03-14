@@ -1,6 +1,7 @@
 /**
- * Public menu via Edge Function public-menu (service_role).
- * Used by guest flow so the app does not touch qr_tokens or wine_branch_stock from the client.
+ * Public menu via Edge Function public-menu.
+ * Used by guest flow; the app does not touch qr_tokens or wine_branch_stock from the client.
+ * La pasarela de Supabase exige Authorization + apikey para aceptar la petición (anon key).
  */
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
@@ -9,6 +10,15 @@ const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 function tokenSuffix(token: string): string {
   if (!token || token.length <= 8) return '***';
   return `${token.slice(-6)}`;
+}
+
+function urlSummary(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.origin}${u.pathname}?token=...`;
+  } catch {
+    return url.length > 50 ? url.slice(0, 50) + '...' : url;
+  }
 }
 
 export interface PublicMenuBranch {
@@ -61,26 +71,35 @@ export interface PublicMenuResponse {
 /**
  * Fetches the public menu by guest token from the Edge Function.
  * Do not log the full token; use tokenSuffix only.
+ * Headers: apikey + Authorization Bearer (anon key) requeridos por la pasarela Supabase.
  */
 export async function getPublicMenuByToken(token: string): Promise<PublicMenuResponse> {
   const suffix = tokenSuffix(token);
-  if (__DEV__) console.log('[GUEST_MENU] fetch start tokenSuffix:', suffix);
-
   const url = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/public-menu?token=${encodeURIComponent(token)}`;
+  const headers: Record<string, string> = {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+  };
+
+  if (__DEV__) {
+    console.log('[GUEST_MENU] fetch start', { urlSummary: urlSummary(url), tokenSuffix: suffix, headersSent: ['apikey', 'Authorization', 'Content-Type'] });
+  }
+
   const res = await fetch(url, {
     method: 'GET',
-    headers: {
-      apikey: SUPABASE_ANON_KEY,
-      'Content-Type': 'application/json',
-    },
+    headers,
   });
 
-  if (__DEV__) console.log('[GUEST_MENU] fetch end tokenSuffix:', suffix, 'status:', res.status);
+  if (__DEV__) {
+    console.log('[GUEST_MENU] fetch end', { status: res.status, tokenSuffix: suffix });
+  }
 
   if (!res.ok) {
     let body = '';
     try {
       body = await res.text();
+      if (__DEV__) console.warn('[GUEST_MENU] fetch error', { status: res.status, bodySummary: body.slice(0, 200) });
       if (body.length > 200) body = body.slice(0, 200) + '...';
     } catch (_) {}
     const msg = body.trim() || res.statusText || `HTTP ${res.status}`;
