@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cellarium - Redirigiendo...</title>
+    <title>Cellarium - Menú</title>
     <style>
         * {
             margin: 0;
@@ -118,8 +118,11 @@
         <h1>Cellarium</h1>
         <p class="subtitle">Catálogo de Vinos</p>
         
-        <div class="loading"></div>
-        <p class="message" id="message">Abriendo la aplicación...</p>
+        <div class="loading" id="loadingSpinner"></div>
+        <p class="message" id="message"></p>
+        <div id="openAppSection" style="display: none; margin-top: 20px;">
+            <a href="#" id="openAppButton" class="store-button">Abrir en la app</a>
+        </div>
 
         <div class="store-buttons" id="storeButtons" style="display: none;">
             <a href="#" id="appStoreButton" class="store-button">
@@ -142,65 +145,61 @@
     </div>
 
     <script>
-        // Obtener parámetros del QR desde la URL
+        // Modo pasivo: no redirigir automáticamente a cellarium:// para evitar loops/cuelgues.
+        // Si hay ?data=, mostramos opción de abrir en app y enlaces a stores. Sin spinner infinito.
         const urlParams = new URLSearchParams(window.location.search);
         const qrDataParam = urlParams.get('data');
-        
-        // Función para detectar el sistema operativo
+
         function getMobileOperatingSystem() {
-            const userAgent = navigator.userAgent || navigator.vendor || window.opera;
-            
-            if (/android/i.test(userAgent)) {
-                return "Android";
-            }
-            
-            if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
-                return "iOS";
-            }
-            
+            const ua = navigator.userAgent || navigator.vendor || window.opera;
+            if (/android/i.test(ua)) return "Android";
+            if (/iPad|iPhone|iPod/.test(ua) && !window.MSStream) return "iOS";
             return "unknown";
         }
 
-        // Intentar abrir la app
-        function tryOpenApp() {
+        function renderPassive() {
+            const spinner = document.getElementById('loadingSpinner');
+            const message = document.getElementById('message');
+            const openAppSection = document.getElementById('openAppSection');
+            const openAppButton = document.getElementById('openAppButton');
+            const storeButtons = document.getElementById('storeButtons');
             const os = getMobileOperatingSystem();
-            let appUrl = '';
-            
+
+            spinner.style.display = 'none';
+
             if (qrDataParam) {
-                // Construir deep link
-                appUrl = `cellarium://qr?data=${qrDataParam}`;
+                message.textContent = 'Menú disponible. Si tienes la app instalada, ábrela desde aquí.';
+                openAppSection.style.display = 'block';
+                openAppButton.href = 'cellarium://qr?data=' + encodeURIComponent(qrDataParam);
+                openAppButton.onclick = function(e) {
+                    e.preventDefault();
+                    window.location.href = 'cellarium://qr?data=' + encodeURIComponent(qrDataParam);
+                };
             } else {
-                appUrl = 'cellarium://';
+                message.textContent = 'Escanea un QR de Cellarium para ver el menú.';
             }
-            
-            // Intentar abrir la app
-            window.location.href = appUrl;
-            
-            // Después de 2 segundos, mostrar opciones de descarga si no se abrió
-            setTimeout(() => {
-                document.getElementById('message').textContent = '¿No tienes la app instalada?';
-                document.getElementById('storeButtons').style.display = 'flex';
-                
-                // Configurar enlaces de las stores
-                if (os === 'iOS') {
-                    document.getElementById('appStoreButton').style.display = 'flex';
-                    document.getElementById('playStoreButton').style.display = 'none';
-                    document.getElementById('appStoreButton').href = 'https://apps.apple.com/app/cellarium/id123456789';
-                } else if (os === 'Android') {
-                    document.getElementById('appStoreButton').style.display = 'none';
-                    document.getElementById('playStoreButton').style.display = 'flex';
-                    document.getElementById('playStoreButton').href = 'https://play.google.com/store/apps/details?id=com.cellarium.winecatalog';
-                } else {
-                    // Desktop o desconocido - mostrar ambos
-                    document.getElementById('appStoreButton').style.display = 'flex';
-                    document.getElementById('playStoreButton').style.display = 'flex';
-                    document.getElementById('message').textContent = 'Descarga Cellarium en tu dispositivo móvil';
-                }
-            }, 2000);
+
+            storeButtons.style.display = 'flex';
+            if (os === 'iOS') {
+                document.getElementById('appStoreButton').style.display = 'flex';
+                document.getElementById('playStoreButton').style.display = 'none';
+                document.getElementById('appStoreButton').href = 'https://apps.apple.com/app/cellarium/id123456789';
+            } else if (os === 'Android') {
+                document.getElementById('appStoreButton').style.display = 'none';
+                document.getElementById('playStoreButton').style.display = 'flex';
+                document.getElementById('playStoreButton').href = 'https://play.google.com/store/apps/details?id=com.cellarium.winecatalog';
+            } else {
+                document.getElementById('appStoreButton').style.display = 'flex';
+                document.getElementById('playStoreButton').style.display = 'flex';
+            }
         }
 
-        // Ejecutar al cargar la página
-        tryOpenApp();
+        // Mostrar contenido de inmediato, sin redirección automática
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', renderPassive);
+        } else {
+            renderPassive();
+        }
     </script>
 </body>
 </html>

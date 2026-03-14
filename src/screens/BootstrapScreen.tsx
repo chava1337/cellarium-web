@@ -6,13 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import Rive from 'rive-react-native';
-
-/** Extrae el segmento encoded de una URL cellarium qr (dobles o triples slash) */
-function getQrEncodedFromUrl(url: string | null): string | null {
-  if (!url || typeof url !== 'string') return null;
-  const match = url.match(/cellarium:\/\/\/?qr\/([^?#]+)/i) || url.match(/cellarium:\/\/qr\/([^?#]+)/i);
-  return match ? match[1] : null;
-}
+import { parseQrLink } from '../utils/parseQrLink';
 
 type BootstrapScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Bootstrap'>;
 
@@ -49,12 +43,19 @@ const BootstrapScreen: React.FC<Props> = ({ navigation }) => {
 
       timeoutRef.current = setTimeout(() => {
         Linking.getInitialURL().then((url) => {
-          const qrEncoded = getQrEncodedFromUrl(url);
-          if (qrEncoded) {
-            if (__DEV__) console.log('[Bootstrap] initial URL is QR link, redirecting to QrProcessor');
+          if (__DEV__) console.log('[Bootstrap] getInitialURL() raw:', url == null ? 'null' : url.length > 120 ? url.slice(0, 120) + '...' : url);
+          const payload = parseQrLink(url);
+          if (__DEV__) console.log('[Bootstrap] parseQrLink(url) result:', payload == null ? 'null' : { hasQrData: payload.qrData != null, hasToken: !!payload.token, tokenLen: payload.token?.length });
+          if (payload) {
+            const params = payload.qrData != null
+              ? { qrData: payload.qrData }
+              : payload.token
+                ? { token: payload.token }
+                : {};
+            if (__DEV__) console.log('[Bootstrap] redirecting to QrProcessor with params keys:', Object.keys(params));
             navigation.reset({
               index: 0,
-              routes: [{ name: 'QrProcessor', params: { qrData: qrEncoded } }],
+              routes: [{ name: 'QrProcessor', params }],
             });
             return;
           }

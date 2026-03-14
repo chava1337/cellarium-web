@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  TouchableOpacity,
 } from 'react-native';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,6 +14,44 @@ import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
 import { getPublicMenuByToken } from '../services/PublicMenuService';
 import { supabase } from '../config/supabase';
+import { parseQrLink } from '../utils/parseQrLink';
+
+/** Temporal: overlay de diagnóstico QR en pantalla (sin ADB). Poner a false para producción. */
+const QR_DEBUG_OVERLAY = true;
+
+export type QrDebugState = {
+  source: string;
+  rawUrl: string;
+  tokenFound: string;
+  tokenLength: string;
+  requestStarted: string;
+  endpointUsed: string;
+  httpStatus: string;
+  responseSummary: string;
+  navigationTriggered: string;
+  finalError: string;
+  currentStep: string;
+};
+
+const initialDebug: QrDebugState = {
+  source: '-',
+  rawUrl: '-',
+  tokenFound: '-',
+  tokenLength: '-',
+  requestStarted: '-',
+  endpointUsed: '-',
+  httpStatus: '-',
+  responseSummary: '-',
+  navigationTriggered: '-',
+  finalError: '-',
+  currentStep: 'mounted',
+};
+
+function trunc(str: string | null | undefined, max: number): string {
+  if (str == null) return '-';
+  const s = String(str);
+  return s.length <= max ? s : s.slice(0, max) + '…';
+}
 
 type QrProcessorScreenNavigationProp = StackNavigationProp<RootStackParamList, 'QrProcessor'>;
 type QrProcessorScreenRouteProp = RouteProp<RootStackParamList, 'QrProcessor'>;
@@ -47,33 +86,6 @@ function decodeMaybeJson(encoded: string): { type: 'object'; data: any } | { typ
   }
 }
 
-/** Extract qr payload from deep link or universal URL (path or query data=) */
-function extractQrPayloadFromUrl(url: string | null): { qrData?: any; token?: string } | null {
-  if (!url || typeof url !== 'string') return null;
-  try {
-    // cellarium://qr/<encoded> or cellarium:///qr/<encoded>
-    const pathMatch = url.match(/cellarium:\/\/\/?qr\/([^?#]+)/i) || url.match(/cellarium:\/\/qr\/([^?#]+)/i);
-    if (pathMatch && pathMatch[1]) {
-      const result = decodeMaybeJson(pathMatch[1]);
-      if (result?.type === 'object') return { qrData: result.data };
-      if (result?.type === 'token') return { token: result.data };
-      return { token: pathMatch[1] };
-    }
-    // ?data=<encoded> (universal link or app opened with query)
-    const parsed = new URL(url);
-    const dataParam = parsed.searchParams.get('data');
-    if (dataParam) {
-      const result = decodeMaybeJson(dataParam);
-      if (result?.type === 'object') return { qrData: result.data };
-      if (result?.type === 'token') return { token: result.data };
-      return { token: dataParam };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 function maskToken(token: string): string {
   if (!token || token.length <= 8) return '***';
   return `${token.slice(0, 4)}...${token.slice(-4)}`;
@@ -85,22 +97,54 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
   const [deepLinkUrl, setDeepLinkUrl] = useState<string | null>(null);
   const deepLinkUrlRef = useRef<string | null>(null);
   const processedRef = useRef(false);
+  const [qrDebug, setQrDebug] = useState<QrDebugState>(initialDebug);
+
+  const setDebug = React.useCallback((partial: Partial<QrDebugState>) => {
+    if (!QR_DEBUG_OVERLAY) return;
+    setQrDebug((prev) => ({ ...prev, ...partial }));
+  }, []);
 
   useEffect(() => {
     deepLinkUrlRef.current = deepLinkUrl;
-  }, [deepLinkUrl]);
+    if (deepLinkUrl) setDebug({ currentStep: 'deepLinkUrl', source: 'deepLinkUrl', rawUrl: trunc(deepLinkUrl, 50) });
+    if (__DEV__ && deepLinkUrl) console.log('[QrProcessor] deepLinkUrl estado:', deepLinkUrl.slice(0, 90) + (deepLinkUrl.length > 90 ? '...' : ''));
+  }, [deepLinkUrl, setDebug]);
+
+  useEffect(() => {
+    const hasParams = route.params?.qrData != null || !!route.params?.token;
+    setDebug({
+      currentStep: 'mounted',
+      source: hasParams ? 'route.params' : '-',
+      rawUrl: '-',
+      tokenFound: hasParams ? 'yes' : 'no',
+      tokenLength: typeof route.params?.token === 'string' ? String(route.params.token.length) : hasParams ? '?' : '-',
+    });
+    if (__DEV__) {
+      console.log('[QrProcessor] mount route.params al entrar:', JSON.stringify({
+        hasQrData: route.params?.qrData != null,
+        qrDataType: typeof route.params?.qrData,
+        hasToken: !!route.params?.token,
+        tokenLen: typeof route.params?.token === 'string' ? route.params.token.length : 0,
+      }));
+    }
+  }, [setDebug]);
 
   useEffect(() => {
     Linking.getInitialURL().then((url) => {
-      if (__DEV__) console.log('[QrProcessor] Initial URL:', url ? `${url.slice(0, 60)}...` : url);
-      if (url && (url.includes('cellarium://qr') || url.includes('cellarium:///qr'))) {
+      if (__DEV__) console.log('[QrProcessor] getInitialURL() raw:', url == null ? 'null' : url.length > 100 ? url.slice(0, 100) + '...' : url);
+      const parsed = url ? parseQrLink(url) : null;
+      if (__DEV__) console.log('[QrProcessor] parseQrLink(initialURL) result:', parsed == null ? 'null' : { hasQrData: parsed.qrData != null, hasToken: !!parsed.token });
+      if (url && parsed) {
         setDeepLinkUrl(url);
+        if (__DEV__) console.log('[QrProcessor] deepLinkUrl estado actualizado con initial URL');
       }
     });
 
     const handleDeepLink = ({ url }: { url: string }) => {
-      if (__DEV__) console.log('[QrProcessor] Deep link event:', url ? `${url.slice(0, 60)}...` : url);
-      if (url && (url.includes('cellarium://qr') || url.includes('cellarium:///qr'))) {
+      if (__DEV__) console.log('[QrProcessor] listener Linking event url:', url?.slice(0, 100));
+      const parsed = url ? parseQrLink(url) : null;
+      if (__DEV__) console.log('[QrProcessor] parseQrLink(event url) result:', parsed == null ? 'null' : { hasQrData: parsed.qrData != null, hasToken: !!parsed.token });
+      if (url && parsed) {
         setDeepLinkUrl(url);
       }
     };
@@ -112,9 +156,21 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
   const processQrCode = React.useCallback(async () => {
     if (processedRef.current) return;
 
+    setDebug({ currentStep: 'parsed' });
+
     try {
       let qrData: any = route.params?.qrData;
       let token: string | undefined = route.params?.token;
+
+      if (__DEV__) {
+        console.log('[QrProcessor] processQrCode run — route.params al entrar:', {
+          qrDataPresent: qrData != null,
+          qrDataType: typeof qrData,
+          tokenPresent: !!token,
+          tokenType: typeof token,
+          tokenLen: typeof token === 'string' ? token.length : 0,
+        });
+      }
 
       // A) Normalize from route.params
       if (typeof qrData === 'string' && qrData.trim()) {
@@ -127,18 +183,45 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         token = (qrData as any).token;
       }
 
+      if (qrData || token) {
+        setDebug({ tokenFound: 'yes', tokenLength: token ? String(token.length) : (qrData && typeof qrData === 'object' && (qrData as any).token ? String((qrData as any).token.length) : '?') });
+      }
       if (__DEV__) {
-        console.log('[QrProcessor] route.params', { hasQrData: !!qrData, hasToken: !!token, tokenMask: token ? maskToken(token) : undefined });
+        console.log('[QrProcessor] tras A) params normalizados:', { hasQrData: !!qrData, hasToken: !!token, tokenMask: token ? maskToken(token) : undefined });
       }
 
-      // B) Fallback: URL (state ref or getInitialURL)
+      // B) Fallback: URL (state ref or getInitialURL) — parseQrLink prioriza ?data=
       if (!qrData && !token) {
-        const urlToParse = deepLinkUrlRef.current || (await Linking.getInitialURL());
-        const payload = extractQrPayloadFromUrl(urlToParse);
+        let urlToParse = deepLinkUrlRef.current;
+        setDebug({ source: urlToParse ? 'deepLinkUrl' : 'initialURL', rawUrl: trunc(urlToParse, 50) });
+        if (__DEV__) console.log('[QrProcessor] deepLinkUrlRef.current:', urlToParse == null ? 'null' : urlToParse.slice(0, 80) + '...');
+        if (!urlToParse) {
+          urlToParse = await Linking.getInitialURL();
+          setDebug({ source: 'initialURL', rawUrl: trunc(urlToParse, 50) });
+          if (__DEV__) console.log('[QrProcessor] getInitialURL() en fallback:', urlToParse == null ? 'null' : urlToParse.slice(0, 80) + '...');
+        }
+        const payload = parseQrLink(urlToParse);
+        setDebug({ currentStep: 'parseQrLink', tokenFound: payload ? (payload.token ? 'yes' : payload.qrData ? 'yes' : 'no') : 'no' });
+        if (__DEV__) console.log('[QrProcessor] parseQrLink(urlToParse) resultado:', payload == null ? 'null' : { hasQrData: payload.qrData != null, hasToken: !!payload.token });
         if (payload) {
           if (payload.qrData) qrData = payload.qrData;
           if (payload.token) token = payload.token;
-          if (__DEV__) console.log('[QrProcessor] parsed from URL', { hasQrData: !!qrData, hasToken: !!token, tokenMask: token ? maskToken(token) : undefined });
+          if (__DEV__) console.log('[QrProcessor] token recibido desde URL', { hasQrData: !!qrData, hasToken: !!token, tokenMask: token ? maskToken(token) : undefined });
+        }
+      }
+
+      // B2) Retry: si seguimos sin payload, esperar un poco y reintentar getInitialURL (race con intent en Android)
+      if (!qrData && !token) {
+        await new Promise((r) => setTimeout(r, 400));
+        const urlRetry = await Linking.getInitialURL();
+        setDebug({ source: 'retryInitialURL', rawUrl: trunc(urlRetry, 50) });
+        if (__DEV__) console.log('[QrProcessor] retry getInitialURL():', urlRetry == null ? 'null' : urlRetry.slice(0, 80) + '...');
+        const payloadRetry = parseQrLink(urlRetry);
+        if (payloadRetry) {
+          if (payloadRetry.qrData) qrData = payloadRetry.qrData;
+          if (payloadRetry.token) token = payloadRetry.token;
+          setDebug({ tokenFound: 'yes', tokenLength: token ? String(token.length) : '?' });
+          if (__DEV__) console.log('[QrProcessor] token obtenido en retry', { hasQrData: !!qrData, hasToken: !!token, tokenMask: token ? maskToken(token) : undefined });
         }
       }
 
@@ -155,7 +238,8 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
       }
 
       if (!qrData && !token) {
-        if (__DEV__) console.log('[QrProcessor] No payload from params, URL or storage');
+        setDebug({ currentStep: 'error', finalError: 'sin payload' });
+        if (__DEV__) console.log('[QrProcessor] error real: sin payload (params, URL, retry URL ni storage)');
         setStatus('error');
         setMessage('Código QR inválido. Por favor, escanea de nuevo.');
         setTimeout(() => navigation.navigate('Welcome'), 3000);
@@ -163,6 +247,8 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
       }
 
       processedRef.current = true;
+      setDebug({ tokenFound: 'yes', tokenLength: token ? String(token.length) : (qrData && typeof qrData === 'object' && (qrData as any).token ? String((qrData as any).token.length) : '?') });
+      if (__DEV__) console.log('[QrProcessor] request iniciado', { hasQrData: !!qrData, tokenMask: token ? maskToken(token) : undefined });
 
       let tokenToValidate: string;
       if (token) {
@@ -175,21 +261,28 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         tokenToValidate = JSON.stringify(qrData);
       }
 
+      if (__DEV__) {
+        console.log('[QrProcessor] token final elegido para request:', { tokenMask: maskToken(tokenToValidate), tokenLen: tokenToValidate.length });
+      }
+
       const isStaffPayload = qrData && typeof qrData === 'object' && ((qrData as any).type === 'admin' || (qrData as any).type === 'admin_invite');
 
       if (isStaffPayload) {
+        setDebug({ currentStep: 'requesting', requestStarted: 'started', endpointUsed: 'resolve-qr' });
         if (__DEV__) {
           console.log('[QrProcessor] staff resolve-qr start', { tokenSuffix: maskToken(tokenToValidate), typeDetected: 'admin_invite' });
         }
+        const staffPayload = { token: tokenToValidate };
+        if (__DEV__) console.log('[QrProcessor] staff request payload (body):', { tokenLen: tokenToValidate.length, tokenMask: maskToken(tokenToValidate) });
         const { data: resolveData, error: resolveError } = await supabase.functions.invoke<{
           success?: boolean;
           code?: string;
           owner_id?: string;
           branch_id?: string;
           branch_name?: string | null;
-        }>('resolve-qr', { body: { token: tokenToValidate } });
+        }>('resolve-qr', { body: staffPayload });
         if (__DEV__) {
-          console.log('[QrProcessor] staff resolve-qr response', {
+          console.log('[QrProcessor] staff resolve-qr respuesta real:', {
             success: resolveData?.success,
             code: resolveData?.code ?? null,
             resolveErrorMessage: resolveError?.message ?? null,
@@ -199,7 +292,11 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
           });
         }
 
+        const statusCode = typeof (resolveError as any)?.context?.response?.status === 'number' ? (resolveError as any).context.response.status : null;
+        setDebug({ currentStep: 'response', requestStarted: 'done', httpStatus: statusCode != null ? String(statusCode) : resolveError ? 'err' : '200', responseSummary: resolveData?.success ? 'ok' : resolveData?.code ?? (resolveError?.message ?? 'unknown') });
         if (resolveData?.success === true && resolveData?.owner_id && resolveData?.branch_id) {
+          if (__DEV__) console.log('[QrProcessor] request resuelto (staff) → AdminRegistration');
+          setDebug({ currentStep: 'navigating', navigationTriggered: 'triggered' });
           setStatus('success');
           setMessage('Invitación de administrador validada');
           setTimeout(() => {
@@ -214,8 +311,8 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         }
 
         const code = resolveData?.code ?? (resolveError as any)?.context?.response?.status;
-        const statusCode = typeof (resolveError as any)?.context?.response?.status === 'number' ? (resolveError as any).context.response.status : null;
         const errCode = code ?? (statusCode === 404 ? 'TOKEN_NOT_FOUND' : statusCode === 410 ? 'TOKEN_EXPIRED' : statusCode === 409 ? 'TOKEN_USED' : null);
+        setDebug({ currentStep: 'error', finalError: errCode ?? resolveError?.message ?? 'staff fail' });
         if (errCode === 'TOKEN_USED' || resolveData?.code === 'TOKEN_USED') {
           Alert.alert('Código ya utilizado', 'Este código de invitación ya fue utilizado. Solicita uno nuevo al administrador.');
         } else if (errCode === 'TOKEN_EXPIRED' || resolveData?.code === 'TOKEN_EXPIRED') {
@@ -237,14 +334,19 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
       if (isGuestPayload && tokenToValidate) {
         const trimmed = tokenToValidate.trim();
         if (trimmed.length < 4) {
+          setDebug({ currentStep: 'error', finalError: 'token corto' });
+          if (__DEV__) console.log('[QrProcessor] error real: token guest demasiado corto');
           Alert.alert('Código inválido', 'El código es demasiado corto. Escanea el QR de nuevo.');
           setStatus('error');
           setMessage('Código inválido');
           setTimeout(() => navigation.navigate('Welcome'), 3000);
           return;
         }
+        setDebug({ currentStep: 'requesting', requestStarted: 'started', endpointUsed: 'public-menu' });
+        if (__DEV__) console.log('[QrProcessor] request resuelto (guest) → WineCatalog');
         setStatus('success');
         setMessage('Cargando menú...');
+        setDebug({ currentStep: 'response', requestStarted: 'done', httpStatus: '200', responseSummary: 'ok', navigationTriggered: 'triggered' });
         setTimeout(() => {
           navigation.replace('WineCatalog', {
             isGuest: true,
@@ -263,17 +365,26 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         return;
       }
 
-      if (__DEV__) console.log('[QrProcessor] legacy fallback tokenSuffix:', maskToken(trimmed));
+      if (__DEV__) console.log('[QrProcessor] legacy fallback token a enviar:', { tokenMask: maskToken(trimmed), tokenLen: trimmed.length });
 
+      setDebug({ currentStep: 'requesting', requestStarted: 'started', endpointUsed: 'public-menu' });
       let publicMenuOk = false;
+      let publicMenuStatus = '-';
       try {
+        if (__DEV__) console.log('[QrProcessor] legacy request public-menu (mismo endpoint que web) tokenLen:', trimmed.length);
         await getPublicMenuByToken(trimmed);
         publicMenuOk = true;
-      } catch (_) {
-        if (__DEV__) console.log('[QrProcessor] legacy public-menu failed tokenSuffix:', maskToken(trimmed));
+        publicMenuStatus = '200';
+        if (__DEV__) console.log('[QrProcessor] legacy public-menu respuesta: ok');
+      } catch (err) {
+        publicMenuStatus = (err as any)?.status ?? (err as Error)?.message ?? 'err';
+        if (__DEV__) console.log('[QrProcessor] legacy public-menu respuesta error:', (err as Error)?.message ?? err);
       }
+      setDebug({ currentStep: 'response', requestStarted: publicMenuOk ? 'done' : 'done', httpStatus: publicMenuStatus, responseSummary: publicMenuOk ? 'ok' : 'error' });
 
       if (publicMenuOk) {
+        if (__DEV__) console.log('[QrProcessor] request resuelto (legacy public-menu) → WineCatalog');
+        setDebug({ navigationTriggered: 'triggered', currentStep: 'navigating' });
         setStatus('success');
         setMessage('Cargando menú...');
         setTimeout(() => {
@@ -282,16 +393,19 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         return;
       }
 
+      setDebug({ requestStarted: 'started', endpointUsed: 'resolve-qr' });
+      const legacyPayload = { token: trimmed };
+      if (__DEV__) console.log('[QrProcessor] legacy resolve-qr payload:', { tokenLen: trimmed.length, tokenMask: maskToken(trimmed) });
       const { data: resolveData, error: resolveError } = await supabase.functions.invoke<{
         success?: boolean;
         code?: string;
         owner_id?: string;
         branch_id?: string;
         branch_name?: string | null;
-      }>('resolve-qr', { body: { token: trimmed } });
+      }>('resolve-qr', { body: legacyPayload });
 
       if (__DEV__) {
-        console.log('[QrProcessor] legacy resolve-qr response', {
+        console.log('[QrProcessor] legacy resolve-qr respuesta real:', {
           success: resolveData?.success,
           code: resolveData?.code ?? null,
           resolveErrorMessage: resolveError?.message ?? null,
@@ -302,7 +416,11 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         });
       }
 
+      const legacyStatus = typeof (resolveError as any)?.context?.response?.status === 'number' ? (resolveError as any).context.response.status : null;
+      setDebug({ httpStatus: legacyStatus != null ? String(legacyStatus) : '?', responseSummary: resolveData?.success ? 'ok' : resolveData?.code ?? (resolveError?.message ?? 'unknown') });
       if (resolveData?.success === true && resolveData?.owner_id && resolveData?.branch_id) {
+        if (__DEV__) console.log('[QrProcessor] request resuelto (legacy resolve-qr staff) → AdminRegistration');
+        setDebug({ currentStep: 'navigating', navigationTriggered: 'triggered' });
         setStatus('success');
         setMessage('Invitación de administrador validada');
         setTimeout(() => {
@@ -316,8 +434,9 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         return;
       }
 
+      if (__DEV__) console.log('[QrProcessor] error real: legacy resolve-qr sin éxito', { code: resolveData?.code, err: (resolveError as Error)?.message });
       const code = resolveData?.code ?? (resolveError as any)?.context?.response?.status;
-      const statusCode = typeof (resolveError as any)?.context?.response?.status === 'number' ? (resolveError as any).context.response.status : null;
+      const statusCode = legacyStatus;
       const errCode = code ?? (statusCode === 404 ? 'TOKEN_NOT_FOUND' : statusCode === 410 ? 'TOKEN_EXPIRED' : statusCode === 409 ? 'TOKEN_USED' : null);
 
       if (errCode === 'TOKEN_USED' || resolveData?.code === 'TOKEN_USED') {
@@ -333,16 +452,31 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
       } else {
         Alert.alert('Código no válido', 'Este QR expiró o ya no es válido. Solicita uno nuevo.');
       }
+      setDebug({ currentStep: 'error', finalError: resolveData?.code ?? (resolveError as Error)?.message ?? 'invalid' });
       setStatus('error');
       setMessage('Código no válido');
       setTimeout(() => navigation.navigate('Welcome'), 3000);
     } catch (error) {
-      if (__DEV__) console.warn('[QrProcessor] processQrCode error', error);
+      setDebug({ currentStep: 'error', finalError: trunc((error as Error)?.message, 30) });
+      if (__DEV__) console.warn('[QrProcessor] error real: processQrCode exception', error);
       setStatus('error');
       setMessage('Error al procesar el código QR');
       setTimeout(() => navigation.navigate('Welcome'), 3000);
     }
-  }, [navigation, route.params?.qrData, route.params?.token]);
+  }, [navigation, route.params?.qrData, route.params?.token, setDebug]);
+
+  // Timeout defensivo: si sigue en validating tras 15s, mostrar error y permitir reintentar
+  const VALIDATING_TIMEOUT_MS = 15000;
+  useEffect(() => {
+    if (status !== 'validating') return;
+    const t = setTimeout(() => {
+      setDebug({ currentStep: 'error', finalError: 'timeout 15s' });
+      setStatus('error');
+      setMessage('Tardó demasiado. Reintenta o escanea de nuevo.');
+      if (__DEV__) console.log('[QrProcessor] timeout defensivo: 15s en validating');
+    }, VALIDATING_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [status, setDebug]);
 
   // Run on mount (delay to allow initial URL to be set)
   useEffect(() => {
@@ -360,6 +494,19 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
   return (
     <View style={styles.container}>
       <View style={styles.content}>
+        {QR_DEBUG_OVERLAY && (
+          <View style={styles.debugOverlay}>
+            <Text style={styles.debugTitle}>QR debug</Text>
+            <Text style={styles.debugLine}>step: {qrDebug.currentStep}</Text>
+            <Text style={styles.debugLine}>source: {trunc(qrDebug.source, 18)}</Text>
+            <Text style={styles.debugLine}>url: {trunc(qrDebug.rawUrl, 35)}</Text>
+            <Text style={styles.debugLine}>token: {qrDebug.tokenFound} len={qrDebug.tokenLength}</Text>
+            <Text style={styles.debugLine}>request: {qrDebug.requestStarted} | {qrDebug.endpointUsed}</Text>
+            <Text style={styles.debugLine}>http: {qrDebug.httpStatus} | resp: {trunc(qrDebug.responseSummary, 15)}</Text>
+            <Text style={styles.debugLine}>nav: {qrDebug.navigationTriggered}</Text>
+            <Text style={styles.debugLine}>error: {trunc(qrDebug.finalError, 25)}</Text>
+          </View>
+        )}
         {status === 'validating' && (
           <>
             <ActivityIndicator size="large" color="#8B0000" />
@@ -381,6 +528,17 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
             <Text style={styles.errorIcon}>⚠️</Text>
             <Text style={styles.errorMessage}>{message}</Text>
             <Text style={styles.submessage}>Volviendo al inicio...</Text>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={() => {
+                processedRef.current = false;
+                setStatus('validating');
+                setMessage('Validando código QR...');
+                setTimeout(() => processQrCode(), 200);
+              }}
+            >
+              <Text style={styles.retryButtonText}>Reintentar</Text>
+            </TouchableOpacity>
           </>
         )}
       </View>
@@ -431,6 +589,37 @@ const styles = StyleSheet.create({
     color: '#dc3545',
     textAlign: 'center',
     marginTop: 16,
+    fontWeight: '600',
+  },
+  debugOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    padding: 8,
+    paddingBottom: 24,
+  },
+  debugTitle: {
+    fontSize: 10,
+    color: '#aaa',
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  debugLine: {
+    fontSize: 9,
+    color: '#ccc',
+  },
+  retryButton: {
+    marginTop: 24,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#8B0000',
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
     fontWeight: '600',
   },
 });
