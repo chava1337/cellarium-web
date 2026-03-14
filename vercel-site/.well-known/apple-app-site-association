@@ -3,20 +3,9 @@
     "apps": [],
     "details": [
       {
-        "appID": "TEAM_ID.com.cellarium.winecatalog",
-        "paths": [
-          "/qr",
-          "/qr/*",
-          "/catalog",
-          "/catalog/*"
-        ]
+        "appID": "6NA9V92N7R.com.cellarium.winecatalog",
+        "paths": ["/qr", "/qr*"]
       }
-    ]
-  },
-  "webcredentials": {
-    "apps": [
-      "TEAM_ID.com.cellarium.winecatalog"
     ]
   }
 }
-
