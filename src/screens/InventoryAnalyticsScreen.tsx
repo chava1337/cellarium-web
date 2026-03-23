@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,14 +6,13 @@ import {
   FlatList,
   TouchableOpacity,
   TextInput,
-  Modal,
   Alert,
   ActivityIndicator,
   ScrollView,
   Image,
   Dimensions,
-  Switch,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -35,6 +34,16 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '../lib/supabase';
 import { isValidPrice, formatCurrencyMXN } from '../utils/wineCatalogUtils';
+import { CELLARIUM, CELLARIUM_LAYOUT } from '../theme/cellariumTheme';
+import { CellariumHeader } from '../components/cellarium';
+import InventoryAnalyticsTabs from '../components/inventory/InventoryAnalyticsTabs';
+import type { InventoryViewMode } from '../components/inventory/InventoryAnalyticsTabs';
+import InventoryItemCard from '../components/inventory/InventoryItemCard';
+import InventoryEventModal from '../components/inventory/InventoryEventModal';
+import InventoryCountModal from '../components/inventory/InventoryCountModal';
+import EditInventoryWineModal from '../components/inventory/EditInventoryWineModal';
+import HelpInventoryModal from '../components/inventory/HelpInventoryModal';
+import type { InventoryEventReason } from '../components/inventory/inventoryAnalyticsTypes';
 
 const { width } = Dimensions.get('window');
 const HELP_MODAL_DONT_SHOW_KEY = 'inventory_analytics_help_dont_show';
@@ -50,10 +59,8 @@ interface Props {
   route: InventoryAnalyticsScreenRouteProp;
 }
 
-type ViewMode = 'stock' | 'sales' | 'comparison' | 'reports';
+type ViewMode = InventoryViewMode;
 type SortBy = 'sales' | 'revenue' | 'rotation';
-/** Razones para evento: entrada (compra, cortesia_proveedor) o salida (cortesia_cliente, rotura) */
-type EventReason = 'compra' | 'cortesia_proveedor' | 'cortesia_cliente' | 'rotura';
 
 const FEATURE_ID_INVENTORY = 'inventory' as const;
 
@@ -113,12 +120,13 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     lowStockCount: 0,
   });
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchVisible, setSearchVisible] = useState(false);
   const [filterType, setFilterType] = useState<'all'>('all');
 
   // Estados de análisis (Ventas estimadas desde cortes)
   const [salesFromCounts, setSalesFromCounts] = useState<SalesFromCountsRow[] | null>(null);
   const [salesFromCountsSummary, setSalesFromCountsSummary] = useState<SalesFromCountsSummary | null>(null);
-  const [salesFromCountsDays, setSalesFromCountsDays] = useState(30);
+  const [salesFromCountsDays, setSalesFromCountsDays] = useState<7 | 30 | 90>(30);
   const [branchMetrics, setBranchMetrics] = useState<BranchMetrics | null>(null);
   const [winesMetrics, setWinesMetrics] = useState<WineMetrics[]>([]);
   const [comparisonFromCounts, setComparisonFromCounts] = useState<{ branches: BranchComparisonRow[]; summary: BranchComparisonSummary } | null>(null);
@@ -129,7 +137,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
   const [eventModalVisible, setEventModalVisible] = useState(false);
   const [eventItem, setEventItem] = useState<InventoryItem | null>(null);
   const [eventDirection, setEventDirection] = useState<'in' | 'out'>('in');
-  const [eventReason, setEventReason] = useState<EventReason>('compra');
+  const [eventReason, setEventReason] = useState<InventoryEventReason>('compra');
   const [eventQty, setEventQty] = useState('');
   const [eventNotes, setEventNotes] = useState('');
   const [eventSubmitting, setEventSubmitting] = useState(false);
@@ -173,7 +181,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
   const [dontShowHelpAgain, setDontShowHelpAgain] = useState(false);
   const [helpHidden, setHelpHidden] = useState(false);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       if (__DEV__) console.log('📊 Cargando datos para modo:', viewMode);
@@ -244,7 +252,15 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [
+    branchId,
+    viewMode,
+    user,
+    canCompareBranches,
+    comparisonDays,
+    estimatedReportPeriod,
+    salesFromCountsDays,
+  ]);
 
   const filterInventory = () => {
     let filtered = [...inventory];
@@ -264,8 +280,9 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   useEffect(() => {
+    if (guardStatus !== 'allowed' || subscriptionAllowed !== true) return;
     loadData();
-  }, [branchId, viewMode, estimatedReportPeriod, comparisonDays]);
+  }, [guardStatus, subscriptionAllowed, loadData]);
 
   useEffect(() => {
     if (viewMode === 'stock') {
@@ -279,21 +296,33 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     });
   }, []);
 
+  const guardLoadingView = (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color={CELLARIUM.primary} />
+      <Text style={styles.loadingText}>{t('msg.loading') || 'Cargando…'}</Text>
+    </View>
+  );
+
   if (guardStatus === 'pending') {
     return (
-      <View style={{ flex: 1, backgroundColor: '#f8f9fa' }}>
+      <View style={{ flex: 1, backgroundColor: CELLARIUM.bg }}>
         <PendingApprovalMessage />
       </View>
     );
   }
-  if (guardStatus === 'allowed' && subscriptionAllowed === 'pending') {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#8B0000" />
-      </View>
-    );
+  if (guardStatus === 'loading' || guardStatus === 'profile_loading') {
+    return guardLoadingView;
   }
-  if (guardStatus === 'allowed' && subscriptionAllowed === false) {
+  if (guardStatus === 'denied') {
+    return null;
+  }
+  if (guardStatus !== 'allowed') {
+    return null;
+  }
+  if (subscriptionAllowed === 'pending') {
+    return guardLoadingView;
+  }
+  if (subscriptionAllowed === false) {
     return null;
   }
 
@@ -596,6 +625,11 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
             try {
               setDeletingWine(true);
               const ownerId = user.owner_id || user.id;
+              const bid = branchId || currentBranch?.id || '';
+              if (!bid) {
+                Alert.alert('Error', 'No se pudo determinar la sucursal.');
+                return;
+              }
 
               // VERIFICAR primero que el vino pertenece al owner
               const { data: wineCheck, error: checkError } = await supabase
@@ -614,7 +648,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
                 .from('wine_branch_stock')
                 .delete()
                 .eq('wine_id', item.wine_id)
-                .eq('branch_id', branchId);
+                .eq('branch_id', bid);
 
               // Verificar si hay stock en otras sucursales antes de eliminar el vino
               const { data: otherStock, error: stockError } = await supabase
@@ -766,131 +800,53 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
   // ========================================
   const renderStockTab = () => {
     const renderInventoryItem = ({ item }: { item: InventoryItem }) => {
-      // Validar que item.wines exista
       if (!item.wines) {
-        if (__DEV__) console.warn('⚠️ Vino sin datos en inventario:', item);
         return null;
       }
-
-
       return (
-        <View style={styles.inventoryCard}>
-          <View style={styles.inventoryHeader}>
-            {item.wines.image_url ? (
-              <Image source={{ uri: item.wines.image_url }} style={styles.wineImage} />
-            ) : (
-              <View style={[styles.wineImage, styles.placeholderImage]}>
-                <Text style={styles.placeholderText}>🍷</Text>
-              </View>
-            )}
-
-            <View style={styles.wineInfo}>
-              {item.wines.winery && (
-                <Text style={styles.wineWinery}>{item.wines.winery}</Text>
-              )}
-              <Text style={styles.wineName}>{item.wines.name}</Text>
-              <Text style={styles.wineDetails}>
-                {item.wines.grape_variety} • {item.wines.vintage}
-              </Text>
-              <Text style={styles.wineRegion}>
-                {item.wines.region}, {item.wines.country}
-              </Text>
-              <Text style={styles.winePrice}>
-                {isValidPrice(item.price_by_bottle)
-                  ? `${formatCurrencyMXN(item.price_by_bottle)} / botella`
-                  : isValidPrice(item.price_by_glass)
-                    ? `${formatCurrencyMXN(item.price_by_glass)} / copa`
-                    : 'No disponible'}
-              </Text>
-            </View>
-          </View>
-
-          {/* Indicador de stock */}
-          <View style={styles.stockSection}>
-            <View style={styles.stockHeader}>
-              <View style={styles.stockInfo}>
-                <Text style={styles.stockLabel}>Stock Actual:</Text>
-                <Text style={styles.stockQuantity}>
-                  {item.stock_quantity} botellas
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Botones de acción */}
-          <View style={styles.actionButtons}>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.countButton]}
-              onPress={() => openEventModal(item)}
-            >
-              <Text style={styles.actionButtonText}>Registrar evento</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.countSecondaryButton]}
-              onPress={() => openCountModal(item)}
-            >
-              <Text style={styles.actionButtonText}>Conteo físico</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.editButton]}
-              onPress={() => openEditModal(item)}
-            >
-              <Text style={styles.actionButtonText}>✏️</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.deleteButton]}
-              onPress={() => handleDeleteWine(item)}
-              disabled={deletingWine}
-            >
-              {deletingWine ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.actionButtonText}>🗑️</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {/* Valor total en inventario */}
-          <View style={styles.valueSection}>
-            <Text style={styles.valueLabel}>Valor en inventario:</Text>
-            <Text style={styles.valueAmount}>
-              {isValidPrice(item.price_by_bottle)
-                ? formatCurrencyMXN(item.stock_quantity * item.price_by_bottle)
-                : '—'}
-            </Text>
-          </View>
-        </View>
+        <InventoryItemCard
+          item={item}
+          deletingWine={deletingWine}
+          onEdit={openEditModal}
+          onDelete={handleDeleteWine}
+          onEvent={openEventModal}
+          onCount={openCountModal}
+        />
       );
     };
 
     return (
       <View style={styles.tabContent}>
+        {!searchVisible ? (
+          <TouchableOpacity
+            style={styles.searchChip}
+            onPress={() => setSearchVisible(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="search" size={18} color="#666" style={styles.searchChipIcon} />
+            <Text style={styles.searchChipText}>Buscar vino</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.searchWrapper}>
+            <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Buscar vino..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholderTextColor="#999"
+              autoFocus
+            />
+            <TouchableOpacity
+              onPress={() => setSearchVisible(false)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              style={styles.searchCloseButton}
+            >
+              <Ionicons name="close-circle" size={22} color="#999" />
+            </TouchableOpacity>
+          </View>
+        )}
 
-        {/* Barra de búsqueda y filtros */}
-        <View style={styles.searchSection}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Buscar vino..."
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholderTextColor="#999"
-          />
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.filterButtons}>
-              <TouchableOpacity
-                style={[styles.filterButton, styles.filterButtonActive]}
-                onPress={() => setFilterType('all')}
-              >
-                <Text style={[styles.filterButtonText, styles.filterButtonTextActive]}>
-                  Todos ({inventory.length})
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
-
-        {/* Lista de inventario */}
         <FlatList
           data={filteredInventory}
           renderItem={renderInventoryItem}
@@ -912,13 +868,47 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
   // RENDER TAB 2: VENTAS (DESDE CORTES)
   // ========================================
   const renderSalesTab = () => {
+    const salesPeriodSelector = (
+      <View style={{ marginBottom: 16 }}>
+        <Text style={[styles.inputLabel, { marginBottom: 8 }]}>Periodo (ventas estimadas)</Text>
+        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+          {([7, 30, 90] as const).map((days) => (
+            <TouchableOpacity
+              key={days}
+              style={[
+                styles.filterButton,
+                salesFromCountsDays === days && styles.filterButtonActive,
+                { paddingVertical: 10, paddingHorizontal: 16 },
+              ]}
+              onPress={() => setSalesFromCountsDays(days)}
+              activeOpacity={0.85}
+            >
+              <Text
+                style={[
+                  styles.filterButtonText,
+                  salesFromCountsDays === days && styles.filterButtonTextActive,
+                ]}
+              >
+                {days} días
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    );
+
     const validWinesCount = salesFromCountsSummary?.valid_wines_count ?? (salesFromCounts?.length ?? 0);
     if (validWinesCount === 0) {
       return (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>📊</Text>
-          <Text style={styles.emptyTitle}>Necesitas 2 conteos físicos (corte inicial y final) para ventas estimadas</Text>
-          <Text style={styles.emptySubtitle}>Por cada vino: un conteo al inicio del periodo y otro al final. Las estimaciones se basan en cortes. Realiza conteos en la pestaña Stock.</Text>
+        <View style={styles.tabContent}>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {salesPeriodSelector}
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>📊</Text>
+              <Text style={styles.emptyTitle}>Necesitas 2 conteos físicos (corte inicial y final) para ventas estimadas</Text>
+              <Text style={styles.emptySubtitle}>Por cada vino: un conteo al inicio del periodo y otro al final. Las estimaciones se basan en cortes. Realiza conteos en la pestaña Stock.</Text>
+            </View>
+          </ScrollView>
         </View>
       );
     }
@@ -965,6 +955,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     return (
       <View style={styles.tabContent}>
         <ScrollView showsVerticalScrollIndicator={false}>
+          {salesPeriodSelector}
             <View style={styles.chartSection}>
             <Text style={styles.sectionTitle}>💰 Top 5 por ingresos estimados (desde cortes)</Text>
             {topByRevenue.map((w, i) => (
@@ -1326,489 +1317,90 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#8B0000" />
+        <ActivityIndicator size="large" color={CELLARIUM.primary} />
         <Text style={styles.loadingText}>Cargando datos...</Text>
       </View>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.container, { paddingBottom: Math.max(insets.bottom, 0) }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <Text style={styles.title}>Inventario y Análisis</Text>
-          <Text style={styles.subtitle}>{currentBranch?.name}</Text>
-        </View>
-        {!helpHidden && (
-          <TouchableOpacity
-            onPress={() => setHelpModalVisible(true)}
-            style={styles.helpButton}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <Text style={styles.helpButtonText}>ℹ️</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+    <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+      <CellariumHeader
+        title="Inventario y Análisis"
+        subtitle={currentBranch?.name || undefined}
+        rightSlot={
+          !helpHidden ? (
+            <TouchableOpacity
+              onPress={() => setHelpModalVisible(true)}
+              style={styles.helpButton}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Ionicons name="help-circle-outline" size={20} color="rgba(255,255,255,0.88)" />
+            </TouchableOpacity>
+          ) : null
+        }
+      />
 
-      {/* Tabs */}
-      <View style={styles.tabs}>
-        <TouchableOpacity
-          style={[styles.tab, viewMode === 'stock' && styles.tabActive]}
-          onPress={() => setViewMode('stock')}
-        >
-          <Text style={[styles.tabText, viewMode === 'stock' && styles.tabTextActive]}>
-            📦 Stock
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, viewMode === 'sales' && styles.tabActive]}
-          onPress={() => setViewMode('sales')}
-        >
-          <Text style={[styles.tabText, viewMode === 'sales' && styles.tabTextActive]}>
-            📈 Ventas estimadas
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.tab,
-            viewMode === 'comparison' && styles.tabActive,
-            !canCompareBranches && styles.tabDisabled,
-          ]}
-          onPress={() => canCompareBranches && setViewMode('comparison')}
-          disabled={!canCompareBranches}
-        >
-          <Text
-            style={[
-              styles.tabText,
-              viewMode === 'comparison' && styles.tabTextActive,
-              !canCompareBranches && styles.tabTextDisabled,
-            ]}
-          >
-            🏢 Comparar
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, viewMode === 'reports' && styles.tabActive]}
-          onPress={() => setViewMode('reports')}
-        >
-          <Text style={[styles.tabText, viewMode === 'reports' && styles.tabTextActive]}>
-            📄 Reportes
-          </Text>
-        </TouchableOpacity>
-      </View>
+      <InventoryAnalyticsTabs
+        viewMode={viewMode}
+        onChangeMode={setViewMode}
+        canCompareBranches={canCompareBranches}
+      />
 
-      {/* Content */}
       {viewMode === 'stock' && renderStockTab()}
       {viewMode === 'sales' && renderSalesTab()}
       {viewMode === 'comparison' && renderComparisonTab()}
       {viewMode === 'reports' && renderReportsTab()}
 
-      {/* Modal Registrar evento */}
-      <Modal
+      <InventoryEventModal
         visible={eventModalVisible}
-        transparent={true}
-        animationType="slide"
         onRequestClose={closeEventModal}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalTitle}>Registrar evento</Text>
-              <Text style={styles.modalCopy}>Registra solo lo que ocurrió. Puedes dejar notas vacío.</Text>
+        eventItem={eventItem}
+        eventDirection={eventDirection}
+        eventReason={eventReason}
+        eventQty={eventQty}
+        eventNotes={eventNotes}
+        eventSubmitting={eventSubmitting}
+        contentPaddingBottom={12 + insets.bottom}
+        onChangeDirection={setEventDirection}
+        onChangeReason={setEventReason}
+        onChangeQty={setEventQty}
+        onChangeNotes={setEventNotes}
+        onConfirm={handleRegisterEvent}
+      />
 
-              {eventItem && (
-                <View style={styles.modalWineInfo}>
-                  <Text style={styles.modalWineName}>{eventItem.wines.name}</Text>
-                  <Text style={styles.modalWineStock}>Stock actual: {eventItem.stock_quantity} botellas</Text>
-                </View>
-              )}
-
-              <Text style={styles.inputLabel}>Tipo</Text>
-              <View style={styles.reasonButtons}>
-                <TouchableOpacity
-                  style={[styles.reasonButton, eventDirection === 'in' && styles.reasonButtonActive]}
-                  onPress={() => { setEventDirection('in'); setEventReason('compra'); }}
-                >
-                  <Text style={[styles.reasonButtonText, eventDirection === 'in' && styles.reasonButtonTextActive]}>Entrada</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.reasonButton, eventDirection === 'out' && styles.reasonButtonActive]}
-                  onPress={() => { setEventDirection('out'); setEventReason('cortesia_cliente'); }}
-                >
-                  <Text style={[styles.reasonButtonText, eventDirection === 'out' && styles.reasonButtonTextActive]}>Salida</Text>
-                </TouchableOpacity>
-              </View>
-
-              <Text style={styles.inputLabel}>Motivo</Text>
-              <View style={styles.reasonButtons}>
-                {eventDirection === 'in'
-                  ? (['compra', 'cortesia_proveedor'] as EventReason[]).map((r) => (
-                      <TouchableOpacity
-                        key={r}
-                        style={[styles.reasonButton, eventReason === r && styles.reasonButtonActive]}
-                        onPress={() => setEventReason(r)}
-                      >
-                        <Text style={[styles.reasonButtonText, eventReason === r && styles.reasonButtonTextActive]}>
-                          {r === 'compra' ? 'Compra' : 'Cortesía proveedor'}
-                        </Text>
-                      </TouchableOpacity>
-                    ))
-                  : (['cortesia_cliente', 'rotura'] as EventReason[]).map((r) => (
-                      <TouchableOpacity
-                        key={r}
-                        style={[styles.reasonButton, eventReason === r && styles.reasonButtonActive]}
-                        onPress={() => setEventReason(r)}
-                      >
-                        <Text style={[styles.reasonButtonText, eventReason === r && styles.reasonButtonTextActive]}>
-                          {r === 'cortesia_cliente' ? 'Cortesía cliente' : 'Rotura/Merma'}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-              </View>
-
-              <Text style={styles.inputLabel}>Cantidad</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Número de botellas"
-                keyboardType="number-pad"
-                value={eventQty}
-                onChangeText={setEventQty}
-              />
-
-              {eventItem && eventQty.trim() !== '' && (() => {
-                const q = parseInt(eventQty, 10);
-                if (isNaN(q) || q <= 0) return null;
-                const prev = eventItem.stock_quantity ?? 0;
-                const next = eventDirection === 'in' ? prev + q : Math.max(0, prev - q);
-                return (
-                  <View style={styles.previewSection}>
-                    <Text style={styles.previewLabel}>Vista previa</Text>
-                    <Text style={styles.previewText}>{prev} → {next} botellas</Text>
-                  </View>
-                );
-              })()}
-
-              <Text style={styles.inputLabel}>Notas (opcional)</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="Notas"
-                multiline
-                numberOfLines={2}
-                value={eventNotes}
-                onChangeText={setEventNotes}
-              />
-
-              <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.cancelButton]}
-                  onPress={closeEventModal}
-                  disabled={eventSubmitting}
-                >
-                  <Text style={styles.cancelButtonText}>Cancelar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.confirmButton]}
-                  onPress={handleRegisterEvent}
-                  disabled={eventSubmitting || eventQty.trim() === '' || !(parseInt(eventQty, 10) > 0)}
-                >
-                  {eventSubmitting ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.confirmButtonText}>Confirmar</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Modal Conteo físico */}
-      <Modal
+      <InventoryCountModal
         visible={countModalVisible}
-        transparent={true}
-        animationType="slide"
         onRequestClose={closeCountModal}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalTitle}>Conteo físico</Text>
-              <Text style={styles.modalCopy}>Recomendado cada 15–30 días para evitar acumulación de errores.</Text>
+        countItem={countItem}
+        countPrevStock={countPrevStock}
+        countQuantity={countQuantity}
+        countNotes={countNotes}
+        countSubmitting={countSubmitting}
+        contentPaddingBottom={12 + insets.bottom}
+        onChangeQuantity={setCountQuantity}
+        onChangeNotes={setCountNotes}
+        onConfirm={handleRegisterCount}
+      />
 
-              {countItem && (
-                <View style={styles.modalWineInfo}>
-                  <Text style={styles.modalWineName}>{countItem.wines.name}</Text>
-                  <Text style={styles.modalWineStock}>Stock actual en app: {countPrevStock} botellas</Text>
-                </View>
-              )}
-
-              <Text style={styles.inputLabel}>Conteo físico ingresado</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Número de botellas contadas"
-                keyboardType="number-pad"
-                value={countQuantity}
-                onChangeText={setCountQuantity}
-              />
-
-              {countQuantity.trim() !== '' && (() => {
-                const count = parseInt(countQuantity, 10);
-                if (isNaN(count) || count < 0) return null;
-                const delta = count - countPrevStock;
-                return (
-                  <View style={styles.previewSection}>
-                    <Text style={styles.previewLabel}>Vista previa</Text>
-                    <Text style={styles.previewText}>{countPrevStock} → {count} botellas</Text>
-                    <Text style={styles.previewText}>
-                      Ajuste: {delta > 0 ? `+${delta}` : delta < 0 ? `-${Math.abs(delta)}` : '0'}
-                    </Text>
-                  </View>
-                );
-              })()}
-
-              <Text style={styles.inputLabel}>Notas (opcional)</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="Notas del conteo"
-                multiline
-                numberOfLines={2}
-                value={countNotes}
-                onChangeText={setCountNotes}
-              />
-
-              <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.cancelButton]}
-                  onPress={closeCountModal}
-                  disabled={countSubmitting}
-                >
-                  <Text style={styles.cancelButtonText}>Cancelar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.confirmButton]}
-                  onPress={handleRegisterCount}
-                  disabled={
-                    countSubmitting ||
-                    countQuantity.trim() === '' ||
-                    (() => {
-                      const n = parseInt(countQuantity, 10);
-                      return isNaN(n) || n < 0;
-                    })()
-                  }
-                >
-                  {countSubmitting ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.confirmButtonText}>Confirmar</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Modal de edición de vino */}
-      <Modal
+      <EditInventoryWineModal
         visible={editModalVisible}
-        transparent={true}
-        animationType="slide"
         onRequestClose={() => setEditModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalTitle}>✏️ Editar Vino</Text>
+        editingWine={editingWine}
+        wineEditData={wineEditData}
+        setWineEditData={setWineEditData}
+        savingWine={savingWine}
+        uploadingImage={uploadingImage}
+        contentPaddingBottom={12 + insets.bottom}
+        onSave={handleSaveWine}
+      />
 
-              {(wineEditData.image_url || (editingWine && editingWine.wines.image_url)) && (
-                <Image
-                  source={{ uri: wineEditData.image_url || (editingWine?.wines.image_url || '') }}
-                  style={styles.editImagePreview}
-                  resizeMode="contain"
-                />
-              )}
-
-              <TouchableOpacity
-                style={styles.imageButton}
-                onPress={handleSelectImage}
-                disabled={uploadingImage}
-              >
-                {uploadingImage ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.imageButtonText}>📷 Cambiar Imagen</Text>
-                )}
-              </TouchableOpacity>
-
-              <Text style={styles.inputLabel}>Nombre del vino *</Text>
-              <TextInput
-                style={styles.input}
-                value={wineEditData.name}
-                onChangeText={(text) => setWineEditData({ ...wineEditData, name: text })}
-              />
-
-              <Text style={styles.inputLabel}>Bodega</Text>
-              <TextInput
-                style={styles.input}
-                value={wineEditData.winery}
-                onChangeText={(text) => setWineEditData({ ...wineEditData, winery: text })}
-              />
-
-              <Text style={styles.inputLabel}>Tipo de uva *</Text>
-              <TextInput
-                style={styles.input}
-                value={wineEditData.grape_variety}
-                onChangeText={(text) => setWineEditData({ ...wineEditData, grape_variety: text })}
-              />
-
-              <View style={styles.rowInputs}>
-                <View style={styles.halfInput}>
-                  <Text style={styles.inputLabel}>Región</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={wineEditData.region}
-                    onChangeText={(text) => setWineEditData({ ...wineEditData, region: text })}
-                  />
-                </View>
-                <View style={styles.halfInput}>
-                  <Text style={styles.inputLabel}>País</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={wineEditData.country}
-                    onChangeText={(text) => setWineEditData({ ...wineEditData, country: text })}
-                  />
-                </View>
-              </View>
-
-              <Text style={styles.inputLabel}>Añada (puedes agregar múltiples separadas por coma: 2020, 2021)</Text>
-              <TextInput
-                style={styles.input}
-                value={wineEditData.vintage}
-                onChangeText={(text) => setWineEditData({ ...wineEditData, vintage: text })}
-                keyboardType="default"
-                placeholder="Ej: 2020 o 2020, 2021"
-              />
-
-              <Text style={styles.inputLabel}>Precio por botella</Text>
-              <TextInput
-                style={styles.input}
-                value={wineEditData.price_bottle}
-                onChangeText={(text) => setWineEditData({ ...wineEditData, price_bottle: text })}
-                keyboardType="decimal-pad"
-              />
-
-              <Text style={styles.inputLabel}>Precio por copa</Text>
-              <TextInput
-                style={styles.input}
-                value={wineEditData.price_glass}
-                onChangeText={(text) => setWineEditData({ ...wineEditData, price_glass: text })}
-                keyboardType="decimal-pad"
-              />
-
-              <Text style={styles.inputLabel}>Descripción</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={wineEditData.description}
-                onChangeText={(text) => setWineEditData({ ...wineEditData, description: text })}
-                multiline
-                numberOfLines={4}
-              />
-
-              <Text style={styles.inputLabel}>Notas de cata</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={wineEditData.tasting_notes}
-                onChangeText={(text) => setWineEditData({ ...wineEditData, tasting_notes: text })}
-                multiline
-                numberOfLines={4}
-              />
-
-              <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.cancelButton]}
-                  onPress={() => setEditModalVisible(false)}
-                  disabled={savingWine || uploadingImage}
-                >
-                  <Text style={styles.cancelButtonText}>Cancelar</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.confirmButton]}
-                  onPress={handleSaveWine}
-                  disabled={savingWine || uploadingImage}
-                >
-                  {savingWine ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.confirmButtonText}>Guardar</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Modal de ayuda */}
-      <Modal
+      <HelpInventoryModal
         visible={helpModalVisible}
-        transparent
-        animationType="fade"
         onRequestClose={closeHelpModal}
-      >
-        <View style={styles.helpModalOverlay}>
-          <View style={styles.helpModalContent}>
-            <Text style={styles.helpModalTitle}>Cómo usar Inventario y Análisis</Text>
-            <ScrollView showsVerticalScrollIndicator={false} style={styles.helpModalScroll}>
-              <View style={styles.helpBlock}>
-                <Text style={styles.helpBlockTitle}>1️⃣ Registrar eventos de inventario</Text>
-                <Text style={styles.helpBlockText}>
-                  Cuando recibas o retires botellas usa:{'\n'}
-                  • Entrada → Compra o cortesía proveedor{'\n'}
-                  • Salida → Cortesía cliente o rotura
-                </Text>
-              </View>
-              <View style={styles.helpBlock}>
-                <Text style={styles.helpBlockTitle}>2️⃣ Conteos físicos</Text>
-                <Text style={styles.helpBlockText}>
-                  Realiza conteos cada 15–30 días.{'\n'}
-                  Estos cortes permiten estimar ventas y consumo.
-                </Text>
-              </View>
-              <View style={styles.helpBlock}>
-                <Text style={styles.helpBlockTitle}>3️⃣ Ventas estimadas</Text>
-                <Text style={styles.helpBlockText}>
-                  El sistema calcula consumo con:{'\n'}
-                  Stock inicio + Entradas − Salidas especiales − Stock final.
-                </Text>
-              </View>
-              <View style={styles.helpBlock}>
-                <Text style={styles.helpBlockTitle}>4️⃣ Comparar sucursales</Text>
-                <Text style={styles.helpBlockText}>
-                  Si tienes varias sucursales puedes comparar su desempeño y ver qué vinos se venden más.
-                </Text>
-              </View>
-              <Text style={styles.helpModalNote}>
-                Las ventas se estiman con base en conteos físicos y movimientos registrados.
-              </Text>
-              <View style={styles.helpModalCheckRow}>
-                <Switch
-                  value={dontShowHelpAgain}
-                  onValueChange={setDontShowHelpAgain}
-                  trackColor={{ false: '#ccc', true: '#8B0000' }}
-                  thumbColor="#fff"
-                />
-                <Text style={styles.helpModalCheckLabel}>No mostrar de nuevo</Text>
-              </View>
-            </ScrollView>
-            <TouchableOpacity style={styles.helpModalCloseButton} onPress={closeHelpModal}>
-              <Text style={styles.helpModalCloseText}>Cerrar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+        dontShowHelpAgain={dontShowHelpAgain}
+        onDontShowChange={setDontShowHelpAgain}
+      />
     </SafeAreaView>
   );
 };
@@ -1816,87 +1408,26 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: CELLARIUM.bg,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: CELLARIUM.bg,
   },
   loadingText: {
     marginTop: 12,
     fontSize: 16,
-    color: '#666',
-  },
-  header: {
-    flexDirection: 'row',
-    padding: 20,
-    paddingVertical: 16,
-    backgroundColor: '#8B0000',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerContent: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    color: CELLARIUM.muted,
   },
   helpButton: {
-    position: 'absolute',
-    right: 16,
-    top: 0,
-    bottom: 0,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.12)',
     justifyContent: 'center',
-    padding: 8,
-  },
-  helpButtonText: {
-    fontSize: 22,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 5,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#fff',
-    opacity: 0.9,
-    textAlign: 'center',
-  },
-  tabs: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 8,
     alignItems: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  tabActive: {
-    borderBottomColor: '#8B0000',
-  },
-  tabText: {
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '600',
-  },
-  tabTextActive: {
-    color: '#8B0000',
-    fontWeight: 'bold',
-  },
-  tabDisabled: {
-    opacity: 0.5,
-    backgroundColor: '#f0f0f0',
-  },
-  tabTextDisabled: {
-    color: '#999',
   },
   tabContent: {
     flex: 1,
@@ -1915,7 +1446,7 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: CELLARIUM.bg,
     borderRadius: 8,
     padding: 12,
     alignItems: 'center',
@@ -1931,11 +1462,11 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#8B0000',
+    color: CELLARIUM.primary,
     marginBottom: 2,
   },
   statValueWarning: {
-    color: '#dc3545',
+    color: CELLARIUM.danger,
   },
   statLabel: {
     fontSize: 10,
@@ -1943,7 +1474,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   pdfButton: {
-    backgroundColor: '#007bff',
+    backgroundColor: CELLARIUM.primary,
     borderRadius: 8,
     padding: 12,
     alignItems: 'center',
@@ -1953,36 +1484,209 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: 'bold',
   },
-  searchSection: {
-    backgroundColor: '#fff',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+  searchChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    height: 40,
+    paddingHorizontal: 14,
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 20,
+    backgroundColor: '#F3F3F3',
+  },
+  searchChipIcon: {
+    marginRight: 8,
+  },
+  searchChipText: {
+    fontSize: 15,
+    color: '#666',
+  },
+  searchWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 52,
+    borderRadius: 26,
+    paddingHorizontal: 16,
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: '#F3F3F3',
+  },
+  searchIcon: {
+    marginRight: 10,
   },
   searchInput: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    padding: 12,
+    flex: 1,
     fontSize: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#ddd',
+    paddingVertical: 0,
+  },
+  searchCloseButton: {
+    marginLeft: 8,
+  },
+  listContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 24,
+  },
+  inventoryCard: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  inventoryCardRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  inventoryThumb: {
+    width: 104,
+    height: 104,
+    borderRadius: 12,
+    backgroundColor: '#F2F2F2',
+  },
+  inventoryThumbPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  placeholderText: {
+    fontSize: 28,
+  },
+  placeholderTextSmall: {
+    fontSize: 20,
+  },
+  inventoryTextBlock: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+  },
+  inventoryWinery: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#924048',
+    marginBottom: 2,
+  },
+  inventoryWineName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    marginBottom: 4,
+  },
+  inventoryRegion: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 4,
+  },
+  inventoryPrice: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#924048',
+  },
+  inventoryPriceCopa: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#924048',
+    marginTop: 2,
+  },
+  inventoryActionColumn: {
+    alignItems: 'center',
+    gap: 10,
+  },
+  inventoryActionBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  inventoryActionBtnPrimary: {
+    backgroundColor: '#924048',
+  },
+  inventoryActionBtnSecondary: {
+    backgroundColor: '#EAEAEA',
+  },
+  stockBlock: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginTop: 8,
+  },
+  stockBlockLabel: {
+    fontSize: 13,
+    color: '#777',
+    marginRight: 4,
+  },
+  stockBlockNumber: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#2E7D32',
+  },
+  inventoryCardFooter: {
+    marginTop: 12,
+  },
+  inventoryDivider: {
+    height: 1,
+    backgroundColor: '#EEE',
+  },
+  inventoryValueRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  inventoryValueLabel: {
+    fontSize: 13,
+    color: '#666',
+  },
+  inventoryValueAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#924048',
+  },
+  inventoryBigActions: {
+    flexDirection: 'row',
+    marginTop: 12,
+    gap: 10,
+  },
+  inventoryBigBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  inventoryBigBtnPrimary: {
+    backgroundColor: '#924048',
+  },
+  inventoryBigBtnSecondary: {
+    backgroundColor: '#F1F1F1',
+  },
+  inventoryBigBtnTextPrimary: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  inventoryBigBtnTextSecondary: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
   },
   filterButtons: {
     flexDirection: 'row',
     gap: 8,
   },
   filterButton: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderWidth: 2,
-    borderColor: 'transparent',
+    backgroundColor: '#F3F3F3',
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
   },
   filterButtonActive: {
-    backgroundColor: '#8B0000',
-    borderColor: '#8B0000',
+    backgroundColor: 'rgba(146,64,72,0.12)',
   },
   filterButtonText: {
     fontSize: 13,
@@ -1990,75 +1694,7 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   filterButtonTextActive: {
-    color: '#fff',
-  },
-  listContainer: {
-    padding: 16,
-  },
-  inventoryCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  inventoryHeader: {
-    flexDirection: 'row',
-    marginBottom: 16,
-  },
-  wineImage: {
-    width: 80,
-    height: 120,
-    borderRadius: 8,
-    marginRight: 12,
-    resizeMode: 'contain',
-    backgroundColor: '#f8f9fa',
-  },
-  placeholderImage: {
-    backgroundColor: '#f8f9fa',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  placeholderText: {
-    fontSize: 32,
-  },
-  placeholderTextSmall: {
-    fontSize: 20,
-  },
-  wineInfo: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  wineWinery: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#8B0000',
-    marginBottom: 2,
-  },
-  wineName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
-  },
-  wineDetails: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 2,
-  },
-  wineRegion: {
-    fontSize: 13,
-    color: '#999',
-    marginBottom: 6,
-  },
-  winePrice: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#8B0000',
+    color: '#924048',
   },
   stockSection: {
     marginBottom: 16,
@@ -2082,7 +1718,7 @@ const styles = StyleSheet.create({
     color: '#28a745',
   },
   stockQuantityLow: {
-    color: '#dc3545',
+    color: CELLARIUM.danger,
   },
   actionButtons: {
     flexDirection: 'row',
@@ -2109,10 +1745,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffc107',
   },
   editButton: {
-    backgroundColor: '#007bff',
+    backgroundColor: CELLARIUM.primary,
   },
   deleteButton: {
-    backgroundColor: '#dc3545',
+    backgroundColor: CELLARIUM.danger,
   },
   actionButtonText: {
     color: '#fff',
@@ -2134,53 +1770,95 @@ const styles = StyleSheet.create({
   valueAmount: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#8B0000',
+    color: CELLARIUM.primary,
+  },
+  wineImage: {
+    width: 80,
+    height: 120,
+    borderRadius: 8,
+    marginRight: 12,
+    resizeMode: 'contain',
+    backgroundColor: CELLARIUM.bg,
+  },
+  placeholderImage: {
+    backgroundColor: CELLARIUM.bg,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  wineInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  wineWinery: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: CELLARIUM.primary,
+    marginBottom: 2,
+  },
+  wineName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  wineDetails: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 2,
+  },
+  wineRegion: {
+    fontSize: 13,
+    color: '#999',
+    marginBottom: 6,
+  },
+  winePrice: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: CELLARIUM.primary,
   },
   chartSection: {
     marginHorizontal: 16,
-    marginBottom: 24,
+    marginBottom: 14,
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 18,
+    padding: 14,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 4,
     elevation: 3,
   },
   sectionTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '700',
+    color: '#1a1a1a',
     marginBottom: 12,
     marginHorizontal: 16,
   },
   sortButtons: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    gap: 8,
-    marginBottom: 16,
+    gap: 10,
+    marginBottom: 14,
   },
   sortButton: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    padding: 10,
+    backgroundColor: '#F3F3F3',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'transparent',
   },
   sortButtonActive: {
-    backgroundColor: '#8B0000',
-    borderColor: '#8B0000',
+    backgroundColor: 'rgba(146,64,72,0.12)',
   },
   sortButtonText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
     color: '#666',
   },
   sortButtonTextActive: {
-    color: '#fff',
+    color: '#924048',
   },
   winesList: {
     paddingHorizontal: 16,
@@ -2189,19 +1867,20 @@ const styles = StyleSheet.create({
   wineMetricCard: {
     flexDirection: 'row',
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 14,
+    marginHorizontal: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 4,
     elevation: 3,
   },
   wineRank: {
     width: 32,
     height: 32,
-    backgroundColor: '#8B0000',
+    backgroundColor: CELLARIUM.primary,
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
@@ -2214,7 +1893,7 @@ const styles = StyleSheet.create({
   },
   wineImageSmall: {
     resizeMode: 'contain',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: CELLARIUM.bg,
     width: 60,
     height: 90,
     borderRadius: 8,
@@ -2250,10 +1929,10 @@ const styles = StyleSheet.create({
   metricValue: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#8B0000',
+    color: CELLARIUM.primary,
   },
   metricValueLow: {
-    color: '#dc3545',
+    color: CELLARIUM.danger,
   },
   wineExtraMetric: {
     fontSize: 10,
@@ -2296,7 +1975,7 @@ const styles = StyleSheet.create({
   },
   comparisonStatCard: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: CELLARIUM.bg,
     borderRadius: 8,
     padding: 12,
     alignItems: 'center',
@@ -2304,7 +1983,7 @@ const styles = StyleSheet.create({
   comparisonStatValue: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#8B0000',
+    color: CELLARIUM.primary,
     marginBottom: 4,
   },
   comparisonStatLabel: {
@@ -2339,7 +2018,7 @@ const styles = StyleSheet.create({
   branchRank: {
     width: 32,
     height: 32,
-    backgroundColor: '#8B0000',
+    backgroundColor: CELLARIUM.primary,
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
@@ -2373,7 +2052,7 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   branchComparisonValueHighlight: {
-    color: '#8B0000',
+    color: CELLARIUM.primary,
     fontSize: 14,
   },
   contributionBar: {
@@ -2392,11 +2071,11 @@ const styles = StyleSheet.create({
   },
   contributionBarFill: {
     height: '100%',
-    backgroundColor: '#8B0000',
+    backgroundColor: CELLARIUM.primary,
   },
   contributionPercent: {
     fontSize: 11,
-    color: '#8B0000',
+    color: CELLARIUM.primary,
     fontWeight: 'bold',
     marginTop: 4,
     textAlign: 'right',
@@ -2436,7 +2115,7 @@ const styles = StyleSheet.create({
     width: 28,
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#8B0000',
+    color: CELLARIUM.primary,
   },
   topName: {
     flex: 1,
@@ -2494,7 +2173,7 @@ const styles = StyleSheet.create({
   helpBlockTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#8B0000',
+    color: CELLARIUM.primary,
     marginBottom: 6,
   },
   helpBlockText: {
@@ -2521,7 +2200,7 @@ const styles = StyleSheet.create({
     color: '#555',
   },
   helpModalCloseButton: {
-    backgroundColor: '#8B0000',
+    backgroundColor: CELLARIUM.primary,
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
@@ -2545,7 +2224,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   modalWineInfo: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: CELLARIUM.bg,
     borderRadius: 8,
     padding: 12,
     marginBottom: 20,
@@ -2567,7 +2246,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   input: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: CELLARIUM.bg,
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
@@ -2611,16 +2290,16 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 15,
+    fontWeight: '600',
   },
   confirmButton: {
     backgroundColor: '#28a745',
   },
   confirmButtonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 15,
+    fontWeight: '600',
   },
   reasonButtons: {
     flexDirection: 'row',
@@ -2630,7 +2309,7 @@ const styles = StyleSheet.create({
   },
   reasonButton: {
     width: '48%',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: CELLARIUM.bg,
     borderRadius: 8,
     padding: 14,
     alignItems: 'center',
@@ -2642,11 +2321,11 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
   reasonButtonActive: {
-    backgroundColor: '#8B0000',
-    borderColor: '#8B0000',
+    backgroundColor: CELLARIUM.primary,
+    borderColor: CELLARIUM.primary,
   },
   reasonButtonText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: '#666',
     textAlign: 'center',
@@ -2654,15 +2333,86 @@ const styles = StyleSheet.create({
   reasonButtonTextActive: {
     color: '#fff',
   },
+  // Estilos compactos y Cellarium para modales Registrar evento, Conteo físico y Editar vino
+  modalScrollContent: {
+    paddingBottom: 4,
+  },
+  modalContentCompact: {
+    padding: 14,
+  },
+  modalTitleCompact: {
+    fontSize: 20,
+    marginBottom: 6,
+  },
+  modalCopyCompact: {
+    marginBottom: 10,
+    fontSize: 13,
+  },
+  modalWineInfoCompact: {
+    padding: 8,
+    marginBottom: 10,
+    borderRadius: 10,
+  },
+  inputCompact: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+  },
+  textAreaCompact: {
+    minHeight: 56,
+  },
+  previewSectionCompact: {
+    padding: 8,
+    marginBottom: 10,
+    backgroundColor: 'rgba(146,64,72,0.08)',
+  },
+  previewLabelCellarium: {
+    fontSize: 12,
+    color: '#924048',
+    marginBottom: 2,
+  },
+  previewTextCellarium: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#924048',
+  },
+  modalButtonsCompact: {
+    marginTop: 6,
+  },
+  modalButtonCompact: {
+    paddingVertical: 10,
+    minHeight: 44,
+  },
+  reasonButtonsCompact: {
+    marginBottom: 10,
+  },
+  reasonButtonCompact: {
+    minHeight: 40,
+    paddingVertical: 8,
+  },
+  reasonButtonActiveCellarium: {
+    backgroundColor: '#924048',
+    borderColor: '#924048',
+  },
+  confirmButtonCellarium: {
+    backgroundColor: '#924048',
+  },
   editImagePreview: {
     width: '100%',
     height: 200,
     borderRadius: 8,
     marginBottom: 16,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: CELLARIUM.bg,
+  },
+  editImagePreviewCompact: {
+    width: '100%',
+    height: 140,
+    borderRadius: 10,
+    marginBottom: 10,
+    backgroundColor: CELLARIUM.bg,
   },
   imageButton: {
-    backgroundColor: '#007bff',
+    backgroundColor: CELLARIUM.primary,
     borderRadius: 8,
     padding: 12,
     alignItems: 'center',
@@ -2709,7 +2459,7 @@ const styles = StyleSheet.create({
   reportStatValue: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#8B0000',
+    color: CELLARIUM.primary,
     marginBottom: 4,
   },
   reportStatValueNoWrap: {
@@ -2744,7 +2494,7 @@ const styles = StyleSheet.create({
   },
   reportButton: {
     flexDirection: 'row',
-    backgroundColor: '#8B0000',
+    backgroundColor: CELLARIUM.primary,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',

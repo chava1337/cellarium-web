@@ -19,7 +19,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import { listWinesKeyset, fetchWineDetail, GlobalWine, getBilingualValue, getBilingualArray, getBilingualCountryDisplay } from '../services/GlobalWineCatalogService';
-import { supabase } from '../services/supabase';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranch } from '../contexts/BranchContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -27,23 +27,14 @@ import { useDebounce } from '../hooks/useDebounce';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { logger } from '../utils/logger';
+import { CELLARIUM, CELLARIUM_GRADIENT } from '../theme/cellariumTheme';
+import { CellariumHeader } from '../components/cellarium';
+
 type GlobalWineCatalogScreenNavigationProp = StackNavigationProp<RootStackParamList, 'GlobalWineCatalog'>;
 interface Props {
  navigation: GlobalWineCatalogScreenNavigationProp;
 }
 
-// Paleta de colores CELLARIUM (movida fuera del componente para uso en closures)
-const CELLARIUM = {
- primary: "#924048",
- primaryDark: "#6f2f37",
- primaryDarker: "#4e2228",
- textOnDark: "rgba(255,255,255,0.92)",
- textOnDarkMuted: "rgba(255,255,255,0.75)",
- chipActiveBg: "rgba(255,255,255,0.14)",
- chipBorder: "rgba(255,255,255,0.16)",
-} as const;
-
-// CARD_HEIGHT removido - ya no se usa en el layout horizontal
 const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  const { user, profileReady } = useAuth();
  const { currentBranch } = useBranch();
@@ -89,7 +80,7 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  if (branchName) {
  return true;
  }
- const isOwner = user.role === 'owner';
+ const isOwner = user?.role === 'owner';
  const title = t('global_catalog.restaurant_name_required');
  const message = isOwner
    ? t('global_catalog.restaurant_name_owner_msg')
@@ -104,7 +95,7 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
      ];
  Alert.alert(title, message, buttons);
  return false;
- }, [currentBranch, navigation, user.role, t]);
+ }, [currentBranch, navigation, user?.role, t]);
 // OPTIMIZACION: Usar debouncedSearchQuery en lugar de searchQuery
 // Esto evita consultas a la BD mientras el usuario esta escribiendo
 // La busqueda se ejecuta 400ms despues de que el usuario deje de escribir
@@ -496,7 +487,7 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  if (!profileReady) {
  return (
  <View style={styles.loadingContainer}>
- <ActivityIndicator size="large" color="#8B0000" />
+ <ActivityIndicator size="large" color={CELLARIUM.primary} />
  </View>
  );
  }
@@ -974,36 +965,23 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  { key: 'fortified', label: t('global_catalog.fortified'), icon: '🛡️' },
  ];
  return (
- <SafeAreaView style={styles.container}>
- {/* Header con gradiente */}
- <LinearGradient
- colors={[CELLARIUM.primaryDarker, CELLARIUM.primary, CELLARIUM.primaryDark]}
- start={{ x: 0, y: 0 }}
- end={{ x: 1, y: 0 }}
- style={styles.headerGradient}
- >
- <View style={styles.headerContent}>
- {/* LeftSlot: balance visual */}
- <View style={styles.headerLeftSlot} />
- {/* CenterSlot: título centrado */}
- <View style={styles.headerCenterSlot}>
- <Text style={styles.headerTitle}>{t('global_catalog.title')}</Text>
- </View>
- {/* RightSlot: botón de búsquéeda */}
- <View style={styles.headerRightSlot}>
+ <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+ <CellariumHeader
+ title={t('global_catalog.title')}
+ rightSlot={
  <TouchableOpacity
  style={styles.searchButtonHeader}
  onPress={() => setShowSearchModal(true)}
+ hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
  >
  <Ionicons name="search" size={20} color={CELLARIUM.textOnDark} />
  </TouchableOpacity>
- </View>
- </View>
- </LinearGradient>
+ }
+ />
  {/* Barra horizontal de filtros */}
  <View style={styles.filterBarOuter}>
  <LinearGradient
- colors={[CELLARIUM.primaryDarker, CELLARIUM.primary, CELLARIUM.primaryDark]}
+ colors={[...CELLARIUM_GRADIENT]}
  start={{ x: 0, y: 0 }}
  end={{ x: 1, y: 0 }}
  style={styles.filterBarGradient}
@@ -1146,41 +1124,12 @@ onRequestClose={() => setShowSearchModal(false)}
 const styles = StyleSheet.create({
  container: {
  flex: 1,
- backgroundColor: '#f5f5f5',
- },
- // Header con gradiente
- headerGradient: {
- paddingVertical: 16,
- paddingHorizontal: 20,
- },
- headerContent: {
- flexDirection: 'row',
- alignItems: 'center',
- justifyContent: 'space-between',
- },
- headerLeftSlot: {
- width: 36, // Mismo ancho quée el botón de búsquéeda para balance
- },
- headerCenterSlot: {
- flex: 1,
- alignItems: 'center',
- justifyContent: 'center',
- },
- headerRightSlot: {
- width: 36, // Mismo ancho quée el botón de búsquéeda
- alignItems: 'flex-end',
- justifyContent: 'center',
- },
- headerTitle: {
- fontSize: 22,
- fontWeight: 'bold',
- color: 'rgba(255,255,255,0.95)',
- textAlign: 'center',
+ backgroundColor: CELLARIUM.bg,
  },
  searchButtonHeader: {
- width: 36,
- height: 36,
- borderRadius: 18,
+ width: 40,
+ height: 40,
+ borderRadius: 20,
  backgroundColor: 'rgba(255,255,255,0.15)',
  justifyContent: 'center',
  alignItems: 'center',

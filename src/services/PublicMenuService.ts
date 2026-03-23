@@ -41,6 +41,14 @@ export interface PublicMenuWine {
   stock_quantity?: number | null;
   price_by_glass?: number | null;
   price_by_bottle?: number | null;
+  /** Grado alcohólico para ficha guest (ej. 14.5 o "14.5") */
+  alcohol_content?: number | string | null;
+  /** Sensoriales 1-5 para ficha en catálogo guest */
+  body_level?: number | null;
+  sweetness_level?: number | null;
+  acidity_level?: number | null;
+  intensity_level?: number | null;
+  fizziness_level?: number | null;
 }
 
 /**

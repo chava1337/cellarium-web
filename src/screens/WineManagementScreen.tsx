@@ -13,7 +13,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
+import { CellariumHeader } from '../components/cellarium';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
@@ -27,6 +27,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { useAdminGuard } from '../hooks/useAdminGuard';
 import { PendingApprovalMessage } from '../components/PendingApprovalMessage';
 import { supabase } from '../lib/supabase';
+import { CELLARIUM } from '../theme/cellariumTheme';
 
 type WineManagementScreenNavigationProp = StackNavigationProp<RootStackParamList, 'WineManagement'>;
 type WineManagementScreenRouteProp = RouteProp<RootStackParamList, 'WineManagement'>;
@@ -79,15 +80,15 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 
   if (guardStatus === 'loading' || guardStatus === 'profile_loading') {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
-        <ActivityIndicator size="large" color="#8E2C3A" />
-        <Text style={{ marginTop: 12, color: '#666' }}>{guardStatus === 'profile_loading' ? (t('msg.loading') || 'Cargando perfil…') : ''}</Text>
+      <View style={styles.guardContainer}>
+        <ActivityIndicator size="large" color={CELLARIUM.primary} />
+        <Text style={styles.guardLoadingText}>{guardStatus === 'profile_loading' ? (t('msg.loading') || 'Cargando perfil…') : ''}</Text>
       </View>
     );
   }
   if (guardStatus === 'pending') {
     return (
-      <View style={{ flex: 1, backgroundColor: '#f8f9fa' }}>
+      <View style={styles.guardContainer}>
         <PendingApprovalMessage />
       </View>
     );
@@ -376,7 +377,6 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         )}
       </View>
 
-      {/* Formulario visible cuando ya hay foto frontal */}
       {frontLabelImage && (
         <>
       <Text style={styles.sectionTitle}>{t('wine_mgmt.section_wine_info')}</Text>
@@ -402,7 +402,7 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       </View>
 
       <View style={styles.formRow}>
-        <View style={[styles.formGroup, { flex: 1, marginRight: 10 }]}>
+        <View style={styles.formGroupFlex}>
           <Text style={styles.label}>{t('wine_mgmt.vintage')}</Text>
           <TextInput
             style={styles.input}
@@ -413,7 +413,7 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
           />
         </View>
 
-        <View style={[styles.formGroup, { flex: 1 }]}>
+        <View style={styles.formGroupFlex}>
           <Text style={styles.label}>{t('wine_mgmt.alcohol_pct')}</Text>
           <TextInput
             style={styles.input}
@@ -461,7 +461,7 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       </View>
 
       <View style={styles.formRow}>
-        <View style={[styles.formGroup, { flex: 1, marginRight: 10 }]}>
+        <View style={styles.formGroupFlex}>
           <Text style={styles.label}>{t('wine_mgmt.region')}</Text>
           <TextInput
             style={styles.input}
@@ -471,7 +471,7 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
           />
         </View>
 
-        <View style={[styles.formGroup, { flex: 1 }]}>
+        <View style={styles.formGroupFlex}>
           <Text style={styles.label}>{t('wine_mgmt.country')} *</Text>
           <TextInput
             style={styles.input}
@@ -535,7 +535,7 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       <Text style={styles.sectionTitle}>{t('wine_mgmt.section_prices')}</Text>
 
       <View style={styles.formRow}>
-        <View style={[styles.formGroup, { flex: 1, marginRight: 10 }]}>
+        <View style={styles.formGroupFlex}>
           <Text style={styles.label}>{t('wine_mgmt.price_glass')}</Text>
           <TextInput
             style={styles.input}
@@ -546,7 +546,7 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
           />
         </View>
 
-        <View style={[styles.formGroup, { flex: 1 }]}>
+        <View style={styles.formGroupFlex}>
           <Text style={styles.label}>{t('wine_mgmt.price_bottle_optional')}</Text>
           <TextInput
             style={styles.input}
@@ -591,17 +591,8 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
-      <LinearGradient
-        colors={['#6D1F2B', '#8E2C3A']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={[styles.headerGradient, { paddingTop: Math.max(insets.top, 16) }]}
-      >
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle} numberOfLines={1}>{t('wine_mgmt.title')}</Text>
-        </View>
-      </LinearGradient>
+    <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+      <CellariumHeader title={t('wine_mgmt.title')} />
 
       {renderCaptureScreen()}
 
@@ -614,7 +605,7 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <ActivityIndicator size="large" color="#8E2C3A" />
+              <ActivityIndicator size="large" color={CELLARIUM.primary} />
               <Text style={styles.modalText}>{t('wine_mgmt.processing')}</Text>
             </View>
           </View>
@@ -644,22 +635,16 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
               style={styles.proCamera}
             />
             
-            {/* Controles de la cámara profesional */}
-            <View style={styles.proCameraControls}>
-              <TouchableOpacity 
+            <View style={[styles.proCameraControls, { top: Math.max(insets.top, 14) }]}>
+              <TouchableOpacity
                 style={styles.proCameraCloseButton}
                 onPress={() => setShowProCamera(false)}
               >
-                <Text style={styles.proCameraCloseText}>✕ {t('wine_mgmt.close')}</Text>
+                <Text style={styles.proCameraCloseText}>{t('wine_mgmt.close')}</Text>
               </TouchableOpacity>
-              
               <View style={styles.proCameraInfo}>
-                <Text style={styles.proCameraInfoText}>
-                  {t('wine_mgmt.front_label_camera')}
-                </Text>
-                <Text style={styles.proCameraInfoSubtext}>
-                  {t('wine_mgmt.camera_auto_capture')}
-                </Text>
+                <Text style={styles.proCameraInfoText}>{t('wine_mgmt.front_label_camera')}</Text>
+                <Text style={styles.proCameraInfoSubtext}>{t('wine_mgmt.camera_auto_capture')}</Text>
               </View>
             </View>
           </View>
@@ -672,146 +657,174 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: CELLARIUM.bg,
   },
-  headerGradient: {
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-    ...(Platform.OS === 'android' && { overflow: 'hidden' as const }),
-  },
-  headerContent: {
-    alignItems: 'center',
+  guardContainer: {
+    flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: CELLARIUM.bg,
+    padding: 24,
   },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: '#FFFFFF',
+  guardLoadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: CELLARIUM.muted,
     textAlign: 'center',
   },
   captureContainer: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: CELLARIUM.bg,
   },
   captureContent: {
-    padding: 20,
-    paddingBottom: 40,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 44,
   },
-  // Hero card — estilo catálogo (WineCatalogScreen: fondo gris, cards con borderRadius/sombras)
   heroCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.04)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.06,
     shadowRadius: 8,
-    elevation: 3,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.04)',
+    elevation: 2,
   },
   heroDescription: {
-    fontSize: 14,
+    fontSize: 15,
+    lineHeight: 22,
     color: '#555',
-    lineHeight: 20,
   },
-  captureOptions: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 40,
-  },
-  captureButton: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 30,
-    alignItems: 'center',
-    width: '45%',
+  photoSectionCard: {
+    backgroundColor: CELLARIUM.card,
+    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 18,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.04)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    elevation: 3,
   },
-  captureIcon: {
-    fontSize: 48,
-    marginBottom: 10,
+  photoSectionTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: CELLARIUM.text,
+    marginBottom: 6,
   },
-  captureButtonText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 5,
+  photoSectionHint: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: CELLARIUM.muted,
+    marginBottom: 16,
   },
-  captureButtonSubtext: {
-    fontSize: 12,
-    color: '#666',
+  photoButtonsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 4,
   },
-  processingContainer: {
+  primaryButton: {
     flex: 1,
-    justifyContent: 'center',
+    minHeight: 52,
+    borderRadius: 16,
+    backgroundColor: CELLARIUM.primary,
     alignItems: 'center',
-    padding: 20,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
   },
-  processingText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginTop: 20,
-    marginBottom: 10,
+  primaryButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
-  processingSubtext: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 30,
+  secondaryButton: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 16,
+    backgroundColor: CELLARIUM.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    borderWidth: 2,
+    borderColor: CELLARIUM.primary,
   },
-  processingImage: {
-    width: 200,
-    height: 300,
-    borderRadius: 12,
+  secondaryButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: CELLARIUM.primary,
+  },
+  imagePreviewContainer: {
+    position: 'relative',
+    borderRadius: 18,
+    overflow: 'hidden',
+    marginTop: 4,
+    backgroundColor: '#F1F1F3',
+  },
+  previewImage: {
+    width: '100%',
+    height: 260,
     resizeMode: 'cover',
   },
-  reviewContainer: {
-    flex: 1,
-    padding: 20,
+  removeImageButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  sectionTitle: {
+  removeImageText: {
+    color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-    color: '#444',
-    marginBottom: 12,
-    marginTop: 20,
-    letterSpacing: 0.3,
   },
-  labelPreview: {
-    width: '100%',
-    height: 200,
-    borderRadius: 12,
-    resizeMode: 'cover',
-    marginBottom: 20,
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: CELLARIUM.text,
+    marginTop: 6,
+    marginBottom: 12,
+    letterSpacing: 0.2,
   },
   formGroup: {
-    marginBottom: 16,
+    marginBottom: 14,
+  },
+  formGroupFlex: {
+    flex: 1,
+    marginBottom: 14,
   },
   formRow: {
     flexDirection: 'row',
+    gap: 12,
   },
   label: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
+    color: CELLARIUM.text,
+    marginBottom: 6,
   },
   input: {
+    minHeight: 48,
+    backgroundColor: CELLARIUM.card,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
+    borderColor: '#E5E5E8',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontSize: 16,
-    backgroundColor: '#fff',
+    color: CELLARIUM.text,
   },
   typeChipsRow: {
     flexDirection: 'row',
@@ -821,23 +834,23 @@ const styles = StyleSheet.create({
   typeChip: {
     paddingVertical: 10,
     paddingHorizontal: 14,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#ddd',
-    backgroundColor: '#fff',
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: '#D9D9DE',
+    backgroundColor: CELLARIUM.card,
   },
   typeChipSelected: {
-    borderColor: '#8E2C3A',
-    backgroundColor: 'rgba(142, 44, 58, 0.08)',
+    borderColor: CELLARIUM.primary,
+    backgroundColor: 'rgba(146,64,72,0.10)',
   },
   typeChipText: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#444',
   },
   typeChipTextSelected: {
-    color: '#8E2C3A',
-    fontWeight: '600',
+    color: CELLARIUM.primary,
+    fontWeight: '700',
   },
   sensoryRow: {
     flexDirection: 'row',
@@ -846,196 +859,80 @@ const styles = StyleSheet.create({
   },
   sensoryBtn: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#ddd',
-    backgroundColor: '#fff',
+    minHeight: 42,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#D9D9DE',
+    backgroundColor: CELLARIUM.card,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sensoryBtnSelected: {
-    borderColor: '#8E2C3A',
-    backgroundColor: 'rgba(142, 44, 58, 0.12)',
+    borderColor: CELLARIUM.primary,
+    backgroundColor: 'rgba(146,64,72,0.12)',
   },
   sensoryBtnText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: CELLARIUM.text,
   },
   sensoryBtnTextSelected: {
-    color: '#8E2C3A',
-  },
-  textArea: {
-    height: 100,
-    textAlignVertical: 'top',
+    color: CELLARIUM.primary,
   },
   helpText: {
     fontSize: 12,
-    color: '#666',
+    color: CELLARIUM.muted,
     marginTop: 5,
     fontStyle: 'italic',
   },
   actionButtons: {
-    marginTop: 20,
+    marginTop: 22,
     marginBottom: 40,
   },
-  imageButton: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#8B0000',
-    marginBottom: 10,
-  },
-  imageButtonText: {
-    fontSize: 16,
-    color: '#8B0000',
-    fontWeight: '600',
-  },
   saveButton: {
-    backgroundColor: '#8E2C3A',
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
+    minHeight: 54,
+    borderRadius: 16,
+    backgroundColor: CELLARIUM.primary,
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    elevation: 4,
   },
   saveButtonDisabled: {
-    backgroundColor: '#ccc',
+    opacity: 0.6,
+    backgroundColor: CELLARIUM.muted,
   },
   saveButtonText: {
-    fontSize: 18,
-    color: '#fff',
-    fontWeight: 'bold',
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
-  imagesContainer: {
+  modalOverlay: {
     flex: 1,
-    padding: 20,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
   },
-  suggestedTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 10,
-    marginTop: 10,
+  modalContent: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: 20,
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    alignItems: 'center',
   },
-  suggestedImages: {
-    marginBottom: 20,
-  },
-  suggestedImage: {
-    marginRight: 15,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  selectedImage: {
-    borderColor: '#8B0000',
-  },
-  bottleImage: {
-    width: 150,
-    height: 250,
-    resizeMode: 'cover',
-  },
-  imageSource: {
-    fontSize: 12,
-    color: '#666',
+  modalText: {
+    marginTop: 14,
+    fontSize: 15,
+    color: '#444',
     textAlign: 'center',
-    padding: 5,
-    backgroundColor: '#f0f0f0',
-  },
-  uploadButton: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#8B0000',
-    marginBottom: 10,
-  },
-  uploadButtonText: {
-    fontSize: 16,
-    color: '#8B0000',
-    fontWeight: '600',
-  },
-  continueButton: {
-    backgroundColor: '#8B0000',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-  },
-  continueButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  // Photo section card — mismo estilo que catálogo (borderRadius/sombras)
-  photoSectionCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    paddingVertical: 20,
-    paddingHorizontal: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.04)',
-  },
-  photoSectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 6,
-  },
-  photoSectionHint: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 16,
-    lineHeight: 18,
-  },
-  // Button styles
-  photoButtonsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
-  },
-  primaryButton: {
-    flex: 1,
-    backgroundColor: '#8E2C3A',
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: '48%',
-  },
-  primaryButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  secondaryButton: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#8E2C3A',
-    minWidth: '48%',
-  },
-  secondaryButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#8E2C3A',
+    lineHeight: 22,
   },
   proCameraContainer: {
     flex: 1,
@@ -1046,133 +943,40 @@ const styles = StyleSheet.create({
   },
   proCameraControls: {
     position: 'absolute',
-    top: 50,
     left: 0,
     right: 0,
     paddingHorizontal: 20,
     zIndex: 10,
   },
   proCameraCloseButton: {
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
     alignSelf: 'flex-start',
   },
   proCameraCloseText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
   },
   proCameraInfo: {
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    padding: 15,
-    borderRadius: 12,
-    marginTop: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 12,
+    borderRadius: 14,
+    marginTop: 14,
   },
   proCameraInfoText: {
     color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 15,
+    fontWeight: '600',
     textAlign: 'center',
   },
   proCameraInfoSubtext: {
-    color: 'white',
-    fontSize: 14,
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 13,
     textAlign: 'center',
-    marginTop: 5,
-    opacity: 0.8,
-  },
-  // Image preview styles
-  imagePreviewContainer: {
-    position: 'relative',
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginTop: 8,
-  },
-  previewImage: {
-    width: '100%',
-    height: 220,
-    resizeMode: 'cover',
-  },
-  removeImageButton: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    borderRadius: 18,
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  removeImageText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  // Additional images styles
-  additionalImagesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 16,
-    gap: 12,
-  },
-  additionalImagePreview: {
-    position: 'relative',
-    width: '47%',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  additionalPreviewImage: {
-    width: '100%',
-    height: 150,
-    resizeMode: 'cover',
-  },
-  removeAdditionalImageButton: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    borderRadius: 15,
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  processButton: {
-    backgroundColor: '#8B0000',
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  processButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  manualButton: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#8B0000',
-    marginBottom: 20,
-  },
-  manualButtonText: {
-    fontSize: 16,
-    color: '#8B0000',
-    fontWeight: '600',
+    marginTop: 4,
   },
 });
 

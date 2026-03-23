@@ -11,7 +11,8 @@ import {
   Image,
   Modal,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList, Wine } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -27,7 +28,32 @@ interface Props {
 type Phase = 'visual' | 'olfative' | 'gustative';
 type WineType = 'red' | 'white' | 'rose' | 'sparkling' | 'dessert' | 'fortified';
 
+const CELLARIUM = {
+  primary: '#924048',
+  primaryDark: '#6f2f37',
+  primaryDarker: '#4e2228',
+  textOnDark: 'rgba(255,255,255,0.92)',
+  textOnDarkMuted: 'rgba(255,255,255,0.75)',
+  bg: '#F4F4F6',
+  card: '#FFFFFF',
+  muted: '#6A6A6A',
+  border: '#E5E5E8',
+} as const;
+
+const UI = {
+  screenPadding: 16,
+  headerHeight: 96,
+  headerHorizontalPadding: 20,
+  cardRadius: 18,
+  cardPadding: 16,
+  cardGap: 14,
+  buttonHeight: 50,
+  buttonRadius: 14,
+  primaryGradient: ['#4e2228', '#6f2f37', '#924048'] as const,
+} as const;
+
 const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
+  const insets = useSafeAreaInsets();
   const { examId } = route.params;
   const { user } = useAuth();
   const [exam, setExam] = useState<TastingExam | null>(null);
@@ -261,7 +287,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!currentWine || !currentWineResponse) return null;
 
     return (
-      <ScrollView style={styles.phaseContent} showsVerticalScrollIndicator={false}>
+      <View style={styles.phaseContentInner}>
         {/* Guía de claridad y limpieza */}
         <View style={styles.guideSection}>
           <Text style={styles.guideTitle}>Limpieza y Transparencia</Text>
@@ -431,7 +457,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
             ))}
           </View>
         </View>
-      </ScrollView>
+      </View>
     );
   };
 
@@ -448,8 +474,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
     ];
 
     return (
-      <ScrollView style={styles.phaseContent} showsVerticalScrollIndicator={false}>
-        {/* Guía primera olfacción */}
+      <View style={styles.phaseContentInner}>
         <View style={styles.guideSection}>
           <Text style={styles.guideTitle}>Primera Olfacción (copa parada)</Text>
           <Text style={styles.guideText}>
@@ -585,7 +610,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
             ))}
           </View>
         </View>
-      </ScrollView>
+      </View>
     );
   };
 
@@ -596,8 +621,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
     const flavorOptions = ['madera', 'especias', 'flores', 'minerales', 'frutos rojos', 'citricos', 'otro'];
 
     return (
-      <ScrollView style={styles.phaseContent} showsVerticalScrollIndicator={false}>
-        {/* Guía gustativa */}
+      <View style={styles.phaseContentInner}>
         <View style={styles.guideSection}>
           <Text style={styles.guideTitle}>Fase Gustativa</Text>
           <Text style={styles.guideText}>
@@ -828,15 +852,15 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
             numberOfLines={4}
           />
         </View>
-      </ScrollView>
+      </View>
     );
   };
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8B0000" />
+          <ActivityIndicator size="large" color={CELLARIUM.primary} />
           <Text style={styles.loadingText}>Cargando examen...</Text>
         </View>
       </SafeAreaView>
@@ -845,7 +869,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
 
   if (!exam || !currentWine) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>No se pudo cargar el examen</Text>
         </View>
@@ -860,86 +884,100 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>{exam.name}</Text>
-        <Text style={styles.headerSubtitle}>
-          Vino {currentWineIndex + 1} de {exam.wines?.length || 0} - {phaseTitles[currentPhase]}
-        </Text>
-      </View>
-
-      {/* Imagen del vino */}
-      {currentWine.image_url && (
-        <View style={styles.wineImageContainer}>
-          <Image
-            source={{ uri: currentWine.image_url }}
-            style={styles.wineImage}
-            resizeMode="contain"
-          />
-          <Text style={styles.wineName}>{currentWine.name}</Text>
-          {currentWine.winery && (
-            <Text style={styles.wineWinery}>{currentWine.winery}</Text>
-          )}
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <LinearGradient
+        colors={UI.primaryGradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.headerGradient}
+      >
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle} numberOfLines={1}>{exam.name}</Text>
+          <Text style={styles.headerSubtitle}>
+            Vino {currentWineIndex + 1} de {exam.wines?.length || 0} — {phaseTitles[currentPhase]}
+          </Text>
         </View>
-      )}
+      </LinearGradient>
 
-      {/* Contenido de la fase actual */}
-      {currentPhase === 'visual' && renderVisualPhase()}
-      {currentPhase === 'olfative' && renderOlfativePhase()}
-      {currentPhase === 'gustative' && renderGustativePhase()}
+      <ScrollView
+        style={styles.mainScroll}
+        contentContainerStyle={styles.mainScrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {currentWine.image_url && (
+          <View style={styles.wineImageContainer}>
+            <Image
+              source={{ uri: currentWine.image_url }}
+              style={styles.wineImage}
+              resizeMode="contain"
+            />
+            <Text style={styles.wineName}>{currentWine.name}</Text>
+            {currentWine.winery && (
+              <Text style={styles.wineWinery}>{currentWine.winery}</Text>
+            )}
+          </View>
+        )}
 
-      {/* Navegación */}
-      <View style={styles.navigation}>
-        <View style={styles.phaseNavigation}>
-          {currentPhase !== 'visual' && (
-            <TouchableOpacity
-              style={styles.navButton}
-              onPress={handlePreviousPhase}
-            >
-              <Text style={styles.navButtonText}>← Fase Anterior</Text>
-            </TouchableOpacity>
-          )}
-          {currentPhase !== 'gustative' && (
-            <TouchableOpacity
-              style={[styles.navButton, styles.navButtonPrimary]}
-              onPress={handleNextPhase}
-            >
-              <Text style={styles.navButtonText}>Siguiente Fase →</Text>
-            </TouchableOpacity>
-          )}
+        <View style={styles.phaseContent}>
+          {currentPhase === 'visual' && renderVisualPhase()}
+          {currentPhase === 'olfative' && renderOlfativePhase()}
+          {currentPhase === 'gustative' && renderGustativePhase()}
         </View>
 
-        <View style={styles.wineNavigation}>
-          {currentWineIndex > 0 && (
-            <TouchableOpacity
-              style={styles.navButton}
-              onPress={handlePreviousWine}
-            >
-              <Text style={styles.navButtonText}>← Vino Anterior</Text>
-            </TouchableOpacity>
-          )}
-          {currentPhase === 'gustative' && (
-            <TouchableOpacity
-              style={[styles.navButton, styles.navButtonPrimary]}
-              onPress={handleNextWine}
-            >
-              <Text style={styles.navButtonText}>
-                {currentWineIndex < (exam.wines?.length || 0) - 1
-                  ? 'Siguiente Vino →'
-                  : 'Terminar Examen'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
+        <View style={[styles.navigation, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <View style={styles.phaseNavigation}>
+            {currentPhase !== 'visual' && (
+              <TouchableOpacity
+                style={styles.navButton}
+                onPress={handlePreviousPhase}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.navButtonText}>← Fase Anterior</Text>
+              </TouchableOpacity>
+            )}
+            {currentPhase !== 'gustative' && (
+              <TouchableOpacity
+                style={[styles.navButton, styles.navButtonPrimary]}
+                onPress={handleNextPhase}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.navButtonText, styles.navButtonTextPrimary]}>Siguiente Fase →</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
-      {/* Modal de carga al enviar */}
+          <View style={styles.wineNavigation}>
+            {currentWineIndex > 0 && (
+              <TouchableOpacity
+                style={styles.navButton}
+                onPress={handlePreviousWine}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.navButtonText}>← Vino Anterior</Text>
+              </TouchableOpacity>
+            )}
+            {currentPhase === 'gustative' && (
+              <TouchableOpacity
+                style={[styles.navButton, styles.navButtonPrimary]}
+                onPress={handleNextWine}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.navButtonText, styles.navButtonTextPrimary]}>
+                  {currentWineIndex < (exam.wines?.length || 0) - 1
+                    ? 'Siguiente Vino →'
+                    : 'Terminar Examen'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </ScrollView>
+
       {submitting && (
         <Modal transparent visible={submitting}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <ActivityIndicator size="large" color="#8B0000" />
+              <ActivityIndicator size="large" color={CELLARIUM.primary} />
               <Text style={styles.modalText}>Guardando examen...</Text>
             </View>
           </View>
@@ -952,7 +990,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: CELLARIUM.bg,
   },
   loadingContainer: {
     flex: 1,
@@ -961,8 +999,8 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 12,
-    fontSize: 16,
-    color: '#666',
+    fontSize: 14,
+    color: CELLARIUM.muted,
   },
   errorContainer: {
     flex: 1,
@@ -972,114 +1010,140 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 16,
-    color: '#dc3545',
+    color: '#b91c1c',
     textAlign: 'center',
   },
-  header: {
-    padding: 20,
-    backgroundColor: '#8B0000',
+  headerGradient: {
+    height: UI.headerHeight,
+    paddingHorizontal: UI.headerHorizontalPadding,
+    paddingBottom: 12,
+    justifyContent: 'flex-end',
+  },
+  headerCenter: {
     alignItems: 'center',
+    justifyContent: 'flex-end',
   },
   headerTitle: {
     fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 4,
+    fontWeight: '700',
+    color: CELLARIUM.textOnDark,
     textAlign: 'center',
   },
   headerSubtitle: {
-    fontSize: 14,
-    color: '#fff',
-    opacity: 0.9,
+    fontSize: 13,
+    color: CELLARIUM.textOnDarkMuted,
+    marginTop: 2,
     textAlign: 'center',
+  },
+  mainScroll: {
+    flex: 1,
+  },
+  mainScrollContent: {
+    flexGrow: 1,
+    paddingBottom: 16,
   },
   wineImageContainer: {
     alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#fff',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: CELLARIUM.card,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: CELLARIUM.border,
   },
   wineImage: {
-    width: 120,
-    height: 200,
-    marginBottom: 12,
+    width: 72,
+    height: 130,
+    marginBottom: 6,
   },
   wineName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#2C2C2C',
+    marginBottom: 2,
   },
   wineWinery: {
-    fontSize: 16,
-    color: '#666',
+    fontSize: 13,
+    color: CELLARIUM.muted,
   },
   phaseContent: {
-    flex: 1,
-    padding: 16,
+    paddingHorizontal: UI.screenPadding,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  phaseContentInner: {
+    paddingBottom: 8,
   },
   guideSection: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
+    padding: UI.cardPadding,
+    marginBottom: UI.cardGap,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
   guideTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#2C2C2C',
     marginBottom: 8,
   },
   guideText: {
     fontSize: 14,
-    color: '#666',
+    color: CELLARIUM.muted,
     lineHeight: 20,
   },
   questionSection: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
+    padding: UI.cardPadding,
+    marginBottom: UI.cardGap,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
   questionLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: '#2C2C2C',
     marginBottom: 12,
   },
   questionHint: {
     fontSize: 12,
-    color: '#999',
+    color: CELLARIUM.muted,
     fontWeight: 'normal',
   },
   scaleContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
   },
   scaleButton: {
     width: 50,
     height: 50,
-    borderRadius: 8,
+    borderRadius: 14,
     borderWidth: 2,
-    borderColor: '#ddd',
+    borderColor: CELLARIUM.border,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: CELLARIUM.card,
   },
   scaleButtonSmall: {
     width: 40,
     height: 40,
   },
   scaleButtonSelected: {
-    backgroundColor: '#8B0000',
-    borderColor: '#8B0000',
+    backgroundColor: CELLARIUM.primary,
+    borderColor: CELLARIUM.primary,
   },
   scaleButtonText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: '#2C2C2C',
   },
   scaleButtonTextSmall: {
     fontSize: 14,
@@ -1090,47 +1154,50 @@ const styles = StyleSheet.create({
   optionsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
     marginBottom: 12,
   },
   optionButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: UI.buttonRadius,
     borderWidth: 2,
-    borderColor: '#ddd',
-    backgroundColor: '#fff',
+    borderColor: CELLARIUM.border,
+    backgroundColor: CELLARIUM.card,
   },
   optionButtonSelected: {
-    backgroundColor: '#8B0000',
-    borderColor: '#8B0000',
+    backgroundColor: CELLARIUM.primary,
+    borderColor: CELLARIUM.primary,
   },
   optionButtonText: {
     fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
+    color: '#2C2C2C',
+    fontWeight: '600',
   },
   optionButtonTextSelected: {
     color: '#fff',
   },
   textInput: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
+    borderColor: CELLARIUM.border,
+    borderRadius: 14,
+    padding: 14,
     fontSize: 14,
-    backgroundColor: '#fff',
+    backgroundColor: CELLARIUM.card,
     marginTop: 8,
+    color: '#2C2C2C',
   },
   textArea: {
     height: 100,
     textAlignVertical: 'top',
   },
   navigation: {
-    padding: 16,
-    backgroundColor: '#fff',
+    marginTop: 24,
+    paddingHorizontal: UI.screenPadding,
+    paddingTop: 20,
+    backgroundColor: CELLARIUM.card,
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: CELLARIUM.border,
   },
   phaseNavigation: {
     flexDirection: 'row',
@@ -1143,20 +1210,24 @@ const styles = StyleSheet.create({
   },
   navButton: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 14,
     paddingHorizontal: 16,
-    borderRadius: 8,
-    backgroundColor: '#6c757d',
+    borderRadius: UI.buttonRadius,
+    backgroundColor: CELLARIUM.border,
     alignItems: 'center',
+    justifyContent: 'center',
     marginHorizontal: 4,
   },
   navButtonPrimary: {
-    backgroundColor: '#8B0000',
+    backgroundColor: CELLARIUM.primary,
   },
   navButtonText: {
-    color: '#fff',
+    color: '#2C2C2C',
     fontSize: 14,
     fontWeight: '600',
+  },
+  navButtonTextPrimary: {
+    color: '#fff',
   },
   modalOverlay: {
     flex: 1,
@@ -1165,15 +1236,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
     padding: 24,
     alignItems: 'center',
   },
   modalText: {
     marginTop: 12,
     fontSize: 16,
-    color: '#333',
+    color: '#2C2C2C',
+    fontWeight: '500',
   },
 });
 

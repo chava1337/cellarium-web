@@ -140,7 +140,13 @@ Deno.serve(async (req: Request) => {
         type,
         description,
         image_url,
-        winery
+        winery,
+        alcohol_content,
+        body_level,
+        sweetness_level,
+        acidity_level,
+        intensity_level,
+        fizziness_level
       )
     `)
     .eq('branch_id', branchId)
@@ -172,6 +178,12 @@ Deno.serve(async (req: Request) => {
       description: string | null;
       image_url: string | null;
       winery: string | null;
+      alcohol_content?: number | string | null;
+      body_level?: number | null;
+      sweetness_level?: number | null;
+      acidity_level?: number | null;
+      intensity_level?: number | null;
+      fizziness_level?: number | null;
     };
   }>;
 
@@ -186,6 +198,12 @@ Deno.serve(async (req: Request) => {
     description: row.wines.description ?? null,
     image_url: row.wines.image_url ?? null,
     winery: row.wines.winery ?? null,
+    alcohol_content: row.wines.alcohol_content ?? null,
+    body_level: row.wines.body_level ?? null,
+    sweetness_level: row.wines.sweetness_level ?? null,
+    acidity_level: row.wines.acidity_level ?? null,
+    intensity_level: row.wines.intensity_level ?? null,
+    fizziness_level: row.wines.fizziness_level ?? null,
     stock_quantity: row.stock_quantity ?? 0,
     price_by_glass: row.price_by_glass ?? null,
     price_by_bottle: row.price_by_bottle ?? null,

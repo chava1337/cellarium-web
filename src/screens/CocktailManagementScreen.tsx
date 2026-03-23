@@ -15,15 +15,13 @@ import {
   Platform,
 } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useAdminGuard } from '../hooks/useAdminGuard';
 import { PendingApprovalMessage } from '../components/PendingApprovalMessage';
-import CocktailHeader from '../components/CocktailHeader';
-import CocktailCard from '../components/CocktailCard';
 import CropImageModal from '../components/CropImageModal';
 import { useBranch } from '../contexts/BranchContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -44,6 +42,8 @@ import { logger } from '../utils/logger';
 import { getEffectivePlan } from '../utils/effectivePlan';
 import { useDeviceInfo } from '../hooks/useDeviceInfo';
 import { compressCocktailImage } from '../utils/imageCompression';
+import { CELLARIUM, CELLARIUM_GRADIENT, CELLARIUM_LAYOUT } from '../theme/cellariumTheme';
+import { CellariumHeader } from '../components/cellarium';
 
 type CocktailManagementScreenNavigationProp = StackNavigationProp<RootStackParamList, 'CocktailManagement'>;
 type CocktailManagementScreenRouteProp = RouteProp<RootStackParamList, 'CocktailManagement'>;
@@ -53,7 +53,25 @@ interface Props {
   route: CocktailManagementScreenRouteProp;
 }
 
+const UI = {
+  ...CELLARIUM_LAYOUT,
+  cardPadding: 16,
+  cardGap: 14,
+  thumbSize: 88,
+  thumbRadius: 14,
+  actionButtonSize: 44,
+  actionButtonRadius: 14,
+  actionButtonGap: 10,
+  inputHeight: 48,
+  inputRadius: 12,
+  modalButtonHeight: 48,
+  modalButtonRadius: 14,
+  sectionGap: 14,
+  primaryGradient: [...CELLARIUM_GRADIENT] as readonly [string, string, string],
+} as const;
+
 const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
+  const insets = useSafeAreaInsets();
   const { status: guardStatus } = useAdminGuard({
     navigation,
     route,
@@ -100,7 +118,7 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
   if (guardStatus === 'loading' || guardStatus === 'profile_loading') {
     return (
       <View style={styles.guardLoading}>
-        <ActivityIndicator size="large" color="#8E2C3A" />
+        <ActivityIndicator size="large" color={CELLARIUM.primary} />
       </View>
     );
   }
@@ -443,15 +461,54 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
     const drinkDescription = getBilingualValue(item.description, language);
 
     return (
-      <Animated.View entering={FadeIn.duration(280).delay(index * 40)}>
-        <CocktailCard
-          drink={item}
-          drinkName={drinkName ?? ''}
-          drinkDescription={drinkDescription ?? ''}
-          onView={(d) => setPreviewDrink(d)}
-          onEdit={handleEditDrink}
-          onDelete={handleDeleteDrink}
-        />
+      <Animated.View entering={FadeIn.duration(280).delay(index * 40)} style={styles.cardWrap}>
+        <View style={styles.card}>
+          <TouchableOpacity
+            style={styles.cardThumbWrap}
+            onPress={() => setPreviewDrink(item)}
+            activeOpacity={0.8}
+          >
+            {item.image_url ? (
+              <Image source={{ uri: item.image_url }} style={styles.cardThumb} resizeMode="contain" />
+            ) : (
+              <View style={styles.cardThumbPlaceholder}>
+                <Ionicons name="wine" size={28} color={CELLARIUM.muted} />
+              </View>
+            )}
+          </TouchableOpacity>
+          <View style={styles.cardContent}>
+            {drinkName ? (
+              <Text style={styles.cardName} numberOfLines={2}>{drinkName}</Text>
+            ) : null}
+            {drinkDescription ? (
+              <Text style={styles.cardDescription} numberOfLines={2}>{drinkDescription}</Text>
+            ) : null}
+            <Text style={styles.cardPrice}>${item.price.toFixed(2)}</Text>
+          </View>
+          <View style={styles.cardActions}>
+            <TouchableOpacity
+              style={[styles.cardActionBtn, styles.cardActionBtnView]}
+              onPress={() => setPreviewDrink(item)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="eye-outline" size={22} color="#2C2C2C" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.cardActionBtn, styles.cardActionBtnEdit]}
+              onPress={() => handleEditDrink(item)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="pencil" size={20} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.cardActionBtn, styles.cardActionBtnDelete]}
+              onPress={() => handleDeleteDrink(item)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="trash-outline" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
       </Animated.View>
     );
   };
@@ -473,24 +530,27 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         >
           <SafeAreaView style={styles.modalSafeArea}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {editingDrink ? t('cocktail.edit_drink') : t('cocktail.add_drink')}
-              </Text>
+              <View style={styles.modalHeaderLeft} />
+              <View style={styles.modalHeaderCenter}>
+                <Text style={styles.modalTitle} numberOfLines={1}>
+                  {editingDrink ? t('cocktail.edit_drink') : t('cocktail.add_drink')}
+                </Text>
+              </View>
               <TouchableOpacity
                 onPress={() => setShowFormModal(false)}
                 style={styles.modalCloseButton}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               >
-                <Ionicons name="close" size={24} color="#333" />
+                <Ionicons name="close" size={24} color={CELLARIUM.muted} />
               </TouchableOpacity>
             </View>
 
             <ScrollView
               style={styles.modalContent}
-              contentContainerStyle={styles.modalContentContainer}
+              contentContainerStyle={[styles.modalContentContainer, { paddingBottom: 16 + insets.bottom }]}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-            {/* Foto */}
             <View style={styles.formSection}>
               <Text style={styles.formLabel}>{t('cocktail.photo')}</Text>
               <View style={styles.imageContainer}>
@@ -502,7 +562,7 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                   />
                 ) : (
                   <View style={styles.formImagePlaceholder}>
-                    <Ionicons name="camera" size={40} color="#B0B0B0" />
+                    <Ionicons name="camera" size={40} color={CELLARIUM.muted} />
                   </View>
                 )}
                 <View style={styles.imageButtons}>
@@ -515,7 +575,7 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
-                        <Ionicons name="camera" size={18} color="#FFFFFF" />
+                        <Ionicons name="camera" size={18} color="#fff" />
                         <Text style={styles.imageButtonText} numberOfLines={1}>{t('cocktail.take_photo')}</Text>
                       </>
                     )}
@@ -529,7 +589,7 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
-                        <Ionicons name="images" size={18} color="#FFFFFF" />
+                        <Ionicons name="images" size={18} color="#fff" />
                         <Text style={styles.imageButtonTextTwoLine}>
                           <Text style={styles.imageButtonTextLine}>{t('cocktail.gallery_line1')}</Text>
                           {'\n'}
@@ -545,7 +605,6 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
               </View>
             </View>
 
-            {/* Nombre */}
             <View style={styles.formSection}>
               <Text style={styles.formLabel}>{t('cocktail.name_es')} *</Text>
               <TextInput
@@ -553,7 +612,7 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                 value={formData.name_es}
                 onChangeText={(text) => setFormData(prev => ({ ...prev, name_es: text }))}
                 placeholder={t('cocktail.name')}
-                placeholderTextColor="#B0B0B0"
+                placeholderTextColor={CELLARIUM.muted}
               />
             </View>
 
@@ -564,11 +623,10 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                 value={formData.name_en}
                 onChangeText={(text) => setFormData(prev => ({ ...prev, name_en: text }))}
                 placeholder={t('cocktail.name')}
-                placeholderTextColor="#B0B0B0"
+                placeholderTextColor={CELLARIUM.muted}
               />
             </View>
 
-            {/* Ingredientes */}
             <View style={styles.formSection}>
               <Text style={styles.formLabel}>{t('cocktail.ingredients_es')} *</Text>
               <TextInput
@@ -576,7 +634,7 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                 value={formData.ingredients_es}
                 onChangeText={(text) => setFormData(prev => ({ ...prev, ingredients_es: text }))}
                 placeholder={t('cocktail.ingredient_placeholder')}
-                placeholderTextColor="#B0B0B0"
+                placeholderTextColor={CELLARIUM.muted}
                 multiline
                 numberOfLines={2}
               />
@@ -589,13 +647,12 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                 value={formData.ingredients_en}
                 onChangeText={(text) => setFormData(prev => ({ ...prev, ingredients_en: text }))}
                 placeholder={t('cocktail.ingredient_placeholder')}
-                placeholderTextColor="#B0B0B0"
+                placeholderTextColor={CELLARIUM.muted}
                 multiline
                 numberOfLines={2}
               />
             </View>
 
-            {/* Precio */}
             <View style={styles.formSection}>
               <Text style={styles.formLabel}>{t('cocktail.price')} *</Text>
               <TextInput
@@ -603,12 +660,11 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                 value={formData.price}
                 onChangeText={(text) => setFormData(prev => ({ ...prev, price: text }))}
                 placeholder={t('cocktail.price_placeholder')}
-                placeholderTextColor="#B0B0B0"
+                placeholderTextColor={CELLARIUM.muted}
                 keyboardType="decimal-pad"
               />
             </View>
 
-            {/* Botones */}
             <View style={styles.formActions}>
               <TouchableOpacity
                 style={styles.btnCancel}
@@ -616,7 +672,6 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
               >
                 <Text style={styles.btnCancelText}>{t('btn.cancel')}</Text>
               </TouchableOpacity>
-              
               <TouchableOpacity
                 style={styles.btnSave}
                 onPress={handleSave}
@@ -658,14 +713,14 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                 <Image source={{ uri: previewDrink.image_url }} style={styles.previewImage} resizeMode="contain" />
               ) : (
                 <View style={styles.previewImagePlaceholder}>
-                  <Ionicons name="wine" size={64} color="#B0B0B0" />
+                  <Ionicons name="wine" size={56} color={CELLARIUM.muted} />
                 </View>
               )}
             </View>
             <Text style={styles.previewName}>{previewName || '—'}</Text>
             {previewDesc ? <Text style={styles.previewDescription}>{previewDesc}</Text> : null}
             <Text style={styles.previewPrice}>${previewDrink.price.toFixed(2)}</Text>
-            <TouchableOpacity style={styles.previewCloseBtn} onPress={() => setPreviewDrink(null)}>
+            <TouchableOpacity style={styles.previewCloseBtn} onPress={() => setPreviewDrink(null)} activeOpacity={0.85}>
               <Text style={styles.previewCloseText}>{t('btn.close')}</Text>
             </TouchableOpacity>
           </View>
@@ -676,7 +731,7 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 
   if (!currentBranch) {
     return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>{t('admin.error_no_branch')}</Text>
         </View>
@@ -685,21 +740,30 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <CocktailHeader
+    <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+      <CellariumHeader
         title={t('cocktail.title')}
         subtitle={`${drinks.length} ${t('cocktail.beverages_available')}`}
-        onAddPress={handleAddDrink}
+        rightSlot={
+          <TouchableOpacity
+            style={styles.headerAddButton}
+            onPress={handleAddDrink}
+            activeOpacity={0.85}
+            accessibilityLabel={t('cocktail.add_drink')}
+          >
+            <Ionicons name="add" size={22} color={CELLARIUM.textOnDark} />
+          </TouchableOpacity>
+        }
       />
 
       {loading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8E2C3A" />
+          <ActivityIndicator size="large" color={CELLARIUM.primary} />
           <Text style={styles.loadingText}>{t('cocktail.loading')}</Text>
         </View>
       ) : drinks.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Ionicons name="wine-outline" size={56} color="#B0B0B0" />
+          <Ionicons name="wine-outline" size={48} color={CELLARIUM.muted} />
           <Text style={styles.emptyText}>{t('cocktail.empty_primary')}</Text>
           <Text style={styles.emptySubtext}>{t('cocktail.empty_secondary')}</Text>
           <TouchableOpacity style={styles.emptyButton} onPress={handleAddDrink} activeOpacity={0.85}>
@@ -734,17 +798,25 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F4F4F6',
+    backgroundColor: CELLARIUM.bg,
   },
   guardLoading: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F4F4F6',
+    backgroundColor: CELLARIUM.bg,
   },
   guardContainer: {
     flex: 1,
-    backgroundColor: '#F4F4F6',
+    backgroundColor: CELLARIUM.bg,
+  },
+  headerAddButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: CELLARIUM.chipActiveBg,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   loadingContainer: {
     flex: 1,
@@ -754,7 +826,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     fontSize: 14,
-    color: '#6A6A6A',
+    color: CELLARIUM.muted,
   },
   emptyContainer: {
     flex: 1,
@@ -772,25 +844,103 @@ const styles = StyleSheet.create({
   },
   emptySubtext: {
     fontSize: 14,
-    color: '#888',
+    color: CELLARIUM.muted,
     marginTop: 8,
     textAlign: 'center',
   },
   emptyButton: {
-    backgroundColor: '#8E2C3A',
+    backgroundColor: CELLARIUM.primary,
     paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 14,
+    paddingVertical: 14,
+    borderRadius: UI.modalButtonRadius,
     marginTop: 24,
   },
   emptyButtonText: {
-    color: '#FFFFFF',
+    color: '#fff',
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   listContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: UI.screenPadding,
+    paddingTop: 18,
     paddingBottom: 40,
+  },
+  cardWrap: {
+    marginBottom: UI.cardGap,
+  },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
+    padding: UI.cardPadding,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  cardThumbWrap: {
+    width: UI.thumbSize,
+    height: UI.thumbSize,
+    borderRadius: UI.thumbRadius,
+    backgroundColor: CELLARIUM.border,
+    overflow: 'hidden',
+    marginRight: 12,
+  },
+  cardThumb: {
+    width: '100%',
+    height: '100%',
+  },
+  cardThumbPlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardContent: {
+    flex: 1,
+    justifyContent: 'center',
+    minWidth: 0,
+    paddingVertical: 4,
+  },
+  cardName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2C2C2C',
+  },
+  cardDescription: {
+    fontSize: 13,
+    color: CELLARIUM.muted,
+    marginTop: 4,
+  },
+  cardPrice: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: CELLARIUM.primary,
+    marginTop: 6,
+  },
+  cardActions: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    marginLeft: 12,
+    gap: UI.actionButtonGap,
+  },
+  cardActionBtn: {
+    width: UI.actionButtonSize,
+    height: UI.actionButtonSize,
+    borderRadius: UI.actionButtonRadius,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardActionBtnView: {
+    backgroundColor: '#E8E8ED',
+  },
+  cardActionBtnEdit: {
+    backgroundColor: CELLARIUM.primary,
+  },
+  cardActionBtnDelete: {
+    backgroundColor: '#B85454',
   },
   previewBackdrop: {
     flex: 1,
@@ -802,19 +952,19 @@ const styles = StyleSheet.create({
   previewCard: {
     width: '100%',
     maxWidth: 360,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
     padding: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.12,
     shadowRadius: 12,
     elevation: 8,
   },
   previewImageWrap: {
     width: '100%',
     aspectRatio: 16 / 9,
-    borderRadius: 14,
+    borderRadius: UI.thumbRadius,
     backgroundColor: '#f0f0f0',
     overflow: 'hidden',
     marginBottom: 16,
@@ -837,61 +987,65 @@ const styles = StyleSheet.create({
   },
   previewDescription: {
     fontSize: 14,
-    color: '#6A6A6A',
+    color: CELLARIUM.muted,
     marginBottom: 8,
   },
   previewPrice: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#8E2C3A',
+    color: CELLARIUM.primary,
     marginBottom: 16,
   },
   previewCloseBtn: {
-    backgroundColor: '#8E2C3A',
-    paddingVertical: 12,
-    borderRadius: 14,
+    backgroundColor: CELLARIUM.primary,
+    paddingVertical: 14,
+    borderRadius: UI.modalButtonRadius,
     alignItems: 'center',
   },
   previewCloseText: {
-    color: '#FFFFFF',
+    color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#F4F4F6',
+    backgroundColor: CELLARIUM.bg,
   },
   modalSafeArea: {
     flex: 1,
   },
   modalHeader: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
+    backgroundColor: CELLARIUM.card,
+    paddingHorizontal: UI.screenPadding,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E8',
+    borderBottomColor: CELLARIUM.border,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+  },
+  modalHeaderLeft: { width: 40 },
+  modalHeaderCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalTitle: {
-    fontSize: 21,
+    fontSize: 20,
     fontWeight: '700',
     color: '#2C2C2C',
   },
   modalCloseButton: {
-    padding: 4,
+    padding: 8,
   },
   modalContent: {
     flex: 1,
   },
   modalContentContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 100,
+    paddingHorizontal: UI.screenPadding,
+    paddingTop: UI.sectionGap,
   },
   formSection: {
-    marginBottom: 14,
+    marginBottom: UI.sectionGap,
   },
   formLabel: {
     fontSize: 13,
@@ -900,11 +1054,11 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   formInput: {
-    height: 48,
-    backgroundColor: '#FFFFFF',
+    height: UI.inputHeight,
+    backgroundColor: CELLARIUM.card,
     borderWidth: 1,
-    borderColor: '#E5E5E8',
-    borderRadius: 12,
+    borderColor: CELLARIUM.border,
+    borderRadius: UI.inputRadius,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
@@ -920,32 +1074,22 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     width: '65%',
     maxWidth: 280,
-    marginBottom: 14,
+    marginBottom: UI.sectionGap,
   },
   formImage: {
     width: '100%',
-    height: 200,
-    borderRadius: 16,
+    height: 180,
+    borderRadius: 14,
     backgroundColor: '#F1F1F3',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
     overflow: 'hidden',
   },
   formImagePlaceholder: {
     width: '100%',
-    height: 200,
-    borderRadius: 16,
+    height: 180,
+    borderRadius: 14,
     backgroundColor: '#F1F1F3',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
   },
   imageButtons: {
     flexDirection: 'row',
@@ -954,53 +1098,53 @@ const styles = StyleSheet.create({
   },
   imageButton: {
     flex: 1,
-    minHeight: 46,
+    minHeight: 44,
     paddingHorizontal: 14,
-    backgroundColor: '#8E2C3A',
+    backgroundColor: CELLARIUM.primary,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 14,
+    borderRadius: UI.modalButtonRadius,
     gap: 8,
   },
   imageButtonDisabled: {
     opacity: 0.6,
   },
   imageButtonText: {
-    color: '#FFFFFF',
+    color: '#fff',
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   imageButtonTextTwoLine: {
-    color: '#FFFFFF',
+    color: '#fff',
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
     textAlign: 'center',
   },
   imageButtonTextLine: {
-    color: '#FFFFFF',
+    color: '#fff',
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   compressingText: {
     marginTop: 6,
     fontSize: 12,
-    color: '#6A6A6A',
+    color: CELLARIUM.muted,
     textAlign: 'center',
     fontStyle: 'italic',
   },
   formActions: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 16,
-    marginBottom: 40,
+    marginTop: 20,
+    marginBottom: 24,
     paddingHorizontal: 0,
   },
   btnCancel: {
     flex: 1,
-    height: 48,
+    height: UI.modalButtonHeight,
     backgroundColor: '#E8E8ED',
-    borderRadius: 14,
+    borderRadius: UI.modalButtonRadius,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1011,15 +1155,15 @@ const styles = StyleSheet.create({
   },
   btnSave: {
     flex: 1,
-    height: 48,
-    backgroundColor: '#8E2C3A',
+    height: UI.modalButtonHeight,
+    backgroundColor: CELLARIUM.primary,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 14,
+    borderRadius: UI.modalButtonRadius,
   },
   btnSaveText: {
-    color: '#FFFFFF',
+    color: '#fff',
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 6,

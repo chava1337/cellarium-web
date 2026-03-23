@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { CELLARIUM } from '../theme/cellariumTheme';
 
 export function PendingApprovalMessage() {
   return (
@@ -18,18 +19,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: CELLARIUM.bg,
   },
   title: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: CELLARIUM.text,
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 14,
-    color: '#666',
+    color: CELLARIUM.muted,
     textAlign: 'center',
   },
 });

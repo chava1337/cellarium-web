@@ -7,13 +7,13 @@ import React from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { CocktailDrink } from '../services/CocktailService';
+import { CELLARIUM, CELLARIUM_LAYOUT } from '../theme/cellariumTheme';
 
 const CARD_PADDING_V = 16;
 const CARD_PADDING_H = 14;
-const CARD_RADIUS = 18;
+const CARD_RADIUS = CELLARIUM_LAYOUT.cardRadius;
 const THUMB_SIZE = 88;
 const THUMB_RADIUS = 14;
-const WINE_COLOR = '#8E2C3A';
 const ACTION_SIZE = 40;
 const ACTION_RADIUS = 20;
 const ACTION_GAP = 12;
@@ -99,7 +99,7 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: CELLARIUM.card,
     borderRadius: CARD_RADIUS,
     paddingVertical: CARD_PADDING_V,
     paddingHorizontal: CARD_PADDING_H,
@@ -138,17 +138,17 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#2C2C2C',
+    color: CELLARIUM.text,
   },
   description: {
     fontSize: 13,
-    color: '#6A6A6A',
+    color: CELLARIUM.muted,
     marginTop: 4,
   },
   price: {
     fontSize: 17,
     fontWeight: '700',
-    color: WINE_COLOR,
+    color: CELLARIUM.primary,
     marginTop: 10,
   },
   actions: {
@@ -165,13 +165,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   actionBtnView: {
-    backgroundColor: '#E8E8E8',
+    backgroundColor: '#E8E8ED',
   },
   actionBtnEdit: {
-    backgroundColor: WINE_COLOR,
+    backgroundColor: CELLARIUM.primary,
   },
   actionBtnDelete: {
-    backgroundColor: '#C45C5C',
+    backgroundColor: CELLARIUM.danger,
   },
 });
 

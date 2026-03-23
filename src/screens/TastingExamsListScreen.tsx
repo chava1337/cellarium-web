@@ -9,7 +9,8 @@ import {
   Modal,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CellariumHeader } from '../components/cellarium';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -28,7 +29,30 @@ interface Props {
 
 const FEATURE_ID_TASTINGS = 'tastings' as const;
 
+const CELLARIUM = {
+  primary: '#924048',
+  primaryDark: '#6f2f37',
+  primaryDarker: '#4e2228',
+  textOnDark: 'rgba(255,255,255,0.92)',
+  textOnDarkMuted: 'rgba(255,255,255,0.75)',
+  bg: '#F4F4F6',
+  card: '#FFFFFF',
+  muted: '#6A6A6A',
+  border: '#E5E5E8',
+} as const;
+
+const UI = {
+  screenPadding: 16,
+  cardRadius: 18,
+  cardPadding: 16,
+  cardGap: 14,
+  buttonHeight: 50,
+  buttonRadius: 14,
+  chipRadius: 14,
+} as const;
+
 const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { currentBranch } = useBranch();
   const { t } = useLanguage();
@@ -213,21 +237,21 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
 
   const getExamStatus = (exam: TastingExam): { text: string; color: string } => {
     if (exam.permanently_disabled) {
-      return { text: 'Deshabilitado permanentemente', color: '#dc3545' };
+      return { text: 'Deshabilitado permanentemente', color: '#b91c1c' };
     }
     if (!exam.enabled) {
-      return { text: 'Deshabilitado', color: '#6c757d' };
+      return { text: 'Deshabilitado', color: CELLARIUM.muted };
     }
     if (exam.enabled_until) {
       const until = new Date(exam.enabled_until);
       const now = new Date();
       if (until < now) {
-        return { text: 'Expirado', color: '#ffc107' };
+        return { text: 'Expirado', color: '#b45309' };
       }
       const hoursLeft = Math.ceil((until.getTime() - now.getTime()) / (1000 * 60 * 60));
-      return { text: `Habilitado (${hoursLeft}h restantes)`, color: '#28a745' };
+      return { text: `Habilitado (${hoursLeft}h restantes)`, color: CELLARIUM.primary };
     }
-    return { text: 'Habilitado', color: '#28a745' };
+    return { text: 'Habilitado', color: CELLARIUM.primary };
   };
 
   const formatDate = (dateString?: string) => {
@@ -244,9 +268,9 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
 
   if (subscriptionAllowed === 'pending') {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8B0000" />
+          <ActivityIndicator size="large" color={CELLARIUM.primary} />
         </View>
       </SafeAreaView>
     );
@@ -257,12 +281,10 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Catas y Degustaciones</Text>
-        </View>
+      <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+        <CellariumHeader title="Catas y Degustaciones" subtitle="Cargando exámenes..." />
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8B0000" />
+          <ActivityIndicator size="large" color={CELLARIUM.primary} />
           <Text style={styles.loadingText}>Cargando exámenes...</Text>
         </View>
       </SafeAreaView>
@@ -270,19 +292,19 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Catas y Degustaciones</Text>
-        <Text style={styles.headerSubtitle}>
-          {exams.length} examen{exams.length !== 1 ? 'es' : ''} en esta sucursal
-        </Text>
-      </View>
+    <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+      <CellariumHeader
+        title="Catas y Degustaciones"
+        subtitle={`${exams.length} examen${exams.length !== 1 ? 'es' : ''} en esta sucursal`}
+      />
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Botón crear examen (solo para owners, gerentes, sommeliers) */}
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) }}
+        showsVerticalScrollIndicator={false}
+      >
         {canCreateExam && (
-          <TouchableOpacity style={styles.createButton} onPress={handleCreateExam}>
+          <TouchableOpacity style={styles.createButton} onPress={handleCreateExam} activeOpacity={0.85}>
             <Text style={styles.createButtonText}>+ Crear Nuevo Examen</Text>
           </TouchableOpacity>
         )}
@@ -321,19 +343,19 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
 
                 <View style={styles.examInfo}>
                   <Text style={styles.examInfoText}>
-                    📋 {exam.wines_count || 0} vino{exam.wines_count !== 1 ? 's' : ''}
+                    {exam.wines_count || 0} vino{exam.wines_count !== 1 ? 's' : ''}
                   </Text>
                   <Text style={styles.examInfoText}>
-                    📅 Creado: {formatDate(exam.created_at)}
+                    Creado: {formatDate(exam.created_at)}
                   </Text>
                   {exam.enabled_until && (
                     <Text style={styles.examInfoText}>
-                      ⏰ Expira: {formatDate(exam.enabled_until)}
+                      Expira: {formatDate(exam.enabled_until)}
                     </Text>
                   )}
                   {exam.permanently_disabled && exam.disabled_reason && (
                     <Text style={[styles.examInfoText, styles.warningText]}>
-                      ⚠️ {exam.disabled_reason}
+                      {exam.disabled_reason}
                     </Text>
                   )}
                 </View>
@@ -481,30 +503,11 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
-  },
-  header: {
-    padding: 20,
-    backgroundColor: '#8B0000',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 5,
-    textAlign: 'center',
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: '#fff',
-    opacity: 0.9,
-    textAlign: 'center',
+    backgroundColor: CELLARIUM.bg,
   },
   content: {
     flex: 1,
-    padding: 16,
+    padding: UI.screenPadding,
   },
   loadingContainer: {
     flex: 1,
@@ -513,45 +516,49 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 12,
-    fontSize: 16,
-    color: '#666',
+    fontSize: 14,
+    color: CELLARIUM.muted,
   },
   createButton: {
-    backgroundColor: '#8B0000',
-    borderRadius: 12,
-    paddingVertical: 14,
+    backgroundColor: CELLARIUM.primary,
+    borderRadius: UI.buttonRadius,
+    height: UI.buttonHeight,
     paddingHorizontal: 20,
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 20,
   },
   createButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   emptyContainer: {
-    padding: 40,
+    padding: 32,
     alignItems: 'center',
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
   },
   emptyText: {
-    fontSize: 18,
-    color: '#666',
+    fontSize: 17,
+    color: CELLARIUM.muted,
     marginBottom: 8,
+    textAlign: 'center',
   },
   emptySubtext: {
-    fontSize: 14,
-    color: '#999',
+    fontSize: 13,
+    color: CELLARIUM.muted,
     textAlign: 'center',
   },
   examCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
+    padding: UI.cardPadding,
+    marginBottom: UI.cardGap,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
     elevation: 3,
   },
   examHeader: {
@@ -564,16 +571,16 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   examName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#2C2C2C',
     marginRight: 8,
     flex: 1,
   },
   statusBadge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: UI.chipRadius,
   },
   statusText: {
     fontSize: 12,
@@ -581,53 +588,54 @@ const styles = StyleSheet.create({
   },
   examDescription: {
     fontSize: 14,
-    color: '#666',
+    color: CELLARIUM.muted,
     marginTop: 4,
   },
   examInfo: {
     marginBottom: 12,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: CELLARIUM.border,
   },
   examInfoText: {
     fontSize: 13,
-    color: '#666',
+    color: CELLARIUM.muted,
     marginBottom: 4,
   },
   warningText: {
-    color: '#dc3545',
+    color: '#b91c1c',
     fontWeight: '600',
   },
   examActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: CELLARIUM.border,
   },
   actionButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: UI.buttonRadius,
     minWidth: 100,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   takeButton: {
-    backgroundColor: '#28a745',
+    backgroundColor: CELLARIUM.primary,
   },
   enableButton: {
-    backgroundColor: '#007bff',
+    backgroundColor: CELLARIUM.primary,
   },
   disableButton: {
-    backgroundColor: '#ffc107',
+    backgroundColor: '#b45309',
   },
   resultsButton: {
-    backgroundColor: '#17a2b8',
+    backgroundColor: '#4e2228',
   },
   deleteButton: {
-    backgroundColor: '#dc3545',
+    backgroundColor: '#b91c1c',
   },
   actionButtonText: {
     color: '#fff',
@@ -639,37 +647,39 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
     padding: 24,
-    width: '80%',
+    width: '100%',
     maxWidth: 400,
   },
   modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#2C2C2C',
     marginBottom: 8,
     textAlign: 'center',
   },
   modalSubtitle: {
     fontSize: 14,
-    color: '#666',
+    color: CELLARIUM.muted,
     marginBottom: 20,
     textAlign: 'center',
   },
   durationOption: {
-    backgroundColor: '#8B0000',
-    borderRadius: 8,
-    paddingVertical: 14,
+    backgroundColor: CELLARIUM.primary,
+    borderRadius: UI.buttonRadius,
+    height: 50,
     paddingHorizontal: 20,
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 12,
   },
   cancelOption: {
-    backgroundColor: '#6c757d',
+    backgroundColor: CELLARIUM.border,
     marginTop: 8,
   },
   durationText: {
@@ -678,7 +688,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   cancelText: {
-    color: '#fff',
+    color: '#2C2C2C',
   },
   modalButtons: {
     flexDirection: 'row',
@@ -687,19 +697,19 @@ const styles = StyleSheet.create({
   },
   modalButton: {
     flex: 1,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 8,
+    height: UI.buttonHeight,
+    borderRadius: UI.buttonRadius,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   confirmButton: {
-    backgroundColor: '#8B0000',
+    backgroundColor: CELLARIUM.primary,
   },
   deleteConfirmButton: {
-    backgroundColor: '#dc3545',
+    backgroundColor: '#b91c1c',
   },
   cancelModalButton: {
-    backgroundColor: '#6c757d',
+    backgroundColor: CELLARIUM.border,
   },
   modalButtonText: {
     color: '#fff',
@@ -707,7 +717,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   cancelModalText: {
-    color: '#fff',
+    color: '#2C2C2C',
   },
 });
 

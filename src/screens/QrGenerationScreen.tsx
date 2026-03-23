@@ -11,10 +11,12 @@ import {
   Modal,
   TextInput,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { CellariumHeader } from '../components/cellarium';
 import ViewShot from 'react-native-view-shot';
 import QRCode from 'react-native-qrcode-svg';
 import Share from 'react-native-share';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as Clipboard from 'expo-clipboard';
 import { useBranch } from '../contexts/BranchContext';
@@ -26,6 +28,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import { canGenerateGuestQr, canGenerateAdminInviteQr } from '../utils/permissions';
 import { isSensitiveAllowed } from '../utils/sensitiveActionGating';
+import { CELLARIUM } from '../theme/cellariumTheme';
 
 interface QrData {
   id: string;
@@ -42,6 +45,21 @@ const GUEST_DURATION_LABELS: Record<GuestQrDuration, string> = {
   '2w': '2 semanas',
   '1m': '1 mes',
 };
+
+const UI = {
+  screenPadding: 16,
+  cardRadius: 18,
+  cardPadding: 16,
+  cardGap: 16,
+  segmentedHeight: 54,
+  segmentedRadius: 27,
+  chipHeight: 44,
+  chipRadius: 14,
+  buttonHeight: 50,
+  buttonRadius: 14,
+  secondaryButtonHeight: 46,
+  secondaryButtonRadius: 14,
+} as const;
 
 const QrGenerationScreen: React.FC = () => {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList, 'QrGeneration'>>();
@@ -104,8 +122,8 @@ const QrGenerationScreen: React.FC = () => {
 
   if (!profileReady) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
-        <ActivityIndicator size="large" color="#8B0000" />
+      <View style={[styles.guardContainer, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={CELLARIUM.primary} />
       </View>
     );
   }
@@ -116,9 +134,9 @@ const QrGenerationScreen: React.FC = () => {
   );
   if (!user || !canEnterQrScreen) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa', padding: 24 }}>
-        <Text style={{ fontSize: 18, fontWeight: '600', color: '#333', textAlign: 'center' }}>🚫 Sin permiso</Text>
-        <Text style={{ marginTop: 8, fontSize: 14, color: '#666', textAlign: 'center' }}>
+      <View style={[styles.guardContainer, { justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
+        <Text style={styles.guardTitle}>Sin permiso</Text>
+        <Text style={styles.guardSubtitle}>
           Solo propietarios, gerentes y supervisores pueden generar QR para comensales. Solo propietarios y gerentes pueden generar QR de invitación admin.
         </Text>
       </View>
@@ -298,6 +316,15 @@ const QrGenerationScreen: React.FC = () => {
           : dataURL;
         const filename = `cellarium-qr-${Date.now()}.png`;
         fileUri = `${FileSystem.cacheDirectory}${filename}`;
+
+        // TEMP: validar carga del módulo legacy en runtime (eliminar tras QA)
+        console.log('[QR FS CHECK]', {
+          hasCacheDirectory: !!FileSystem.cacheDirectory,
+          hasWriteAsStringAsync: typeof FileSystem.writeAsStringAsync === 'function',
+          hasEncodingType: !!FileSystem.EncodingType,
+          hasBase64: !!FileSystem.EncodingType?.Base64,
+        });
+
         await FileSystem.writeAsStringAsync(fileUri, base64, {
           encoding: FileSystem.EncodingType.Base64,
         });
@@ -349,49 +376,39 @@ const QrGenerationScreen: React.FC = () => {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <Text style={styles.title}>Generación de Códigos QR</Text>
-          <Text style={styles.subtitle}>{currentBranch?.name}</Text>
-        </View>
-      </View>
+    <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+      <CellariumHeader
+        title="Generación de QR"
+        subtitle={currentBranch?.name?.trim() ? currentBranch.name : undefined}
+      />
 
       <ScrollView style={styles.content}>
         {/* Selector de tipo de QR: solo se muestran las opciones permitidas por rol */}
-        <View style={styles.typeSelector}>
-          {canGenerateGuest && (
-            <TouchableOpacity
-              style={[
-                styles.typeButton,
-                qrType === 'guest' && styles.typeButtonActive
-              ]}
-              onPress={() => setQrType('guest')}
-            >
-              <Text style={[
-                styles.typeButtonText,
-                qrType === 'guest' && styles.typeButtonTextActive
-              ]}>
-                🍽️ Comensales
-              </Text>
-            </TouchableOpacity>
-          )}
-          {canGenerateAdmin && (
-            <TouchableOpacity
-              style={[
-                styles.typeButton,
-                qrType === 'admin' && styles.typeButtonActive
-              ]}
-              onPress={() => setQrType('admin')}
-            >
-              <Text style={[
-                styles.typeButtonText,
-                qrType === 'admin' && styles.typeButtonTextActive
-              ]}>
-                👥 Invitación Admin
-              </Text>
-            </TouchableOpacity>
-          )}
+        <View style={styles.typeSelectorOuter}>
+          <View style={styles.typeSelectorInner}>
+            {canGenerateGuest && (
+              <TouchableOpacity
+                style={[styles.typeButton, qrType === 'guest' && styles.typeButtonActive]}
+                onPress={() => setQrType('guest')}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.typeButtonText, qrType === 'guest' && styles.typeButtonTextActive]}>
+                  Comensales
+                </Text>
+              </TouchableOpacity>
+            )}
+            {canGenerateAdmin && (
+              <TouchableOpacity
+                style={[styles.typeButton, qrType === 'admin' && styles.typeButtonActive]}
+                onPress={() => setQrType('admin')}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.typeButtonText, qrType === 'admin' && styles.typeButtonTextActive]}>
+                  Invitación Admin
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         {/* Información del tipo de QR seleccionado */}
@@ -430,7 +447,7 @@ const QrGenerationScreen: React.FC = () => {
                 </View>
               ) : !canGenerateGuest ? (
                 <View style={styles.restrictedAccessCard}>
-                  <Text style={styles.restrictedAccessTitle}>🚫 Sin permiso</Text>
+                  <Text style={styles.restrictedAccessTitle}>Sin permiso</Text>
                   <Text style={styles.restrictedAccessText}>
                     Tu plan o rol no permite generar QR para comensales en esta sucursal.
                   </Text>
@@ -477,7 +494,7 @@ const QrGenerationScreen: React.FC = () => {
                 </TouchableOpacity>
               ) : (
                 <View style={styles.restrictedAccessCard}>
-                  <Text style={styles.restrictedAccessTitle}>🚫 Acceso Restringido</Text>
+                  <Text style={styles.restrictedAccessTitle}>Acceso restringido</Text>
                   <Text style={styles.restrictedAccessText}>
                     No tienes los permisos suficientes para generar códigos QR de invitación de administradores.
                   </Text>
@@ -499,7 +516,11 @@ const QrGenerationScreen: React.FC = () => {
               style={styles.shareCardContainer}
             >
               <View style={styles.shareCardInner}>
-                <Text style={styles.shareCardTitle}>Cellarium – Menú de vinos</Text>
+                <Text style={styles.shareCardTitle}>
+                  {selectedQr.type === 'guest'
+                    ? 'Cellarium – Menú de vinos'
+                    : 'Cellarium – Invitación de staff'}
+                </Text>
                 <Text style={styles.shareCardSubtitle}>
                   {selectedQr.branchName || 'Sucursal'}
                 </Text>
@@ -525,7 +546,7 @@ const QrGenerationScreen: React.FC = () => {
                       branchName: selectedQr.branchName,
                     })}
                     size={240}
-                    color="#8B0000"
+                    color={CELLARIUM.primary}
                     backgroundColor="white"
                   />
                 </View>
@@ -533,7 +554,7 @@ const QrGenerationScreen: React.FC = () => {
             </ViewShot>
 
             <Text style={styles.qrDisplayTitle}>
-              {selectedQr.type === 'guest' ? '🍽️ QR para Comensales' : '👥 QR Invitación Admin'}
+              {selectedQr.type === 'guest' ? 'QR para Comensales' : 'QR Invitación Admin'}
             </Text>
 
             <View style={styles.qrInfoContainer}>
@@ -561,7 +582,7 @@ const QrGenerationScreen: React.FC = () => {
             {selectedQr.type === 'admin_invite' && (
               <View style={styles.warningContainer}>
                 <Text style={styles.warningText}>
-                  ⚠️ Este admin solo tendrá acceso a {selectedQr.branchName}
+                  Este admin solo tendrá acceso a {selectedQr.branchName}
                 </Text>
               </View>
             )}
@@ -571,35 +592,30 @@ const QrGenerationScreen: React.FC = () => {
                 style={[styles.shareButton, styles.shareButtonPrimary]}
                 onPress={handleShareAsImage}
                 disabled={sharingImage}
+                activeOpacity={0.85}
               >
                 {sharingImage ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={styles.shareButtonText}>📤 Compartir QR (imagen)</Text>
+                  <Text style={styles.shareButtonText}>Compartir QR (imagen)</Text>
                 )}
               </TouchableOpacity>
               <View style={styles.qrActionsRow}>
                 <TouchableOpacity
                   style={[styles.shareButton, styles.shareButtonSecondary]}
                   onPress={handleCopyLink}
+                  activeOpacity={0.85}
                 >
-                  <Text style={styles.shareButtonTextSecondary}>🔗 Copiar link</Text>
+                  <Text style={styles.shareButtonTextSecondary}>Copiar link</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.shareButton, styles.shareButtonSecondary]}
                   onPress={handleCopyMessage}
+                  activeOpacity={0.85}
                 >
-                  <Text style={styles.shareButtonTextSecondary}>📋 Copiar mensaje</Text>
+                  <Text style={styles.shareButtonTextSecondary}>Copiar mensaje</Text>
                 </TouchableOpacity>
               </View>
-              {__DEV__ && selectedQr.type === 'guest' && (
-                <TouchableOpacity
-                  style={[styles.shareButton, styles.devOnlyButton]}
-                  onPress={() => navigation.navigate('WineCatalog', { isGuest: true, guestToken: selectedQr.token })}
-                >
-                  <Text style={styles.devOnlyButtonText}>Ver como comensal en app</Text>
-                </TouchableOpacity>
-              )}
             </View>
           </View>
         )}
@@ -607,7 +623,7 @@ const QrGenerationScreen: React.FC = () => {
         {/* Lista de QRs generados */}
         {generatedQrs.length > 0 && (
           <View style={styles.qrListCard}>
-            <Text style={styles.listTitle}>📋 QRs Generados ({generatedQrs.length})</Text>
+            <Text style={styles.listTitle}>QRs generados ({generatedQrs.length})</Text>
             {generatedQrs.map((qr) => (
               <TouchableOpacity
                 key={qr.id}
@@ -616,14 +632,15 @@ const QrGenerationScreen: React.FC = () => {
                   selectedQr?.id === qr.id && styles.qrListItemActive
                 ]}
                 onPress={() => setSelectedQr(qr)}
+                activeOpacity={0.85}
               >
                 <View style={styles.qrListInfo}>
                   <Text style={styles.qrListType}>
-                    {qr.type === 'guest' 
-                      ? '🍽️ Comensales' 
-                      : (qr.createdByRole 
-                          ? `👥 ${qr.createdByRole.charAt(0).toUpperCase() + qr.createdByRole.slice(1)}`
-                          : '👥 Admin')}
+                    {qr.type === 'guest'
+                      ? 'Comensales'
+                      : (qr.createdByRole
+                          ? qr.createdByRole.charAt(0).toUpperCase() + qr.createdByRole.slice(1)
+                          : 'Admin')}
                   </Text>
                   <Text style={styles.qrListDate}>
                     {new Date(qr.createdAt).toLocaleString('es-MX')}
@@ -689,289 +706,285 @@ const QrGenerationScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: CELLARIUM.bg,
   },
-  header: {
-    padding: 20,
-    backgroundColor: '#8B0000',
-    alignItems: 'center',
-    justifyContent: 'center',
+  guardContainer: {
+    flex: 1,
+    backgroundColor: CELLARIUM.bg,
   },
-  headerContent: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 5,
+  guardTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#2C2C2C',
     textAlign: 'center',
   },
-  subtitle: {
+  guardSubtitle: {
+    marginTop: 8,
     fontSize: 14,
-    color: '#fff',
-    opacity: 0.9,
+    color: CELLARIUM.muted,
     textAlign: 'center',
+    paddingHorizontal: 8,
   },
   content: {
     flex: 1,
-    padding: 16,
+    padding: UI.screenPadding,
   },
-  typeSelector: {
+  typeSelectorOuter: {
+    marginBottom: UI.cardGap,
+    height: UI.segmentedHeight,
+    borderRadius: UI.segmentedRadius,
+    backgroundColor: CELLARIUM.card,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  typeSelectorInner: {
     flexDirection: 'row',
-    marginBottom: 16,
-    gap: 12,
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    height: '100%',
+    paddingHorizontal: 6,
   },
   typeButton: {
     flex: 1,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 12,
-    padding: 16,
+    paddingHorizontal: 8,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#f0f0f0',
   },
   typeButtonActive: {
-    backgroundColor: 'white',
-    borderColor: '#8B0000',
+    backgroundColor: 'rgba(146,64,72,0.12)',
   },
   typeButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#666',
+    color: CELLARIUM.muted,
+    textAlign: 'center',
   },
   typeButtonTextActive: {
-    color: '#8B0000',
+    color: CELLARIUM.primary,
   },
   infoCard: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
+    padding: UI.cardPadding,
+    marginBottom: UI.cardGap,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
     elevation: 3,
   },
   infoText: {
-    fontSize: 13,
-    color: '#666',
+    fontSize: 14,
+    color: CELLARIUM.muted,
     lineHeight: 20,
     marginBottom: 16,
   },
   durationSelector: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
     marginBottom: 16,
   },
   durationOption: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
+    height: UI.chipHeight,
+    borderRadius: UI.chipRadius,
+    backgroundColor: CELLARIUM.border,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   durationOptionActive: {
-    backgroundColor: '#8B0000',
+    backgroundColor: CELLARIUM.primary,
   },
   durationOptionText: {
     fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
+    color: '#2C2C2C',
+    fontWeight: '600',
   },
   durationOptionTextActive: {
-    color: 'white',
+    color: '#fff',
   },
   generateButton: {
-    backgroundColor: '#8B0000',
-    borderRadius: 8,
-    padding: 16,
+    backgroundColor: CELLARIUM.primary,
+    borderRadius: UI.buttonRadius,
+    height: UI.buttonHeight,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   generateButtonDisabled: {
-    backgroundColor: '#ccc',
+    backgroundColor: CELLARIUM.muted,
   },
   generateButtonText: {
-    color: 'white',
+    color: '#fff',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '700',
   },
   qrDisplayCard: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 16,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
+    padding: UI.cardPadding,
+    marginBottom: UI.cardGap,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
     elevation: 3,
   },
   shareCardContainer: {
     alignSelf: 'stretch',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   shareCardInner: {
-    backgroundColor: 'white',
+    backgroundColor: CELLARIUM.card,
     padding: 24,
-    borderRadius: 12,
+    borderRadius: 16,
     borderWidth: 2,
-    borderColor: '#8B0000',
+    borderColor: CELLARIUM.primary,
     alignItems: 'center',
   },
   shareCardTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '700',
+    color: '#2C2C2C',
     marginBottom: 6,
     textAlign: 'center',
   },
   shareCardSubtitle: {
     fontSize: 14,
-    color: '#666',
+    color: CELLARIUM.muted,
     marginBottom: 4,
     textAlign: 'center',
   },
   shareCardExpiry: {
     fontSize: 12,
-    color: '#888',
+    color: CELLARIUM.muted,
     marginBottom: 16,
     textAlign: 'center',
   },
   qrContainerShare: {
-    backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 8,
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: CELLARIUM.border,
   },
   qrDisplayTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '700',
+    color: '#2C2C2C',
     marginBottom: 16,
-  },
-  qrContainer: {
-    backgroundColor: 'white',
-    padding: 20,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#8B0000',
-    marginBottom: 16,
+    textAlign: 'center',
   },
   qrInfoContainer: {
     width: '100%',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   qrInfoLabel: {
     fontSize: 12,
-    color: '#666',
+    color: CELLARIUM.muted,
     fontWeight: '600',
     marginBottom: 2,
   },
   qrInfoValue: {
-    fontSize: 11,
-    color: '#333',
+    fontSize: 13,
+    color: '#2C2C2C',
   },
   warningContainer: {
-    backgroundColor: '#fff3cd',
-    borderRadius: 8,
-    padding: 8,
+    backgroundColor: 'rgba(255,193,7,0.15)',
+    borderRadius: 12,
+    padding: 12,
     marginTop: 8,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#ffc107',
+    borderColor: 'rgba(255,193,7,0.4)',
   },
   warningText: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#856404',
     textAlign: 'center',
     fontWeight: '600',
   },
   qrActions: {
     width: '100%',
-    marginTop: 8,
-    gap: 10,
+    marginTop: 16,
+    gap: 12,
   },
   qrActionsRow: {
     flexDirection: 'row',
     width: '100%',
-    gap: 10,
+    gap: 12,
   },
   shareButton: {
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: UI.secondaryButtonRadius,
+    height: UI.buttonHeight,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   shareButtonPrimary: {
-    backgroundColor: '#28a745',
+    backgroundColor: CELLARIUM.primary,
     width: '100%',
   },
   shareButtonSecondary: {
-    backgroundColor: '#f0f0f0',
+    height: UI.secondaryButtonHeight,
+    backgroundColor: CELLARIUM.border,
     flex: 1,
   },
   shareButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: 'bold',
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
   },
   shareButtonTextSecondary: {
-    color: '#333',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  devOnlyButton: {
-    backgroundColor: '#b45309',
-    width: '100%',
-    marginTop: 8,
-  },
-  devOnlyButtonText: {
-    color: '#fff',
-    fontSize: 13,
+    color: '#2C2C2C',
+    fontSize: 14,
     fontWeight: '600',
   },
   qrListCard: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
+    padding: UI.cardPadding,
+    marginBottom: UI.cardGap,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
     elevation: 3,
   },
   listTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#2C2C2C',
+    marginBottom: 14,
   },
   qrListItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#f8f9fa',
-    marginBottom: 8,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: CELLARIUM.bg,
+    marginBottom: 10,
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
   qrListItemActive: {
-    backgroundColor: '#e3f2fd',
-    borderWidth: 1,
-    borderColor: '#8B0000',
+    backgroundColor: 'rgba(146,64,72,0.08)',
+    borderColor: CELLARIUM.primary,
   },
   qrListInfo: {
     flex: 1,
@@ -979,21 +992,22 @@ const styles = StyleSheet.create({
   qrListType: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: '#2C2C2C',
     marginBottom: 2,
   },
   qrListDate: {
-    fontSize: 11,
-    color: '#666',
+    fontSize: 12,
+    color: CELLARIUM.muted,
   },
   qrListCreator: {
-    fontSize: 10,
-    color: '#999',
+    fontSize: 11,
+    color: CELLARIUM.muted,
     marginTop: 2,
   },
   qrListArrow: {
-    fontSize: 18,
-    color: '#ccc',
+    fontSize: 20,
+    color: CELLARIUM.muted,
+    fontWeight: '300',
   },
   modalOverlay: {
     flex: 1,
@@ -1003,33 +1017,33 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
     padding: 24,
     width: '100%',
     maxWidth: 400,
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '700',
+    color: '#2C2C2C',
     marginBottom: 8,
     textAlign: 'center',
   },
   modalSubtitle: {
     fontSize: 14,
-    color: '#666',
+    color: CELLARIUM.muted,
     marginBottom: 20,
     textAlign: 'center',
   },
   modalInput: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 12,
-    color: '#333',
+    backgroundColor: CELLARIUM.bg,
+    borderRadius: 14,
+    padding: 14,
+    fontSize: 13,
+    color: '#2C2C2C',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: CELLARIUM.border,
     marginBottom: 20,
     minHeight: 80,
     textAlignVertical: 'top',
@@ -1040,37 +1054,38 @@ const styles = StyleSheet.create({
   },
   modalButton: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
+    height: UI.buttonHeight,
+    borderRadius: UI.buttonRadius,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   modalButtonPrimary: {
-    backgroundColor: '#8B0000',
+    backgroundColor: CELLARIUM.primary,
   },
   modalButtonSecondary: {
-    backgroundColor: '#f0f0f0',
+    backgroundColor: CELLARIUM.border,
   },
   modalButtonTextPrimary: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   modalButtonTextSecondary: {
-    color: '#666',
+    color: '#2C2C2C',
     fontSize: 16,
     fontWeight: '600',
   },
   restrictedAccessCard: {
-    backgroundColor: '#fff3cd',
-    borderRadius: 12,
+    backgroundColor: 'rgba(255,193,7,0.12)',
+    borderRadius: 14,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#ffeaa7',
+    borderColor: 'rgba(255,193,7,0.35)',
     marginTop: 12,
   },
   restrictedAccessTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '700',
     color: '#856404',
     marginBottom: 8,
     textAlign: 'center',

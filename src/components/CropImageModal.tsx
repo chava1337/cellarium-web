@@ -18,6 +18,7 @@ import { captureRef } from 'react-native-view-shot';
 import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { useSharedValue, useAnimatedStyle } from 'react-native-reanimated';
+import { CELLARIUM } from '../theme/cellariumTheme';
 
 const FRAME_WIDTH_RATIO = 0.88;
 const FRAME_MAX_WIDTH = 320;
@@ -182,7 +183,7 @@ export const CropImageModal: React.FC<CropImageModalProps> = ({
               style={styles.headerBtn}
             >
               {isCropping ? (
-                <ActivityIndicator size="small" color="#8E2C3A" />
+                <ActivityIndicator size="small" color={CELLARIUM.primary} />
               ) : (
                 <Text style={styles.useText}>Usar foto</Text>
               )}
@@ -197,11 +198,11 @@ export const CropImageModal: React.FC<CropImageModalProps> = ({
                 </View>
               ) : !imageUri || !imageSize ? (
                 <View style={styles.centered}>
-                  <ActivityIndicator size="large" color="#8E2C3A" />
+                  <ActivityIndicator size="large" color={CELLARIUM.primary} />
                 </View>
               ) : !hasCropArea ? (
                 <View style={styles.centered}>
-                  <ActivityIndicator size="large" color="#8E2C3A" />
+                  <ActivityIndicator size="large" color={CELLARIUM.primary} />
                 </View>
               ) : (
                 <>
@@ -296,7 +297,7 @@ const styles = StyleSheet.create({
   useText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#8E2C3A',
+    color: CELLARIUM.primary,
   },
   cropArea: {
     flex: 1,

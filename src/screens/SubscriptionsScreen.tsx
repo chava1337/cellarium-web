@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp, useFocusEffect } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { CellariumHeader } from '../components/cellarium';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useAdminGuard } from '../hooks/useAdminGuard';
@@ -1230,15 +1230,8 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   const planLabelForPill = t(`subscription.plan_name.${currentPlanId}`);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <LinearGradient
-        colors={[CELLARIUM.primaryDarker, CELLARIUM.primary, CELLARIUM.primaryDark]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={styles.header}
-      >
-        <Text style={styles.headerTitle}>{t('subscription.screen_title')}</Text>
-      </LinearGradient>
+    <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+      <CellariumHeader title={t('subscription.screen_title')} />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {(!profileReady || user?.status === 'loading') && (
@@ -1430,24 +1423,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: CELLARIUM_THEME.admin.bg,
-  },
-  header: {
-    paddingVertical: LAYOUT.spacing,
-    paddingHorizontal: LAYOUT.padding,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: CELLARIUM.textOnDark,
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: PALETTE.headerSubtitle,
-    textAlign: 'center',
   },
   content: {
     flex: 1,

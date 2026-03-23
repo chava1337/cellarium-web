@@ -10,7 +10,8 @@ import {
   ActivityIndicator,
   Image,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList, Wine } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -24,20 +25,51 @@ interface Props {
   navigation: CreateTastingExamScreenNavigationProp;
 }
 
+const CELLARIUM = {
+  primary: '#924048',
+  primaryDark: '#6f2f37',
+  primaryDarker: '#4e2228',
+  textOnDark: 'rgba(255,255,255,0.92)',
+  textOnDarkMuted: 'rgba(255,255,255,0.75)',
+  bg: '#F4F4F6',
+  card: '#FFFFFF',
+  muted: '#6A6A6A',
+  border: '#E5E5E8',
+} as const;
+
+const UI = {
+  screenPadding: 16,
+  headerHeight: 96,
+  headerHorizontalPadding: 20,
+  cardRadius: 18,
+  cardPadding: 16,
+  cardGap: 14,
+  thumbSize: 72,
+  thumbRadius: 12,
+  inputHeight: 52,
+  inputRadius: 14,
+  buttonHeight: 50,
+  buttonRadius: 14,
+  chipHeight: 42,
+  chipRadius: 14,
+  primaryGradient: ['#4e2228', '#6f2f37', '#924048'] as const,
+} as const;
+
 const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { currentBranch } = useBranch();
   const [name, setName] = useState('');
 
   if (user && !canCreateTastingExam(user.role as 'owner' | 'gerente' | 'sommelier' | 'supervisor' | 'personal')) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa', padding: 24 }}>
-        <Text style={{ fontSize: 18, fontWeight: '600', color: '#333', textAlign: 'center' }}>Sin permiso</Text>
-        <Text style={{ marginTop: 8, fontSize: 14, color: '#666', textAlign: 'center' }}>
+      <View style={styles.guardContainer}>
+        <Text style={styles.guardTitle}>Sin permiso</Text>
+        <Text style={styles.guardSubtitle}>
           Solo propietarios, gerentes y sommeliers pueden crear exámenes de cata.
         </Text>
-        <TouchableOpacity style={{ marginTop: 16, paddingVertical: 10, paddingHorizontal: 20, backgroundColor: '#8B0000', borderRadius: 8 }} onPress={() => navigation.goBack()}>
-          <Text style={{ color: '#fff', fontWeight: '600' }}>Volver</Text>
+        <TouchableOpacity style={styles.guardButton} onPress={() => navigation.goBack()}>
+          <Text style={styles.guardButtonText}>Volver</Text>
         </TouchableOpacity>
       </View>
     );
@@ -97,7 +129,7 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
     try {
       setSubmitting(true);
       const ownerId = user.owner_id || user.id;
-      
+
       await TastingExamService.createExam({
         branchId: currentBranch.id,
         ownerId,
@@ -123,12 +155,20 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Crear Examen de Cata</Text>
-        </View>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <LinearGradient
+          colors={UI.primaryGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.headerGradient}
+        >
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle}>Crear Examen de Cata</Text>
+            <Text style={styles.headerSubtitle}>Cargando vinos...</Text>
+          </View>
+        </LinearGradient>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8B0000" />
+          <ActivityIndicator size="large" color={CELLARIUM.primary} />
           <Text style={styles.loadingText}>Cargando vinos...</Text>
         </View>
       </SafeAreaView>
@@ -136,22 +176,32 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Crear Examen de Cata</Text>
-        <Text style={styles.headerSubtitle}>
-          Selecciona los vinos que formarán parte de este examen
-        </Text>
-      </View>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <LinearGradient
+        colors={UI.primaryGradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.headerGradient}
+      >
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>Crear Examen de Cata</Text>
+          <Text style={styles.headerSubtitle}>
+            Selecciona los vinos que formarán parte de este examen
+          </Text>
+        </View>
+      </LinearGradient>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Formulario */}
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) + 80 }}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.formSection}>
           <Text style={styles.label}>Nombre del Examen *</Text>
           <TextInput
             style={styles.input}
             placeholder="Ej: Examen de Cata - Vinos Tintos"
+            placeholderTextColor={CELLARIUM.muted}
             value={name}
             onChangeText={setName}
             maxLength={100}
@@ -161,6 +211,7 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
           <TextInput
             style={[styles.input, styles.textArea]}
             placeholder="Descripción del examen..."
+            placeholderTextColor={CELLARIUM.muted}
             value={description}
             onChangeText={setDescription}
             multiline
@@ -169,7 +220,6 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
           />
         </View>
 
-        {/* Selección de vinos */}
         <View style={styles.winesSection}>
           <Text style={styles.sectionTitle}>
             Vinos del Catálogo ({selectedWineIds.size} seleccionado{selectedWineIds.size !== 1 ? 's' : ''})
@@ -193,25 +243,30 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
                   key={wine.id}
                   style={[styles.wineCard, isSelected && styles.wineCardSelected]}
                   onPress={() => toggleWineSelection(wine.id)}
+                  activeOpacity={0.85}
                 >
-                  {wine.image_url && (
-                    <Image
-                      source={{ uri: wine.image_url }}
-                      style={styles.wineImage}
-                      resizeMode="contain"
-                    />
-                  )}
+                  <View style={styles.wineThumbWrap}>
+                    {wine.image_url ? (
+                      <Image
+                        source={{ uri: wine.image_url }}
+                        style={styles.wineImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.wineThumbPlaceholder} />
+                    )}
+                  </View>
                   <View style={styles.wineInfo}>
                     <Text style={styles.wineName}>{wine.name}</Text>
                     {wine.winery && (
                       <Text style={styles.wineWinery}>{wine.winery}</Text>
                     )}
                     {wine.vintage && (
-                      <Text style={styles.wineVintage}>Añada: {wine.vintage}</Text>
+                      <Text style={styles.wineMeta}>Añada: {wine.vintage}</Text>
                     )}
                     {wine.type && (
-                      <Text style={styles.wineType}>
-                        Tipo: {wine.type.charAt(0).toUpperCase() + wine.type.slice(1)}
+                      <Text style={styles.wineMeta}>
+                        {wine.type.charAt(0).toUpperCase() + wine.type.slice(1)}
                       </Text>
                     )}
                   </View>
@@ -224,24 +279,25 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
           )}
         </View>
 
-        {/* Botones */}
-        <View style={styles.actions}>
+        <View style={[styles.actions, { marginBottom: Math.max(insets.bottom, 16) }]}>
           <TouchableOpacity
             style={[styles.button, styles.cancelButton]}
             onPress={() => navigation.goBack()}
             disabled={submitting}
+            activeOpacity={0.85}
           >
-            <Text style={styles.buttonText}>Cancelar</Text>
+            <Text style={styles.cancelButtonText}>Cancelar</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.button, styles.submitButton, submitting && styles.buttonDisabled]}
             onPress={handleSubmit}
             disabled={submitting || selectedWineIds.size === 0 || !name.trim()}
+            activeOpacity={0.85}
           >
             {submitting ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color="#fff" size="small" />
             ) : (
-              <Text style={styles.buttonText}>Crear Examen</Text>
+              <Text style={styles.submitButtonText}>Crear Examen</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -253,30 +309,64 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: CELLARIUM.bg,
   },
-  header: {
-    padding: 20,
-    backgroundColor: '#8B0000',
-    alignItems: 'center',
+  guardContainer: {
+    flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: CELLARIUM.bg,
+    padding: 24,
+  },
+  guardTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#2C2C2C',
+    textAlign: 'center',
+  },
+  guardSubtitle: {
+    marginTop: 8,
+    fontSize: 14,
+    color: CELLARIUM.muted,
+    textAlign: 'center',
+  },
+  guardButton: {
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: CELLARIUM.primary,
+    borderRadius: UI.buttonRadius,
+  },
+  guardButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  headerGradient: {
+    height: UI.headerHeight,
+    paddingHorizontal: UI.headerHorizontalPadding,
+    paddingBottom: 12,
+    justifyContent: 'flex-end',
+  },
+  headerCenter: {
+    alignItems: 'center',
+    justifyContent: 'flex-end',
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 5,
+    fontSize: 26,
+    fontWeight: '700',
+    color: CELLARIUM.textOnDark,
     textAlign: 'center',
   },
   headerSubtitle: {
-    fontSize: 14,
-    color: '#fff',
-    opacity: 0.9,
+    fontSize: 13,
+    color: CELLARIUM.textOnDarkMuted,
+    marginTop: 2,
     textAlign: 'center',
   },
   content: {
     flex: 1,
-    padding: 16,
+    padding: UI.screenPadding,
   },
   loadingContainer: {
     flex: 1,
@@ -285,157 +375,177 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 12,
-    fontSize: 16,
-    color: '#666',
+    fontSize: 14,
+    color: CELLARIUM.muted,
   },
   formSection: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
+    padding: UI.cardPadding,
+    marginBottom: UI.cardGap,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
   label: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: '#2C2C2C',
     marginBottom: 8,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
+    borderColor: CELLARIUM.border,
+    borderRadius: UI.inputRadius,
+    paddingHorizontal: 14,
+    height: UI.inputHeight,
     fontSize: 16,
-    backgroundColor: '#fff',
+    backgroundColor: CELLARIUM.card,
     marginBottom: 16,
+    color: '#2C2C2C',
   },
   textArea: {
-    height: 80,
+    height: 100,
+    paddingTop: 14,
     textAlignVertical: 'top',
   },
   winesSection: {
-    marginBottom: 20,
+    marginBottom: UI.cardGap,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#2C2C2C',
     marginBottom: 4,
   },
   sectionSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
+    fontSize: 13,
+    color: CELLARIUM.muted,
+    marginBottom: 14,
   },
   emptyContainer: {
-    padding: 40,
+    padding: 32,
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: CELLARIUM.muted,
     marginBottom: 8,
     textAlign: 'center',
   },
   emptySubtext: {
-    fontSize: 14,
-    color: '#999',
+    fontSize: 13,
+    color: CELLARIUM.muted,
     textAlign: 'center',
   },
   wineCard: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
+    padding: 14,
+    marginBottom: UI.cardGap,
     borderWidth: 2,
-    borderColor: '#ddd',
+    borderColor: CELLARIUM.border,
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
   wineCardSelected: {
-    borderColor: '#8B0000',
-    backgroundColor: '#fff5f5',
+    borderColor: CELLARIUM.primary,
+    backgroundColor: 'rgba(146,64,72,0.06)',
+  },
+  wineThumbWrap: {
+    width: UI.thumbSize,
+    height: UI.thumbSize,
+    borderRadius: UI.thumbRadius,
+    backgroundColor: CELLARIUM.border,
+    overflow: 'hidden',
+    marginRight: 14,
   },
   wineImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-    marginRight: 12,
+    width: '100%',
+    height: '100%',
+  },
+  wineThumbPlaceholder: {
+    width: '100%',
+    height: '100%',
   },
   wineInfo: {
     flex: 1,
+    minWidth: 0,
   },
   wineName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
+    color: '#2C2C2C',
+    marginBottom: 2,
   },
   wineWinery: {
     fontSize: 14,
-    color: '#666',
+    color: CELLARIUM.muted,
     marginBottom: 2,
   },
-  wineVintage: {
+  wineMeta: {
     fontSize: 12,
-    color: '#999',
-    marginBottom: 2,
-  },
-  wineType: {
-    fontSize: 12,
-    color: '#999',
+    color: CELLARIUM.muted,
   },
   checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     borderWidth: 2,
-    borderColor: '#ddd',
+    borderColor: CELLARIUM.border,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 12,
+    marginLeft: 10,
   },
   checkboxSelected: {
-    backgroundColor: '#8B0000',
-    borderColor: '#8B0000',
+    backgroundColor: CELLARIUM.primary,
+    borderColor: CELLARIUM.primary,
   },
   checkmark: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 14,
+    fontWeight: '700',
   },
   actions: {
     flexDirection: 'row',
     gap: 12,
     marginTop: 20,
-    marginBottom: 20,
   },
   button: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
+    height: UI.buttonHeight,
+    borderRadius: UI.buttonRadius,
     alignItems: 'center',
     justifyContent: 'center',
   },
   cancelButton: {
-    backgroundColor: '#6c757d',
+    backgroundColor: CELLARIUM.border,
+  },
+  cancelButtonText: {
+    color: '#2C2C2C',
+    fontSize: 16,
+    fontWeight: '600',
   },
   submitButton: {
-    backgroundColor: '#8B0000',
+    backgroundColor: CELLARIUM.primary,
+  },
+  submitButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
   },
   buttonDisabled: {
     opacity: 0.5,
   },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
 });
 
 export default CreateTastingExamScreen;
-
-
-

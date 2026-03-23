@@ -10,7 +10,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
@@ -18,7 +18,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { useAdminGuard } from '../hooks/useAdminGuard';
 import { PendingApprovalMessage } from '../components/PendingApprovalMessage';
 import { useLanguage } from '../contexts/LanguageContext';
-import { supabase } from '../config/supabase';
+import { supabase } from '../lib/supabase';
+import { CELLARIUM, CELLARIUM_LAYOUT } from '../theme/cellariumTheme';
+import { CellariumHeader } from '../components/cellarium';
 
 type SettingsScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Settings'>;
 type SettingsScreenRouteProp = RouteProp<RootStackParamList, 'Settings'>;
@@ -27,6 +29,15 @@ interface Props {
   navigation: SettingsScreenNavigationProp;
   route: SettingsScreenRouteProp;
 }
+
+const UI = {
+  ...CELLARIUM_LAYOUT,
+  cardPadding: 16,
+  cardGap: 14,
+  buttonRadius: 14,
+  inputHeight: 52,
+  inputRadius: 14,
+} as const;
 
 /** Extrae status y body de FunctionsHttpError de supabase-js (error.context es la Response). */
 async function extractFunctionsHttpErrorDetails(
@@ -54,6 +65,7 @@ async function extractFunctionsHttpErrorDetails(
 }
 
 const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
+  const insets = useSafeAreaInsets();
   const { status: guardStatus } = useAdminGuard({ navigation, route });
   const { user, signOut, profileReady } = useAuth();
   const { t } = useLanguage();
@@ -63,15 +75,17 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   if (guardStatus === 'loading' || guardStatus === 'profile_loading') {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
-        <ActivityIndicator size="large" color="#8B0000" />
-        <Text style={{ marginTop: 12, color: '#666' }}>{guardStatus === 'profile_loading' ? (t('msg.loading') || 'Cargando perfil…') : ''}</Text>
+      <View style={styles.guardContainer}>
+        <ActivityIndicator size="large" color={CELLARIUM.primary} />
+        <Text style={styles.guardLoadingText}>
+          {guardStatus === 'profile_loading' ? (t('msg.loading') || 'Cargando perfil…') : ''}
+        </Text>
       </View>
     );
   }
   if (guardStatus === 'pending') {
     return (
-      <View style={{ flex: 1, backgroundColor: '#f8f9fa' }}>
+      <View style={styles.guardContainer}>
         <PendingApprovalMessage />
       </View>
     );
@@ -254,27 +268,23 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backButtonText}>← {t('settings.back')}</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>{t('settings.title')}</Text>
-      </View>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      <CellariumHeader title={t('settings.title')} />
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) }}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('settings.account')}</Text>
-          
-          <View style={styles.userInfo}>
+
+          <View style={styles.userInfoRow}>
             <Text style={styles.userInfoLabel}>{t('settings.user')}:</Text>
             <Text style={styles.userInfoValue}>{user?.username || user?.email || 'N/A'}</Text>
           </View>
-          
-          <View style={styles.userInfo}>
+
+          <View style={[styles.userInfoRow, styles.userInfoRowLast]}>
             <Text style={styles.userInfoLabel}>{t('settings.role')}:</Text>
             <Text style={styles.userInfoValue}>
               {!profileReady ? (t('msg.loading') || 'Cargando perfil…') :
@@ -293,17 +303,17 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
           <TouchableOpacity
             style={[styles.actionButton, styles.signOutButton]}
             onPress={handleSignOut}
+            activeOpacity={0.85}
           >
-            <Text style={styles.actionButtonText}>🚪 {t('settings.logout')}</Text>
+            <Text style={styles.signOutButtonText}>{t('settings.logout')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.actionButton, styles.deleteButton]}
             onPress={handleDeleteAccount}
+            activeOpacity={0.85}
           >
-            <Text style={[styles.actionButtonText, styles.deleteButtonText]}>
-              🗑️ {t('settings.delete_account')}
-            </Text>
+            <Text style={styles.deleteButtonText}>{t('settings.delete_account')}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -337,7 +347,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
               onChangeText={setConfirmText}
               autoCapitalize="characters"
               editable={!isDeleting}
-              placeholderTextColor="#999"
+              placeholderTextColor={CELLARIUM.muted}
             />
 
             <View style={styles.modalButtons}>
@@ -364,7 +374,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
                 disabled={confirmText !== 'CONFIRMAR' || isDeleting}
               >
                 {isDeleting ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color="#fff" size="small" />
                 ) : (
                   <Text style={styles.confirmDeleteButtonText}>{t('btn.delete')}</Text>
                 )}
@@ -380,97 +390,96 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: CELLARIUM.bg,
   },
-  header: {
-    backgroundColor: 'white',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: {
-    marginRight: 16,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: '#8B0000',
-    fontWeight: '600',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#8B0000',
+  guardContainer: {
     flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: CELLARIUM.bg,
+    padding: 24,
+  },
+  guardLoadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: CELLARIUM.muted,
+    textAlign: 'center',
   },
   content: {
     flex: 1,
-    padding: 16,
+    padding: UI.screenPadding,
+    paddingTop: 16,
   },
   section: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
+    padding: UI.cardPadding,
+    marginBottom: UI.cardGap,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
     elevation: 3,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 16,
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#2C2C2C',
+    marginBottom: 14,
   },
-  userInfo: {
+  userInfoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 12,
+    alignItems: 'center',
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: CELLARIUM.border,
+  },
+  userInfoRowLast: {
+    borderBottomWidth: 0,
   },
   userInfoLabel: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 13,
+    color: CELLARIUM.muted,
   },
   userInfoValue: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
-    color: '#333',
+    color: '#2C2C2C',
   },
   actionButton: {
-    borderRadius: 12,
-    padding: 16,
+    height: UI.buttonHeight,
+    borderRadius: UI.buttonRadius,
     marginBottom: 12,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   signOutButton: {
-    backgroundColor: '#6c757d',
+    backgroundColor: CELLARIUM.neutralButton,
   },
-  deleteButton: {
-    backgroundColor: '#dc3545',
-  },
-  actionButtonText: {
+  signOutButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: 'white',
+    color: '#fff',
+  },
+  deleteButton: {
+    backgroundColor: CELLARIUM.danger,
   },
   deleteButtonText: {
-    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
   modalContent: {
-    backgroundColor: 'white',
-    borderRadius: 16,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
     padding: 24,
     width: '100%',
     maxWidth: 400,
@@ -478,55 +487,56 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#dc3545',
+    fontWeight: '700',
+    color: '#2C2C2C',
     marginBottom: 16,
     textAlign: 'center',
   },
   modalScroll: {
-    maxHeight: 300,
-    marginBottom: 16,
+    maxHeight: 280,
+    marginBottom: 18,
   },
   modalWarning: {
     fontSize: 14,
-    color: '#333',
+    color: CELLARIUM.muted,
     lineHeight: 22,
-    marginBottom: 16,
   },
   confirmInput: {
+    height: UI.inputHeight,
     borderWidth: 2,
-    borderColor: '#dc3545',
-    borderRadius: 8,
-    padding: 12,
+    borderColor: CELLARIUM.danger,
+    borderRadius: UI.inputRadius,
+    paddingHorizontal: 14,
     fontSize: 16,
-    marginBottom: 16,
+    marginBottom: 20,
     textAlign: 'center',
-    fontWeight: 'bold',
+    fontWeight: '600',
+    color: '#2C2C2C',
   },
   modalButtons: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     gap: 12,
   },
   modalButton: {
     flex: 1,
-    borderRadius: 8,
-    padding: 14,
+    height: UI.buttonHeight,
+    borderRadius: UI.buttonRadius,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   cancelButton: {
-    backgroundColor: '#6c757d',
+    backgroundColor: CELLARIUM.border,
   },
   cancelButtonText: {
-    color: 'white',
+    color: '#2C2C2C',
     fontWeight: '600',
     fontSize: 16,
   },
   confirmDeleteButton: {
-    backgroundColor: '#dc3545',
+    backgroundColor: CELLARIUM.danger,
   },
   confirmDeleteButtonText: {
-    color: 'white',
+    color: '#fff',
     fontWeight: '600',
     fontSize: 16,
   },

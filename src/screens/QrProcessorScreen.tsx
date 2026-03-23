@@ -16,9 +16,11 @@ import { getPublicMenuByToken } from '../services/PublicMenuService';
 import { supabase } from '../config/supabase';
 import { parseQrLink } from '../utils/parseQrLink';
 import { consumePendingQrPayload } from '../utils/pendingQrPayload';
+import { StatusBar } from 'expo-status-bar';
+import CellariumLoader from '../components/CellariumLoader';
 
-/** Temporal: overlay de diagnóstico QR en pantalla (sin ADB). Poner a false para producción. */
-const QR_DEBUG_OVERLAY = true;
+/** Overlay de diagnóstico QR: desactivado; el comensal solo ve la copa y "Abriendo menú...". Para depurar usar logs en consola (__DEV__). */
+const QR_DEBUG_OVERLAY = false;
 
 export type QrDebugState = {
   source: string;
@@ -538,57 +540,54 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => clearTimeout(t);
   }, [deepLinkUrl, processQrCode]);
 
+  const isTransition = status === 'validating' || status === 'success';
+
   return (
     <View style={styles.container}>
-      <View style={styles.content}>
-        {QR_DEBUG_OVERLAY && (
-          <View style={styles.debugOverlay}>
-            <Text style={styles.debugTitle}>QR debug</Text>
-            <Text style={styles.debugLine}>step: {qrDebug.currentStep}</Text>
-            <Text style={styles.debugLine}>source: {trunc(qrDebug.source, 18)}</Text>
-            <Text style={styles.debugLine}>url: {trunc(qrDebug.rawUrl, 35)}</Text>
-            <Text style={styles.debugLine}>token: {qrDebug.tokenFound} len={qrDebug.tokenLength}</Text>
-            <Text style={styles.debugLine}>request: {qrDebug.requestStarted} | {qrDebug.endpointUsed}</Text>
-            <Text style={styles.debugLine}>http: {qrDebug.httpStatus} | resp: {trunc(qrDebug.responseSummary, 15)}</Text>
-            <Text style={styles.debugLine}>nav: {qrDebug.navigationTriggered}</Text>
-            <Text style={styles.debugLine}>error: {trunc(qrDebug.finalError, 25)}</Text>
-          </View>
-        )}
-        {status === 'validating' && (
-          <>
-            <ActivityIndicator size="large" color="#8B0000" />
-            <Text style={styles.message}>{message}</Text>
-            <Text style={styles.submessage}>Por favor espera...</Text>
-          </>
-        )}
+      <StatusBar style="dark" backgroundColor="#FFFFFF" />
+      {isTransition && (
+        <View style={styles.transitionWrap}>
+          <CellariumLoader
+            size={220}
+            label="Abriendo menú..."
+            loop={true}
+            speed={1}
+          />
+        </View>
+      )}
 
-        {status === 'success' && (
-          <>
-            <Text style={styles.successIcon}>✓</Text>
-            <Text style={styles.successMessage}>{message}</Text>
-            <Text style={styles.submessage}>Redirigiendo...</Text>
-          </>
-        )}
+      {status === 'error' && (
+        <View style={styles.content}>
+          <Text style={styles.errorIcon}>⚠️</Text>
+          <Text style={styles.errorMessage}>{message}</Text>
+          <Text style={styles.submessage}>Volviendo al inicio...</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              processedRef.current = false;
+              setStatus('validating');
+              setMessage('Validando código QR...');
+              setTimeout(() => processQrCode(), 200);
+            }}
+          >
+            <Text style={styles.retryButtonText}>Reintentar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
-        {status === 'error' && (
-          <>
-            <Text style={styles.errorIcon}>⚠️</Text>
-            <Text style={styles.errorMessage}>{message}</Text>
-            <Text style={styles.submessage}>Volviendo al inicio...</Text>
-            <TouchableOpacity
-              style={styles.retryButton}
-              onPress={() => {
-                processedRef.current = false;
-                setStatus('validating');
-                setMessage('Validando código QR...');
-                setTimeout(() => processQrCode(), 200);
-              }}
-            >
-              <Text style={styles.retryButtonText}>Reintentar</Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
+      {QR_DEBUG_OVERLAY && (
+        <View style={styles.debugOverlay}>
+          <Text style={styles.debugTitle}>QR debug</Text>
+          <Text style={styles.debugLine}>step: {qrDebug.currentStep}</Text>
+          <Text style={styles.debugLine}>source: {trunc(qrDebug.source, 18)}</Text>
+          <Text style={styles.debugLine}>url: {trunc(qrDebug.rawUrl, 35)}</Text>
+          <Text style={styles.debugLine}>token: {qrDebug.tokenFound} len={qrDebug.tokenLength}</Text>
+          <Text style={styles.debugLine}>request: {qrDebug.requestStarted} | {qrDebug.endpointUsed}</Text>
+          <Text style={styles.debugLine}>http: {qrDebug.httpStatus} | resp: {trunc(qrDebug.responseSummary, 15)}</Text>
+          <Text style={styles.debugLine}>nav: {qrDebug.navigationTriggered}</Text>
+          <Text style={styles.debugLine}>error: {trunc(qrDebug.finalError, 25)}</Text>
+        </View>
+      )}
     </View>
   );
 };
@@ -596,7 +595,13 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  transitionWrap: {
+    flex: 1,
+    width: '100%',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -604,29 +609,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 40,
   },
-  message: {
-    fontSize: 18,
-    color: '#333',
-    textAlign: 'center',
-    marginTop: 24,
-    fontWeight: '600',
-  },
   submessage: {
     fontSize: 14,
     color: '#666',
     textAlign: 'center',
     marginTop: 8,
-  },
-  successIcon: {
-    fontSize: 64,
-    color: '#28a745',
-  },
-  successMessage: {
-    fontSize: 20,
-    color: '#28a745',
-    textAlign: 'center',
-    marginTop: 16,
-    fontWeight: 'bold',
   },
   errorIcon: {
     fontSize: 64,

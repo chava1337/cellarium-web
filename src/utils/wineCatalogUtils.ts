@@ -85,12 +85,12 @@ export const toLevel1to5 = (v: unknown): number | undefined => {
   if (!Number.isFinite(num) || isNaN(num)) return undefined;
   if (num < 0) return undefined;
 
-  if (num > 5 && num <= 10) {
-    num = num / 2;
-  } else if (num > 10) {
+  // Escala 0-100 → 1-5: todo valor > 5 se considera 0-100 y se convierte con /20
+  // (antes 5 < num <= 10 se convertía con /2, haciendo p.ej. sweetness 10 → 5 en vez de 1)
+  if (num > 5) {
     num = num / 20;
   }
-  
+
   // Clamp a rango 1..5 y redondear a entero
   const clamped = Math.max(1, Math.min(5, num));
   return Math.round(clamped);

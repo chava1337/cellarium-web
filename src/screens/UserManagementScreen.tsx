@@ -7,8 +7,10 @@ import {
   TouchableOpacity,
   Alert,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CellariumHeader } from '../components/cellarium';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList, User, UserRole } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -34,7 +36,32 @@ interface Props {
   navigation: UserManagementScreenNavigationProp;
 }
 
+const CELLARIUM = {
+  primary: '#924048',
+  primaryDark: '#6f2f37',
+  primaryDarker: '#4e2228',
+  textOnDark: 'rgba(255,255,255,0.92)',
+  textOnDarkMuted: 'rgba(255,255,255,0.75)',
+  chipActiveBg: 'rgba(255,255,255,0.14)',
+  chipBorder: 'rgba(255,255,255,0.16)',
+  bg: '#F4F4F6',
+  card: '#FFFFFF',
+  muted: '#6A6A6A',
+  border: '#E5E5E8',
+} as const;
+
+const UI = {
+  screenPadding: 16,
+  cardRadius: 18,
+  cardPadding: 16,
+  cardGap: 14,
+  buttonHeight: 46,
+  buttonRadius: 14,
+  chipRadius: 14,
+} as const;
+
 const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
+  const insets = useSafeAreaInsets();
   const { user, profileReady } = useAuth();
   const { t } = useLanguage();
   const { currentBranch } = useBranch();
@@ -75,15 +102,16 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
   
   if (!user || !profileReady) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.loadingText}>{t('msg.loading') || 'Cargando perfil…'}</Text>
+      <View style={styles.guardContainer}>
+        <ActivityIndicator size="large" color={CELLARIUM.primary} />
+        <Text style={styles.guardLoadingText}>{t('msg.loading') || 'Cargando perfil…'}</Text>
       </View>
     );
   }
   if (!user.role || !canManageUsers(user.role)) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>{t('users.no_permissions')}</Text>
+      <View style={styles.guardContainer}>
+        <Text style={styles.guardErrorText}>{t('users.no_permissions')}</Text>
       </View>
     );
   }
@@ -424,19 +452,25 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
             style={[styles.approveButton, isBusy && styles.buttonDisabled]}
             onPress={() => !isBusy && handleApproveUser(pendingUser)}
             disabled={isBusy}
+            activeOpacity={0.85}
           >
-            <Text style={styles.approveButtonText}>
-              {isApproving ? '…' : `✓ ${t('users.approve')}`}
-            </Text>
+            {isApproving ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.approveButtonText}>{t('users.approve')}</Text>
+            )}
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.rejectButton, isBusy && styles.buttonDisabled]}
             onPress={() => !isBusy && handleRejectUser(pendingUser)}
             disabled={isBusy}
+            activeOpacity={0.85}
           >
-            <Text style={styles.rejectButtonText}>
-              {isRejecting ? '…' : `✗ ${t('users.reject')}`}
-            </Text>
+            {isRejecting ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.rejectButtonText}>{t('users.reject')}</Text>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -463,16 +497,17 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
             <TouchableOpacity
               style={styles.changeRoleButton}
               onPress={() => handleOpenChangeRole(user)}
+              activeOpacity={0.85}
             >
-              <Text style={styles.changeRoleButtonText}>🔄 {t('users.change_role')}</Text>
+              <Text style={styles.changeRoleButtonText}>{t('users.change_role')}</Text>
             </TouchableOpacity>
-            {/* Botón eliminar: solo visible para owner y gerente */}
             {(isOwner || (currentUserRole === 'gerente' && user.role !== 'owner' && user.role !== 'gerente')) && (
               <TouchableOpacity
                 style={styles.deleteButton}
                 onPress={() => handleDeleteUser(user)}
+                activeOpacity={0.85}
               >
-                <Text style={styles.deleteButtonText}>🗑️ {t('btn.delete')}</Text>
+                <Text style={styles.deleteButtonText}>{t('btn.delete')}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -483,44 +518,43 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
 
   const getRoleColor = (role: UserRole): string => {
     switch (role) {
-      case 'owner': return '#8B0000';
+      case 'owner': return CELLARIUM.primary;
       case 'gerente': return '#1e3a8a';
       case 'sommelier': return '#7c2d12';
       case 'supervisor': return '#166534';
-      default: return '#6b7280';
+      default: return CELLARIUM.muted;
     }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <Text style={styles.title}>{t('users.title')}</Text>
-          <Text style={styles.subtitle}>
-            {isOwner ? t('users.all_branches') : currentBranch?.name || t('branches.title')}
-          </Text>
-        </View>
-      </View>
+    <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+      <CellariumHeader
+        title={t('users.title')}
+        subtitle={isOwner ? t('users.all_branches') : currentBranch?.name || t('branches.title')}
+      />
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Solicitudes pendientes */}
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) }}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
-            📋 {t('users.pending_approval')} ({filteredPendingUsers.length})
+            {t('users.pending_approval')} ({filteredPendingUsers.length})
           </Text>
           {filteredPendingUsers.length > 0 ? (
             filteredPendingUsers.map(renderPendingUser)
           ) : (
             <View style={styles.emptyCard}>
               <Text style={styles.emptyText}>{t('msg.no_data')}</Text>
+              <Text style={styles.emptySubtext}>Las solicitudes de acceso aparecerán aquí.</Text>
             </View>
           )}
         </View>
 
-        {/* Usuarios activos */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
-            👥 {t('users.active')} ({filteredActiveUsers.length})
+            {t('users.active')} ({filteredActiveUsers.length})
           </Text>
           {filteredActiveUsers.map(renderActiveUser)}
         </View>
@@ -642,177 +676,156 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: CELLARIUM.bg,
   },
-  header: {
-    padding: 20,
-    backgroundColor: '#8B0000',
-    alignItems: 'center',
+  guardContainer: {
+    flex: 1,
     justifyContent: 'center',
-  },
-  headerContent: {
     alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: CELLARIUM.bg,
+    padding: 24,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 5,
+  guardLoadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: CELLARIUM.muted,
     textAlign: 'center',
   },
-  subtitle: {
-    fontSize: 14,
-    color: '#fff',
-    opacity: 0.9,
+  guardErrorText: {
+    fontSize: 16,
+    color: '#b91c1c',
     textAlign: 'center',
   },
   content: {
     flex: 1,
-    padding: 16,
+    padding: UI.screenPadding,
+    paddingTop: 18,
   },
   section: {
-    marginBottom: 24,
+    marginBottom: 28,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#2C2C2C',
+    marginBottom: 14,
   },
   userCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
+    padding: UI.cardPadding,
+    marginBottom: UI.cardGap,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
     elevation: 3,
   },
   userInfo: {
-    marginBottom: 12,
+    marginBottom: 14,
   },
   userName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#2C2C2C',
     marginBottom: 4,
   },
   userEmail: {
     fontSize: 14,
-    color: '#666',
+    color: CELLARIUM.muted,
     marginBottom: 4,
   },
   userRole: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#8B0000',
+    color: CELLARIUM.primary,
   },
   branchInfo: {
     fontSize: 12,
-    color: '#999',
+    color: CELLARIUM.muted,
     marginTop: 4,
   },
   userActions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
   },
   approveButton: {
     flex: 1,
-    backgroundColor: '#28a745',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    height: UI.buttonHeight,
+    borderRadius: UI.buttonRadius,
+    backgroundColor: CELLARIUM.primary,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   approveButtonText: {
     color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
+    fontWeight: '600',
+    fontSize: 15,
   },
   buttonDisabled: {
     opacity: 0.6,
   },
   rejectButton: {
     flex: 1,
-    backgroundColor: '#dc3545',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    height: UI.buttonHeight,
+    borderRadius: UI.buttonRadius,
+    backgroundColor: CELLARIUM.border,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   rejectButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
+    color: '#2C2C2C',
+    fontWeight: '600',
+    fontSize: 15,
   },
   changeRoleButton: {
     flex: 1,
-    backgroundColor: '#17a2b8',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    height: UI.buttonHeight,
+    borderRadius: UI.buttonRadius,
+    backgroundColor: CELLARIUM.primary,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   changeRoleButtonText: {
     color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
+    fontWeight: '600',
+    fontSize: 15,
   },
   deleteButton: {
     flex: 1,
-    backgroundColor: '#dc3545',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    height: UI.buttonHeight,
+    borderRadius: UI.buttonRadius,
+    backgroundColor: '#b91c1c',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   deleteButtonText: {
     color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
+    fontWeight: '600',
+    fontSize: 15,
   },
   emptyCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 24,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
+    padding: 28,
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
   emptyText: {
-    fontSize: 14,
-    color: '#999',
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2C2C2C',
+    textAlign: 'center',
   },
-  infoCard: {
-    backgroundColor: '#e3f2fd',
-    borderRadius: 12,
-    padding: 16,
+  emptySubtext: {
+    fontSize: 13,
+    color: CELLARIUM.muted,
+    textAlign: 'center',
     marginTop: 8,
-    marginBottom: 24,
-  },
-  infoTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1976d2',
-    marginBottom: 8,
-  },
-  infoText: {
-    fontSize: 14,
-    color: '#555',
-    lineHeight: 20,
-  },
-  errorText: {
-    fontSize: 16,
-    color: '#dc3545',
-    textAlign: 'center',
-    marginTop: 40,
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 40,
   },
   modalOverlay: {
     flex: 1,
@@ -822,30 +835,30 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
     padding: 24,
     width: '100%',
     maxWidth: 400,
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '700',
+    color: '#2C2C2C',
     marginBottom: 8,
     textAlign: 'center',
   },
   modalSubtitle: {
     fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
+    color: CELLARIUM.muted,
+    marginBottom: 16,
     textAlign: 'center',
   },
   modalCurrentRole: {
     fontSize: 14,
-    color: '#8B0000',
+    color: CELLARIUM.primary,
     fontWeight: '600',
-    marginBottom: 20,
+    marginBottom: 18,
     textAlign: 'center',
   },
   rolesContainer: {
@@ -855,33 +868,40 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
     borderWidth: 2,
-    borderRadius: 8,
+    borderRadius: UI.chipRadius,
     marginBottom: 12,
+    borderColor: CELLARIUM.border,
+    backgroundColor: CELLARIUM.bg,
   },
   roleOptionCurrent: {
-    backgroundColor: '#f0f0f0',
+    backgroundColor: 'rgba(146,64,72,0.08)',
+    borderColor: CELLARIUM.primary,
   },
   roleOptionText: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   currentBadge: {
-    fontSize: 12,
-    color: '#999',
-    fontStyle: 'italic',
+    fontSize: 11,
+    color: CELLARIUM.primary,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   modalCloseButton: {
-    backgroundColor: '#6b7280',
-    paddingVertical: 12,
-    borderRadius: 8,
+    height: UI.buttonHeight,
+    borderRadius: UI.buttonRadius,
+    backgroundColor: CELLARIUM.border,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   modalCloseButtonText: {
-    color: '#fff',
+    color: '#2C2C2C',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
 });
 

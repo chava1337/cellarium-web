@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
 import LottieView from 'lottie-react-native';
+import { CELLARIUM } from '../theme/cellariumTheme';
 
 interface CellariumLoaderProps {
   size?: number;
@@ -98,7 +99,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 16,
-    color: '#666',
+    color: CELLARIUM.muted,
     opacity: 0.85,
     textAlign: 'center',
     fontWeight: '500',

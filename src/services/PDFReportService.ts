@@ -1,11 +1,11 @@
-import * as FileSystem from 'expo-file-system';
+import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { InventoryItem, InventoryStats, EstimatedSalesRow, SalesFromCountsRow, SalesFromCountsSummary, BranchComparisonRow, BranchComparisonSummary } from './InventoryService';
 import { WineMetrics, BranchMetrics } from './AnalyticsService';
 import { isValidPrice, formatCurrencyMXN } from '../utils/wineCatalogUtils';
 
 /**
- * Servicio para generación y compartición de reportes PDF
+ * Reportes: HTML como plantilla → PDF binario vía expo-print → compartir con expo-sharing.
  */
 export class PDFReportService {
   /**
@@ -335,32 +335,27 @@ export class PDFReportService {
   }
 
   /**
-   * Guardar HTML como archivo y compartir
+   * Renderiza HTML a PDF con expo-print y comparte el archivo (mismo HTML que los generadores).
    */
-  static async saveAndShareHTML(html: string, filename: string): Promise<void> {
+  static async printHtmlAndSharePdf(html: string, filenameBase: string): Promise<void> {
     try {
-      const fileUri = `${FileSystem.documentDirectory}${filename}.html`;
-      
-      // Guardar el HTML
-      await FileSystem.writeAsStringAsync(fileUri, html, {
-        encoding: FileSystem.EncodingType.UTF8,
+      const { uri } = await Print.printToFileAsync({
+        html,
+        base64: false,
       });
 
-      // Verificar si se puede compartir
       const canShare = await Sharing.isAvailableAsync();
-      
-      if (canShare) {
-        // Compartir el archivo
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/html',
-          dialogTitle: 'Compartir Reporte',
-          UTI: 'public.html',
-        });
-      } else {
+      if (!canShare) {
         throw new Error('Compartir no está disponible en este dispositivo');
       }
+
+      await Sharing.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: `Compartir reporte · ${filenameBase}`,
+        UTI: 'com.adobe.pdf',
+      });
     } catch (error) {
-      console.error('Error saving/sharing HTML:', error);
+      if (__DEV__) console.error('Error generating/sharing PDF report:', error);
       throw error;
     }
   }
@@ -376,7 +371,7 @@ export class PDFReportService {
     try {
       const html = await this.generateInventoryReport(branchName, inventory, stats);
       const filename = `inventario_${branchName.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`;
-      await this.saveAndShareHTML(html, filename);
+      await this.printHtmlAndSharePdf(html, filename);
     } catch (error) {
       if (__DEV__) console.error('Error exporting inventory report:', error);
       throw error;
@@ -487,7 +482,7 @@ export class PDFReportService {
     try {
       const html = this.generateEstimatedSalesReport(branchName, period, rows, summary);
       const filename = `ventas_estimadas_${branchName.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`;
-      await this.saveAndShareHTML(html, filename);
+      await this.printHtmlAndSharePdf(html, filename);
     } catch (error) {
       if (__DEV__) console.error('Error exporting estimated sales report:', error);
       throw error;
@@ -621,7 +616,7 @@ export class PDFReportService {
     try {
       const html = this.generateSalesFromCountsReport(branchName, period, rows, summary);
       const filename = `ventas_cortes_${branchName.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`;
-      await this.saveAndShareHTML(html, filename);
+      await this.printHtmlAndSharePdf(html, filename);
     } catch (error) {
       if (__DEV__) console.error('Error exporting sales from counts report:', error);
       throw error;
@@ -747,7 +742,7 @@ export class PDFReportService {
     try {
       const html = this.generateBranchComparisonReport(period, branches, summary);
       const filename = `comparativo_sucursales_${Date.now()}`;
-      await this.saveAndShareHTML(html, filename);
+      await this.printHtmlAndSharePdf(html, filename);
     } catch (error) {
       if (__DEV__) console.error('Error exporting branch comparison report:', error);
       throw error;
@@ -765,7 +760,7 @@ export class PDFReportService {
     try {
       const html = await this.generateSalesReport(branchName, metrics, wineMetrics);
       const filename = `ventas_${branchName.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`;
-      await this.saveAndShareHTML(html, filename);
+      await this.printHtmlAndSharePdf(html, filename);
     } catch (error) {
       if (__DEV__) console.error('Error exporting sales report:', error);
       throw error;

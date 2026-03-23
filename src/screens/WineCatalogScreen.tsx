@@ -14,6 +14,8 @@ import {
   Animated,
   Pressable,
   Platform,
+  Dimensions,
+  PixelRatio,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -52,6 +54,7 @@ import {
   type PublicMenuResponse,
   type PublicMenuBranch,
   type PublicMenuWine,
+  type PublicMenuCocktail,
 } from '../services/PublicMenuService';
 
 // Debug flags
@@ -84,7 +87,7 @@ function parseIngredients(ingredientsText: string | null | undefined): string[] 
     .filter(Boolean);
 }
 
-/** Map public-menu JSON to Branch + Wine[] for catalog UI (guest flow). */
+/** Map public-menu JSON to Branch + Wine[] for catalog UI (guest flow). Incluye campos sensoriales si vienen del backend. */
 function mapPublicMenuToWineCatalogItems(menu: PublicMenuResponse): { branch: Branch; wines: Wine[] } {
   const branch: Branch = {
     id: menu.branch.id,
@@ -96,9 +99,16 @@ function mapPublicMenuToWineCatalogItems(menu: PublicMenuResponse): { branch: Br
     updated_at: '',
   };
   const now = new Date().toISOString();
+  const clamp1to5 = (n: number | null | undefined): number | undefined => {
+    if (n == null || !Number.isFinite(n)) return undefined;
+    return Math.round(Math.max(1, Math.min(5, Number(n))));
+  };
   const wines: Wine[] = (menu.wines || []).map((w: PublicMenuWine) => {
     const priceBottle = typeof w.price_by_bottle === 'number' && Number.isFinite(w.price_by_bottle) ? w.price_by_bottle : null;
     const priceGlass = typeof w.price_by_glass === 'number' && Number.isFinite(w.price_by_glass) ? w.price_by_glass : null;
+    const alcohol = w.alcohol_content != null
+      ? (typeof w.alcohol_content === 'number' ? w.alcohol_content : parseFloat(String(w.alcohol_content).replace(',', '.')))
+      : undefined;
     return {
       id: w.id,
       name: w.name ?? '',
@@ -107,17 +117,48 @@ function mapPublicMenuToWineCatalogItems(menu: PublicMenuResponse): { branch: Br
       country: w.country ?? '',
       vintage: w.vintage ?? '',
       description: w.description ?? '',
+      alcohol_content: Number.isFinite(alcohol) ? alcohol : undefined,
       price: priceBottle ?? priceGlass ?? 0,
       price_per_glass: priceGlass ?? undefined,
+      available_by_bottle: priceBottle != null,
+      available_by_glass: priceGlass != null,
       image_url: w.image_url ?? undefined,
       winery: w.winery ?? undefined,
       stock_quantity: typeof w.stock_quantity === 'number' && Number.isFinite(w.stock_quantity) ? w.stock_quantity : undefined,
       type: (w.type as Wine['type']) ?? undefined,
+      body_level: clamp1to5(w.body_level ?? undefined),
+      sweetness_level: clamp1to5(w.sweetness_level ?? undefined),
+      acidity_level: clamp1to5(w.acidity_level ?? undefined),
+      intensity_level: clamp1to5(w.intensity_level ?? undefined),
+      fizziness_level: clamp1to5(w.fizziness_level ?? undefined),
       created_at: now,
       updated_at: now,
     };
   });
   return { branch, wines };
+}
+
+/** Map public-menu cocktails to CocktailDrink[] para UI (guest flow). branch_id requerido; owner_id no viene en payload, se deja vacío. */
+function mapPublicMenuCocktailsToCatalogItems(
+  cocktails: PublicMenuCocktail[] | undefined,
+  branchId: string
+): CocktailDrink[] {
+  if (!cocktails || !Array.isArray(cocktails)) return [];
+  const now = new Date().toISOString();
+  return cocktails.map((c) => ({
+    id: c.id,
+    branch_id: branchId,
+    owner_id: '',
+    name: c.name ?? { es: '', en: '' },
+    description: c.description ?? undefined,
+    ingredients: c.ingredients ?? [],
+    image_url: c.image_url ?? undefined,
+    price: typeof c.price === 'number' && Number.isFinite(c.price) ? c.price : 0,
+    is_active: true,
+    display_order: typeof c.display_order === 'number' ? c.display_order : 0,
+    created_at: now,
+    updated_at: now,
+  }));
 }
 
 type WineCatalogScreenNavigationProp = StackNavigationProp<RootStackParamList, 'WineCatalog'>;
@@ -196,6 +237,48 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
       itemSpacing: carouselDimensions.ITEM_SPACING,
     });
   }, [deviceInfo.screenWidth, deviceInfo.screenHeight, deviceInfo.deviceType, stableIsTablet, carouselDimensions.ITEM_WIDTH, carouselDimensions.ITEM_SPACING]);
+
+  // Variante guest: card y bloques más grandes (solo cuando isGuest)
+  const GUEST_CARD = useMemo(
+    () => ({
+      cardMinHeight: 600,
+      cardMinHeightTablet: 628,
+      imageHeight: 212,
+      imageHeightTablet: 232,
+      sensoryHeight: 212,
+      sensoryHeightTablet: 232,
+      fichaMinHeight: 260,
+      heroMaxHeight: 280,
+      heroMaxHeightTablet: 324,
+    }),
+    []
+  );
+
+  // Instrumentación temporal: medir layout real de la card guest (solo __DEV__)
+  const cardLayoutDeviceLoggedRef = useRef(false);
+  const logCardLayout = useCallback(
+    (label: string) =>
+      (e: { nativeEvent: { layout: { x: number; y: number; width: number; height: number } } }) => {
+        if (!__DEV__) return;
+        const { width, height } = e.nativeEvent.layout;
+        if (label === 'itemWrapper' && !cardLayoutDeviceLoggedRef.current) {
+          cardLayoutDeviceLoggedRef.current = true;
+          const win = Dimensions.get('window');
+          console.log('[CARD_LAYOUT] DEVICE', {
+            windowWidth: win.width,
+            windowHeight: win.height,
+            pixelRatio: PixelRatio.get(),
+            stableIsTablet,
+            ITEM_WIDTH: carouselDimensions.ITEM_WIDTH,
+            ITEM_SPACING: carouselDimensions.ITEM_SPACING,
+            ITEM_FULL: carouselDimensions.ITEM_FULL,
+          });
+        }
+        console.log(`[CARD_LAYOUT] ${label}`, { w: width, h: height });
+      },
+    [stableIsTablet, carouselDimensions.ITEM_WIDTH, carouselDimensions.ITEM_SPACING, carouselDimensions.ITEM_FULL]
+  );
+
   const insets = useSafeAreaInsets();
 
   // Estados para modal de maridajes
@@ -925,6 +1008,8 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
       setGuestBranchFromMenu(branch);
       setWines(wines);
       setFilteredWines(wines);
+      const guestCocktails = mapPublicMenuCocktailsToCatalogItems(menu.cocktails, branch.id);
+      setCocktails(guestCocktails);
       rawWinesDataRef.current = wines.map((w) => ({
         wines: w,
         stock_quantity: w.stock_quantity,
@@ -934,7 +1019,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
       const stockMap = new Map<string, { wines: Wine; stock_quantity?: number; price_by_glass?: number; price_by_bottle?: number }>();
       wines.forEach((w) => stockMap.set(w.id, { wines: w, stock_quantity: w.stock_quantity, price_by_glass: w.price_per_glass, price_by_bottle: w.price }));
       stockByWineIdRef.current = stockMap;
-      if (__DEV__) console.log('[WineCatalog] loadGuestMenuByToken success', { branchId: branch?.id, winesCount: wines.length });
+      if (__DEV__) console.log('[WineCatalog] loadGuestMenuByToken success', { branchId: branch?.id, winesCount: wines.length, cocktailsCount: guestCocktails.length });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (__DEV__) console.warn('[GUEST_MENU] fetch failed', msg, err);
@@ -988,12 +1073,12 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   };
 
-  // Cargar cocteles cuando se seleccione la opción o cambie la sucursal
+  // Cargar cocteles cuando se seleccione la opción o cambie la sucursal (solo no-guest: guest ya los recibe de public-menu en loadGuestMenuByToken)
   useEffect(() => {
-    if (showCocktails && activeBranch) {
+    if (showCocktails && activeBranch && !isGuest) {
       loadCocktails();
     }
-  }, [showCocktails, activeBranch?.id]);
+  }, [showCocktails, activeBranch?.id, isGuest]);
 
   // Filtrar cocteles por búsqueda
   useEffect(() => {
@@ -1627,10 +1712,17 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
 
     return (
       <View key={cocktail.id} style={{ width: carouselDimensions.ITEM_WIDTH }}>
-        <View style={styles.wineCard}>
+        <View style={[
+          styles.wineCard,
+          isGuest && { minHeight: stableIsTablet ? GUEST_CARD.cardMinHeightTablet : GUEST_CARD.cardMinHeight },
+        ]}>
           {/* Contenedor principal - Imagen centrada ocupando todo el espacio */}
           <View style={styles.wineCardBody}>
-            <View style={[styles.wineCardContent, stableIsTablet && { height: 280 }]}>
+            <View style={[
+              styles.wineCardContent,
+              stableIsTablet && !isGuest && { height: 280 },
+              isGuest && { height: stableIsTablet ? 232 : 212 },
+            ]}>
               {/* Imagen del coctel ocupando todo el espacio (sin ficha sensorial) */}
               <View style={{
                 flex: 1,
@@ -1677,7 +1769,11 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                   source={cocktailCardBackground}
                   resizeMode="cover"
                   imageStyle={{ opacity: 1 }}
-                  style={styles.wineAdditionalInfo}
+                  style={[
+                    styles.wineAdditionalInfo,
+                    stableIsTablet && !isGuest && { maxHeight: 300 },
+                    isGuest && { maxHeight: stableIsTablet ? GUEST_CARD.heroMaxHeightTablet : GUEST_CARD.heroMaxHeight },
+                  ]}
                 >
                   {/* Overlay oscuro para legibilidad del texto */}
                   <View style={StyleSheet.absoluteFillObject}>
@@ -1690,14 +1786,22 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                   </View>
                     <ScrollView 
                       style={styles.wineAdditionalInfoScroll}
-                      contentContainerStyle={[styles.wineAdditionalInfoContent, { alignItems: 'center' }]}
+                      contentContainerStyle={[
+                        styles.wineAdditionalInfoContent,
+                        { alignItems: 'center', flexGrow: 1 },
+                        isGuest && { minHeight: 260 },
+                      ]}
                       showsVerticalScrollIndicator={false}
                       nestedScrollEnabled={true}
                       bounces={false}
                     >
                       {/* Nombre del coctel — centrado, colores claros para contraste sobre fondo oscuro */}
                       <View style={[styles.wineNameRow, { alignSelf: 'stretch', alignItems: 'center' }]}>
-                        <Text style={[styles.wineName, { color: '#FFFFFF', fontSize: 21, fontWeight: '700', textAlign: 'center' }]} numberOfLines={2} ellipsizeMode="tail">
+                        <Text style={[
+                          styles.wineName,
+                          { color: '#FFFFFF', fontWeight: '700', textAlign: 'center' },
+                          isGuest ? { fontSize: 23, lineHeight: 28 } : { fontSize: 21 },
+                        ]} numberOfLines={2} ellipsizeMode="tail">
                           {cocktailName}
                         </Text>
                       </View>
@@ -1746,6 +1850,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
             style={[
               styles.pricesContainer,
               { paddingHorizontal: stableIsTablet ? 20 : 16 },
+              isGuest && styles.pricesContainerGuest,
             ]}
           >
             <View style={styles.priceContainer}>
@@ -1753,7 +1858,8 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                 <Text style={[
                   styles.priceBottle,
                   {
-                    fontSize: stableIsTablet ? 18 : 16,
+                    fontSize: isGuest ? 20 : (stableIsTablet ? 18 : 16),
+                    lineHeight: isGuest ? 24 : undefined,
                     color: '#FFFFFF',
                   }
                 ]}>
@@ -1765,11 +1871,13 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         </View>
       </View>
     );
-  }, [stableIsTablet, carouselDimensions.ITEM_WIDTH, t, language]);
+  }, [stableIsTablet, carouselDimensions.ITEM_WIDTH, t, language, isGuest, GUEST_CARD]);
 
   // Subcomponente: Bloque de imagen del vino
-  const WineImageBlock = ({ wine, isTablet }: { wine: Wine; isTablet: boolean }) => {
-    const imageHeight = isTablet ? 200 : 180;
+  const WineImageBlock = ({ wine, isTablet, isGuest = false, guestCard }: { wine: Wine; isTablet: boolean; isGuest?: boolean; guestCard?: { imageHeight: number; imageHeightTablet: number; sensoryHeight: number; sensoryHeightTablet: number } }) => {
+    const imageHeight = isGuest && guestCard
+      ? (isTablet ? guestCard.imageHeightTablet : guestCard.imageHeight)
+      : (isTablet ? 200 : 180);
     const imagePadding = isTablet ? 12 : 8;
     
     return (
@@ -1807,9 +1915,11 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   // Subcomponente: Bloque sensorial (wrapper del renderSensoryProfile)
-  const WineSensoryBlock = ({ wine, isTablet }: { wine: Wine; isTablet: boolean }) => {
+  const WineSensoryBlock = ({ wine, isTablet, isGuest = false, guestCard }: { wine: Wine; isTablet: boolean; isGuest?: boolean; guestCard?: { sensoryHeight: number; sensoryHeightTablet: number } }) => {
     const sectionPadding = isTablet ? 12 : 8;
-    const sectionHeight = isTablet ? 200 : 180;
+    const sectionHeight = isGuest && guestCard
+      ? (isTablet ? guestCard.sensoryHeightTablet : guestCard.sensoryHeight)
+      : (isTablet ? 200 : 180);
     
     return (
       <View style={[
@@ -1825,8 +1935,8 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     );
   };
 
-  // Subcomponente: Bloque de información (winery, nombre, país, uvas, vintage)
-  const WineInfoBlock = ({ wine, t, onOpenPairings, isTablet }: { wine: Wine; t: (key: string) => string; onOpenPairings: (wine: Wine) => void; isTablet: boolean }) => {
+  // Subcomponente: Bloque de información (winery, nombre, país, uvas, vintage, ABV). isGuest: ficha más alta y estable en menú comensal.
+  const WineInfoBlock = ({ wine, t, onOpenPairings, isTablet, isGuest = false }: { wine: Wine; t: (key: string) => string; onOpenPairings: (wine: Wine) => void; isTablet: boolean; isGuest?: boolean }) => {
     const winery = wine.winery?.trim() || '';
     const wineName = wine.name?.trim() || '';
     const areEqual = winery.toLowerCase() === wineName.toLowerCase() && winery.length > 0;
@@ -1846,26 +1956,58 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     const grapeCount = grapesText ? grapesText.split(',').map(s => s.trim()).filter(Boolean).length : 0;
     const isGrapesLong = grapesText.length > 26 || grapeCount >= 3;
 
+    const handleContainerLayout = (e: { nativeEvent: { layout: { width: number; height: number } } }) => {
+      if (!__DEV__) return;
+      const { width, height } = e.nativeEvent.layout;
+      console.log('[FICHA_LAYOUT] container', {
+        wineName: wine.name?.slice(0, 30),
+        isGuest,
+        width,
+        height,
+        stylesApplied: { containerGuest: isGuest, contentGuest: isGuest },
+      });
+    };
+    const handleContentLayout = (e: { nativeEvent: { layout: { width: number; height: number } } }) => {
+      if (!__DEV__) return;
+      const { width, height } = e.nativeEvent.layout;
+      console.log('[FICHA_LAYOUT] content', {
+        wineName: wine.name?.slice(0, 30),
+        isGuest,
+        width,
+        height,
+      });
+    };
+
     return (
-      <View style={styles.wineInfoBlockContainer}>
+      <View
+        style={[
+          styles.wineInfoBlockContainer,
+          isGuest && styles.wineInfoBlockContainerGuest,
+        ]}
+        onLayout={handleContainerLayout}
+      >
         {/* Glass card overlay para legibilidad */}
         <View style={styles.wineInfoBlockOverlay} />
         
         {/* Contenido del bloque */}
-        <View style={[
-          styles.wineInfoBlockContent,
-          isGrapesLong && styles.wineInfoBlockContentLong,
-          isGrapesLong && styles.wineInfoBlockContentManyGrapes,
-          isGrapesLong && isTablet && styles.wineInfoBlockContentManyGrapesTablet
-        ]}>
+        <View
+          style={[
+            styles.wineInfoBlockContent,
+            isGrapesLong && styles.wineInfoBlockContentLong,
+            isGrapesLong && styles.wineInfoBlockContentManyGrapes,
+            isGrapesLong && isTablet && styles.wineInfoBlockContentManyGrapesTablet,
+            isGuest && styles.wineInfoBlockContentGuest,
+          ]}
+          onLayout={handleContentLayout}
+        >
           {/* Nombre de la bodega - Arriba (solo si es diferente al nombre del vino) */}
           {!areEqual && winery && (
-            <Text style={styles.wineWinery} numberOfLines={1} ellipsizeMode="tail">{winery}</Text>
+            <Text style={[styles.wineWinery, isGuest && styles.wineWineryGuest]} numberOfLines={1} ellipsizeMode="tail">{winery}</Text>
           )}
           
         {/* Nombre del vino */}
           <View style={styles.wineNameRow}>
-            <Text style={styles.wineName} numberOfLines={2} ellipsizeMode="tail">{wine.name}</Text>
+            <Text style={[styles.wineName, isGuest && styles.wineNameGuest]} numberOfLines={2} ellipsizeMode="tail">{wine.name}</Text>
           </View>
           
           {/* País - Uvas (en la misma línea o seguidos) */}
@@ -1875,7 +2017,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
               {(wine.country || (wine.country && wine.grape_variety)) && (
                 <View style={styles.countryInlineWrap}>
                   {wine.country && (
-                    <Text style={styles.wineCountry} numberOfLines={1} ellipsizeMode="tail">{wine.country}</Text>
+                    <Text style={[styles.wineCountry, isGuest && styles.wineCountryGuest]} numberOfLines={1} ellipsizeMode="tail">{wine.country}</Text>
                   )}
                   {wine.country && wine.grape_variety && (
                     <Text style={styles.wineOriginSeparator}> • </Text>
@@ -1887,7 +2029,8 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                   style={[
                     styles.wineGrapesInline,
                     isGrapesLong && styles.wineGrapesInlineLong,
-                    isGrapesLong && styles.wineGrapesInlineMany
+                    isGrapesLong && styles.wineGrapesInlineMany,
+                    isGuest && styles.wineGrapesInlineGuest,
                   ]} 
                   numberOfLines={isGrapesLong ? 3 : 1} 
                   ellipsizeMode="tail"
@@ -1905,8 +2048,8 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                 : parseFloat(String(val).replace(',', '.').match(/[\d.]+/)?.[0] ?? '');
               const display = Number.isFinite(num) ? num.toFixed(1) : String(val);
               return (
-                <View style={styles.abvBadge}>
-                  <Text style={styles.abvBadgeText}>{display}% vol.</Text>
+                <View style={[styles.abvBadge, isGuest && styles.abvBadgeGuest]}>
+                  <Text style={[styles.abvBadgeText, isGuest && styles.abvBadgeTextGuest]}>{display}% vol.</Text>
                 </View>
               );
             })()}
@@ -1914,7 +2057,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
           
           {/* Añada - SOLO mostrar si NO viene del catálogo global */}
           {vintageDisplay && (
-            <Text style={styles.wineVintage} numberOfLines={1} ellipsizeMode="tail">{t('wine.vintage_label')} {vintageDisplay}</Text>
+            <Text style={[styles.wineVintage, isGuest && styles.wineVintageGuest]} numberOfLines={1} ellipsizeMode="tail">{t('wine.vintage_label')} {vintageDisplay}</Text>
           )}
         </View>
         
@@ -1992,24 +2135,27 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
               paddingTop: isTablet ? 10 : 8,
               paddingBottom: isTablet ? 10 : 8,
             },
-            isTablet && { minHeight: 0 },
+            isTablet && !isGuest && { minHeight: 0 },
+            isGuest && styles.pricesContainerGuest,
           ]}
         >
           <View style={[
             styles.priceContainer,
-            !isTablet && styles.priceContainerPhone
+            !isTablet && styles.priceContainerPhone,
           ]}>
             {/* Contenedor de precios con stack vertical - CENTRADO */}
             <View style={styles.pricesStack}>
               <View style={styles.priceLine}>
                 <Text style={[
                   styles.priceValue,
-                  isTablet ? styles.priceValueTablet : styles.priceValuePhone,
+                  isTablet && !isGuest && styles.priceValueTablet,
+                  !isTablet && !isGuest && styles.priceValuePhone,
+                  isGuest && styles.priceValueGuest,
                   !effectiveHasBottle && styles.priceValueUnavailable
                 ]}>
                   {bottlePrice}
                 </Text>
-                <Text style={styles.priceLabel}>{t('wine.bottle')}</Text>
+                <Text style={[styles.priceLabel, isGuest && styles.priceLabelGuest]}>{t('wine.bottle')}</Text>
               </View>
 
               <View
@@ -2021,12 +2167,14 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
               >
                 <Text style={[
                   styles.priceValue,
-                  isTablet ? styles.priceValueTablet : styles.priceValuePhone,
+                  isTablet && !isGuest && styles.priceValueTablet,
+                  !isTablet && !isGuest && styles.priceValuePhone,
+                  isGuest && styles.priceValueGuest,
                   !effectiveHasGlass && styles.priceValueUnavailable
                 ]}>
                   {glassPrice}
                 </Text>
-                <Text style={styles.priceLabel}>{t('wine.glass')}</Text>
+                <Text style={[styles.priceLabel, isGuest && styles.priceLabelGuest]}>{t('wine.glass')}</Text>
               </View>
             </View>
             
@@ -2056,22 +2204,26 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     const hasGlass = wine.available_by_glass && isValidPrice(wine.price_per_glass);
 
     return (
-    <View key={wine.id} style={{ width: carouselDimensions.ITEM_WIDTH }}>
-      <View style={[
-        styles.wineCard,
-        stableIsTablet && { minHeight: 540 } // Altura mínima mayor para tablet
-      ]}>
+    <View key={wine.id} style={{ width: carouselDimensions.ITEM_WIDTH }} onLayout={logCardLayout('itemWrapper')}>
+      <View
+        style={[
+          styles.wineCard,
+          stableIsTablet && !isGuest && { minHeight: 540 },
+          isGuest && { minHeight: stableIsTablet ? GUEST_CARD.cardMinHeightTablet : GUEST_CARD.cardMinHeight },
+        ]}
+        onLayout={logCardLayout('wineCard')}
+      >
         {/* Wrapper interno para recorte de esquinas redondeadas */}
-        <View style={styles.wineCardInnerClip}>
+        <View style={styles.wineCardInnerClip} onLayout={logCardLayout('wineCardInnerClip')}>
           {/* Contenedor principal dividido */}
-          <View style={styles.wineCardBody}>
+          <View style={styles.wineCardBody} onLayout={logCardLayout('wineCardBody')}>
         {/* Grid superior: Imagen izquierda + Sensorial derecha */}
-        <View style={styles.topGridRow}>
+        <View style={styles.topGridRow} onLayout={logCardLayout('topGridRow')}>
           {/* Lado izquierdo - Imagen */}
-          <WineImageBlock wine={wine} isTablet={stableIsTablet} />
+          <WineImageBlock wine={wine} isTablet={stableIsTablet} isGuest={isGuest} guestCard={GUEST_CARD} />
 
           {/* Lado derecho - Características sensoriales (ficha) */}
-          <WineSensoryBlock wine={wine} isTablet={stableIsTablet} />
+          <WineSensoryBlock wine={wine} isTablet={stableIsTablet} isGuest={isGuest} guestCard={GUEST_CARD} />
         </View>
 
         {/* Información principal del vino - Se expande para ocupar espacio disponible */}
@@ -2084,7 +2236,12 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                 source={backgroundImage}
                 resizeMode="cover"
                 imageStyle={{ opacity: 1 }}
-                style={styles.wineAdditionalInfo}
+                style={[
+                  styles.wineAdditionalInfo,
+                  stableIsTablet && !isGuest && { maxHeight: 300 },
+                  isGuest && { maxHeight: stableIsTablet ? GUEST_CARD.heroMaxHeightTablet : GUEST_CARD.heroMaxHeight },
+                ]}
+                onLayout={logCardLayout('wineAdditionalInfo')}
               >
                 {/* Overlay con gradiente para mejorar legibilidad del texto */}
                 <View style={StyleSheet.absoluteFillObject}>
@@ -2099,19 +2256,23 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                     style={StyleSheet.absoluteFillObject}
                   />
                 </View>
-                <View style={styles.wineAdditionalInfoContent}>
-                  <WineInfoBlock wine={wine} t={t} onOpenPairings={openPairingsModal} isTablet={stableIsTablet} />
+                <View style={styles.wineAdditionalInfoContent} onLayout={logCardLayout('wineAdditionalInfoContent')}>
+                  <WineInfoBlock wine={wine} t={t} onOpenPairings={openPairingsModal} isTablet={stableIsTablet} isGuest={isGuest} />
                 </View>
             </ImageBackground>
           );
         } else {
           return (
-            <View style={[
-              styles.wineAdditionalInfo,
-              stableIsTablet && { minHeight: 240 } // Altura mínima para tablet (reducida, sin maridaje embebido)
-            ]}>
-              <View style={styles.wineAdditionalInfoContent}>
-                <WineInfoBlock wine={wine} t={t} onOpenPairings={openPairingsModal} isTablet={stableIsTablet} />
+            <View
+              style={[
+                styles.wineAdditionalInfo,
+                stableIsTablet && !isGuest && { minHeight: 240, maxHeight: 300 },
+                isGuest && { maxHeight: stableIsTablet ? GUEST_CARD.heroMaxHeightTablet : GUEST_CARD.heroMaxHeight },
+              ]}
+              onLayout={logCardLayout('wineAdditionalInfo')}
+            >
+              <View style={styles.wineAdditionalInfoContent} onLayout={logCardLayout('wineAdditionalInfoContent')}>
+                <WineInfoBlock wine={wine} t={t} onOpenPairings={openPairingsModal} isTablet={stableIsTablet} isGuest={isGuest} />
               </View>
             </View>
           );
@@ -2119,22 +2280,24 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
       })()}
           </View>
 
-          <WinePricesBlock
-            wine={wine}
-            hasBottle={!!hasBottle}
-            hasGlass={!!hasGlass}
-            isGuest={isGuest}
-            user={user}
-            handleConfigGlassSaleMemo={handleConfigGlassSaleMemo}
-            t={t}
-            isTablet={stableIsTablet}
-          />
+          <View onLayout={logCardLayout('WinePricesBlock')}>
+            <WinePricesBlock
+              wine={wine}
+              hasBottle={!!hasBottle}
+              hasGlass={!!hasGlass}
+              isGuest={isGuest}
+              user={user}
+              handleConfigGlassSaleMemo={handleConfigGlassSaleMemo}
+              t={t}
+              isTablet={stableIsTablet}
+            />
+          </View>
         </View>
         {/* Fin del wrapper interno de recorte */}
       </View>
     </View>
     );
-  }, [stableIsTablet, carouselDimensions.ITEM_WIDTH, navigation, t, isGuest, user, handleConfigGlassSaleMemo, getWineCardBackground, renderSensoryProfile, insets, openPairingsModal]);
+  }, [stableIsTablet, carouselDimensions.ITEM_WIDTH, navigation, t, isGuest, user, handleConfigGlassSaleMemo, getWineCardBackground, renderSensoryProfile, insets, openPairingsModal, logCardLayout, GUEST_CARD]);
 
   // Crear renderCatalogItem memoizado
   const renderCatalogItem = useCallback(({ item }: { item: Wine | CocktailDrink }) => {
@@ -2851,6 +3014,7 @@ const styles = StyleSheet.create({
   wineCardBody: {
     flex: 1,
     minHeight: 0,
+    justifyContent: 'space-between',
   },
   bookIconButton: {
     position: 'absolute',
@@ -3067,10 +3231,11 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
   },
   // Footer compacto
-  // Información principal
+  // Información principal (hero). maxHeight evita que absorba todo el alto en pantallas grandes.
   wineAdditionalInfo: {
     flex: 1,
     minHeight: 0,
+    maxHeight: 260,
     overflow: 'hidden',
     position: 'relative',
     marginBottom: 0,
@@ -3080,6 +3245,7 @@ const styles = StyleSheet.create({
   },
   wineAdditionalInfoContent: {
     flex: 1,
+    justifyContent: 'center',
     padding: 16,
     paddingBottom: 4,
   },
@@ -3094,6 +3260,27 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 4,
   },
+  // Guest: ficha más alta para reducir área muerta y anclar mejor el botón Maridajes
+  wineInfoBlockContainerGuest: {
+    minHeight: 260,
+    justifyContent: 'space-between',
+  },
+  wineInfoBlockContentGuest: {
+    paddingVertical: 14,
+    paddingBottom: 36,
+  },
+  // Guest: tipografía más grande en ficha (variante menú comensal)
+  wineNameGuest: { fontSize: 22, lineHeight: 28 },
+  wineWineryGuest: { fontSize: 16, lineHeight: 22 },
+  wineCountryGuest: { fontSize: 15 },
+  wineGrapesInlineGuest: { fontSize: 15 },
+  wineVintageGuest: { fontSize: 16 },
+  abvBadgeGuest: { paddingVertical: 5, paddingHorizontal: 10 },
+  abvBadgeTextGuest: { fontSize: 12, fontWeight: '600' as const },
+  // Guest: footer de precios más presente
+  pricesContainerGuest: { paddingVertical: 12, paddingTop: 14, paddingBottom: 14 },
+  priceValueGuest: { fontSize: 20, lineHeight: 24 },
+  priceLabelGuest: { fontSize: 11 },
   // Overlay translúcido para legibilidad
   wineInfoBlockOverlay: {
     ...StyleSheet.absoluteFillObject,

@@ -8,8 +8,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-
-const GRADIENT_COLORS = ['#6D1F2B', '#8E2C3A'] as const;
+import { CELLARIUM, CELLARIUM_GRADIENT } from '../theme/cellariumTheme';
 
 export interface CocktailHeaderProps {
   title: string;
@@ -25,7 +24,7 @@ const CocktailHeader: React.FC<CocktailHeaderProps> = ({ title, subtitle, onAddP
 
   return (
     <LinearGradient
-      colors={GRADIENT_COLORS}
+      colors={[...CELLARIUM_GRADIENT]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 0 }}
       style={[styles.gradient, { paddingTop: Math.max(insets.top, 16) }]}
@@ -74,22 +73,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: CELLARIUM.textOnDark,
     marginBottom: 4,
     textAlign: 'center',
+    lineHeight: 30,
   },
   subtitle: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: CELLARIUM.textOnDarkMuted,
     textAlign: 'center',
   },
   addButton: {
     width: ADD_BUTTON_SIZE,
     height: ADD_BUTTON_SIZE,
     borderRadius: ADD_BUTTON_SIZE / 2,
-    backgroundColor: '#8E2C3A',
+    backgroundColor: CELLARIUM.chipActiveBg,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',

@@ -77,10 +77,10 @@ export default function AppNavigator() {
         component={QrGenerationScreen}
         options={{ headerShown: false }}
       />
-      <Stack.Screen 
-        name="BranchManagement" 
+      <Stack.Screen
+        name="BranchManagement"
         component={BranchManagementScreen}
-        options={{ title: 'Gestión de Sucursales' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen 
         name="WineManagement" 

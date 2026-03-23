@@ -8,7 +8,8 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -24,7 +25,32 @@ interface Props {
   route: { params: { examId: string } };
 }
 
+const CELLARIUM = {
+  primary: '#924048',
+  primaryDark: '#6f2f37',
+  primaryDarker: '#4e2228',
+  textOnDark: 'rgba(255,255,255,0.92)',
+  textOnDarkMuted: 'rgba(255,255,255,0.75)',
+  bg: '#F4F4F6',
+  card: '#FFFFFF',
+  muted: '#6A6A6A',
+  border: '#E5E5E8',
+} as const;
+
+const UI = {
+  screenPadding: 16,
+  headerHeight: 96,
+  headerHorizontalPadding: 20,
+  cardRadius: 18,
+  cardPadding: 16,
+  cardGap: 14,
+  buttonHeight: 50,
+  buttonRadius: 14,
+  primaryGradient: ['#4e2228', '#6f2f37', '#924048'] as const,
+} as const;
+
 const TastingExamResultsScreen: React.FC<Props> = ({ navigation, route }) => {
+  const insets = useSafeAreaInsets();
   const { examId } = route.params;
   const { user } = useAuth();
   const [exam, setExam] = useState<TastingExam | null>(null);
@@ -479,9 +505,9 @@ const TastingExamResultsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8B0000" />
+          <ActivityIndicator size="large" color={CELLARIUM.primary} />
           <Text style={styles.loadingText}>Cargando resultados...</Text>
         </View>
       </SafeAreaView>
@@ -490,7 +516,7 @@ const TastingExamResultsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   if (!exam) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>No se pudo cargar el examen</Text>
         </View>
@@ -499,27 +525,37 @@ const TastingExamResultsScreen: React.FC<Props> = ({ navigation, route }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Resultados del Examen</Text>
-        <Text style={styles.headerSubtitle}>{exam.name}</Text>
-        <Text style={styles.headerInfo}>
-          {responses.length} participante{responses.length !== 1 ? 's' : ''}
-        </Text>
-      </View>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <LinearGradient
+        colors={UI.primaryGradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.headerGradient}
+      >
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>Resultados del Examen</Text>
+          <Text style={styles.headerSubtitle} numberOfLines={1}>{exam.name}</Text>
+          <Text style={styles.headerInfo}>
+            {responses.length} participante{responses.length !== 1 ? 's' : ''}
+          </Text>
+        </View>
+      </LinearGradient>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Botón generar PDF */}
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) }}
+        showsVerticalScrollIndicator={false}
+      >
         <TouchableOpacity
           style={[styles.pdfButton, generatingPdf && styles.buttonDisabled]}
           onPress={generatePDF}
           disabled={generatingPdf || responses.length === 0}
+          activeOpacity={0.85}
         >
           {generatingPdf ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color="#fff" size="small" />
           ) : (
-            <Text style={styles.pdfButtonText}>📄 Generar PDF de Resultados</Text>
+            <Text style={styles.pdfButtonText}>Generar PDF de Resultados</Text>
           )}
         </TouchableOpacity>
 
@@ -658,7 +694,7 @@ const TastingExamResultsScreen: React.FC<Props> = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: CELLARIUM.bg,
   },
   loadingContainer: {
     flex: 1,
@@ -667,8 +703,8 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 12,
-    fontSize: 16,
-    color: '#666',
+    fontSize: 14,
+    color: CELLARIUM.muted,
   },
   errorContainer: {
     flex: 1,
@@ -678,44 +714,49 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 16,
-    color: '#dc3545',
+    color: '#b91c1c',
     textAlign: 'center',
   },
-  header: {
-    padding: 20,
-    backgroundColor: '#8B0000',
+  headerGradient: {
+    height: UI.headerHeight,
+    paddingHorizontal: UI.headerHorizontalPadding,
+    paddingBottom: 12,
+    justifyContent: 'flex-end',
+  },
+  headerCenter: {
     alignItems: 'center',
+    justifyContent: 'flex-end',
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 5,
+    fontSize: 26,
+    fontWeight: '700',
+    color: CELLARIUM.textOnDark,
     textAlign: 'center',
   },
   headerSubtitle: {
-    fontSize: 18,
-    color: '#fff',
-    opacity: 0.9,
-    marginBottom: 5,
+    fontSize: 17,
+    color: CELLARIUM.textOnDarkMuted,
+    marginTop: 2,
     textAlign: 'center',
   },
   headerInfo: {
-    fontSize: 14,
-    color: '#fff',
-    opacity: 0.8,
+    fontSize: 13,
+    color: CELLARIUM.textOnDarkMuted,
+    marginTop: 2,
+    opacity: 0.9,
     textAlign: 'center',
   },
   content: {
     flex: 1,
-    padding: 16,
+    padding: UI.screenPadding,
   },
   pdfButton: {
-    backgroundColor: '#8B0000',
-    borderRadius: 12,
-    paddingVertical: 14,
+    backgroundColor: CELLARIUM.primary,
+    borderRadius: UI.buttonRadius,
+    height: UI.buttonHeight,
     paddingHorizontal: 20,
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 20,
   },
   buttonDisabled: {
@@ -724,82 +765,90 @@ const styles = StyleSheet.create({
   pdfButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   emptyContainer: {
-    padding: 40,
+    padding: 32,
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
   },
   emptyText: {
-    fontSize: 18,
-    color: '#666',
+    fontSize: 17,
+    color: '#2C2C2C',
     marginBottom: 8,
     textAlign: 'center',
+    fontWeight: '600',
   },
   emptySubtext: {
     fontSize: 14,
-    color: '#999',
+    color: CELLARIUM.muted,
     textAlign: 'center',
   },
   responseCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: UI.cardRadius,
+    padding: UI.cardPadding,
+    marginBottom: UI.cardGap,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
     elevation: 3,
   },
   responseHeader: {
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: CELLARIUM.border,
     paddingBottom: 12,
     marginBottom: 12,
   },
   responseTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#2C2C2C',
     marginBottom: 4,
   },
   responseDate: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 13,
+    color: CELLARIUM.muted,
   },
   wineResponsesContainer: {
     marginTop: 12,
   },
   wineResponseCard: {
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: CELLARIUM.bg,
+    borderRadius: 14,
+    padding: 14,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: CELLARIUM.border,
   },
   wineName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#8B0000',
+    fontSize: 17,
+    fontWeight: '700',
+    color: CELLARIUM.primary,
     marginBottom: 12,
   },
   phaseSection: {
     marginBottom: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: CELLARIUM.border,
   },
   phaseTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
-    color: '#333',
+    color: '#2C2C2C',
     marginBottom: 8,
   },
   phaseItem: {
     fontSize: 14,
-    color: '#666',
+    color: CELLARIUM.muted,
     marginBottom: 4,
     lineHeight: 20,
   },
