@@ -18,6 +18,7 @@ import { parseQrLink } from '../utils/parseQrLink';
 import { consumePendingQrPayload } from '../utils/pendingQrPayload';
 import { StatusBar } from 'expo-status-bar';
 import CellariumLoader from '../components/CellariumLoader';
+import { captureCriticalError } from '../utils/sentryContext';
 
 /** Overlay de diagnóstico QR: desactivado; el comensal solo ve la copa y "Abriendo menú...". Para depurar usar logs en consola (__DEV__). */
 const QR_DEBUG_OVERLAY = false;
@@ -506,6 +507,11 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
       setMessage('Código no válido');
       setTimeout(() => navigation.navigate('Welcome'), 3000);
     } catch (error) {
+      captureCriticalError(error, {
+        feature: 'qr_processor',
+        screen: 'QrProcessor',
+        app_area: 'qr_guest',
+      });
       setDebug({ currentStep: 'error', finalError: trunc((error as Error)?.message, 30) });
       if (__DEV__) console.warn('[QrProcessor] error real: processQrCode exception', error);
       setStatus('error');

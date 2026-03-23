@@ -1,3 +1,5 @@
+import './src/utils/sentryInit';
+import * as Sentry from '@sentry/react-native';
 import React, { useEffect } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { NavigationContainer, LinkingOptions, useNavigationContainerRef } from '@react-navigation/native';
@@ -210,7 +212,7 @@ const AppContent: React.FC = () => {
   );
 };
 
-export default function App() {
+function App() {
   const [fontsLoaded] = useFonts({
     Cormorant_600SemiBold_Italic,
   });
@@ -239,3 +241,5 @@ export default function App() {
     </GestureHandlerRootView>
   );
 }
+
+export default Sentry.wrap(App);

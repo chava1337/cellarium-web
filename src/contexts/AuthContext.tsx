@@ -3,6 +3,7 @@ import { User, AuthContextType, UserDataStatus, Branch, normalizeRole } from '..
 import { supabase } from '../lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import { withTimeout, TimeoutError } from '../utils/withTimeout';
+import { captureCriticalError, clearSentryUserContext, setSentryUserContext } from '../utils/sentryContext';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -309,6 +310,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           setLoading(false);
         } catch (err) {
           if (__DEV__) console.warn('[Auth] onAuthStateChange error', err);
+          captureCriticalError(err, {
+            feature: 'auth_bootstrap',
+            app_area: 'auth',
+          });
           await forcedSignOut();
         } finally {
           setLoading(false);
@@ -623,10 +628,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       await loadUserData(session.user);
     } catch (err) {
       if (__DEV__) console.warn('[Auth] refreshUserData error', err);
+      captureCriticalError(err, {
+        feature: 'auth_bootstrap',
+        app_area: 'auth',
+      });
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (userDataStatus === 'ok' && user) {
+      setSentryUserContext(user);
+    } else if (!user) {
+      clearSentryUserContext();
+    }
+  }, [user, userDataStatus]);
 
   const refreshUser = async () => {
     try {
@@ -676,6 +693,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       });
     } catch (error) {
       if (__DEV__) console.warn('[refreshUser]', (error as Error)?.message);
+      captureCriticalError(error, {
+        feature: 'auth_bootstrap',
+        app_area: 'auth',
+      });
     }
   };
 

@@ -29,6 +29,7 @@ import { RootStackParamList } from '../types';
 import { canGenerateGuestQr, canGenerateAdminInviteQr } from '../utils/permissions';
 import { isSensitiveAllowed } from '../utils/sensitiveActionGating';
 import { CELLARIUM } from '../theme/cellariumTheme';
+import { captureCriticalError, sentryFlowBreadcrumb } from '../utils/sentryContext';
 
 interface QrData {
   id: string;
@@ -288,6 +289,10 @@ const QrGenerationScreen: React.FC = () => {
     }
 
     setSharingImage(true);
+    sentryFlowBreadcrumb('qr_share_image_start', {
+      qr_type: selectedQr.type,
+      branch_id: user?.branch_id ?? currentBranch?.id ?? 'none',
+    });
     try {
       let fileUri: string | null = null;
 
@@ -341,7 +346,11 @@ const QrGenerationScreen: React.FC = () => {
       });
 
       try {
-        if (fileUri?.startsWith(FileSystem.cacheDirectory)) {
+        if (
+          fileUri &&
+          FileSystem.cacheDirectory &&
+          fileUri.startsWith(FileSystem.cacheDirectory)
+        ) {
           await FileSystem.deleteAsync(fileUri, { idempotent: true });
         }
       } catch (_) {}
@@ -349,6 +358,13 @@ const QrGenerationScreen: React.FC = () => {
       if (error?.message === 'User did not share') {
         return;
       }
+      captureCriticalError(error, {
+        feature: 'qr_share_image',
+        screen: 'QrGeneration',
+        app_area: 'qr',
+        branch_id: user?.branch_id ?? currentBranch?.id ?? 'none',
+        qr_type: selectedQr.type,
+      });
       setQrUrlToShare(qrUrl);
       setShareModalVisible(true);
       Alert.alert(

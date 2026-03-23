@@ -1,8 +1,167 @@
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { InventoryItem, InventoryStats, EstimatedSalesRow, SalesFromCountsRow, SalesFromCountsSummary, BranchComparisonRow, BranchComparisonSummary } from './InventoryService';
 import { WineMetrics, BranchMetrics } from './AnalyticsService';
 import { isValidPrice, formatCurrencyMXN } from '../utils/wineCatalogUtils';
+import { captureCriticalError, sentryFlowBreadcrumb } from '../utils/sentryContext';
+
+/**
+ * CSS compartido para PDF vía expo-print (WebKit). Objetivos: A4, KPIs estables, tablas legibles.
+ * Grid evitado en KPIs (flex + wrap); thead repetible donde el motor lo soporte.
+ */
+const REPORT_PRINT_CSS = `
+  @page { size: A4; margin: 12mm 14mm; }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+    font-size: 10pt;
+    line-height: 1.4;
+    color: #1a1a1a;
+    margin: 0;
+    padding: 0;
+  }
+  .doc-topbar {
+    height: 4px;
+    background: #8B0000;
+    margin: 0 0 14px 0;
+    page-break-after: avoid;
+  }
+  .report-header {
+    page-break-after: avoid;
+    page-break-inside: avoid;
+    margin-bottom: 18px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #e5e5e5;
+  }
+  .report-header h1 {
+    margin: 0 0 6px 0;
+    font-size: 17pt;
+    font-weight: 700;
+    color: #8B0000;
+    letter-spacing: -0.02em;
+  }
+  .report-header .meta {
+    margin: 4px 0 0 0;
+    font-size: 9.5pt;
+    color: #444;
+  }
+  .report-header .meta strong { color: #222; }
+  .section-title {
+    margin: 20px 0 10px 0;
+    font-size: 11pt;
+    font-weight: 700;
+    color: #333;
+    page-break-after: avoid;
+  }
+  .kpi-block {
+    background: #f7f7f8;
+    border: 1px solid #e8e8e8;
+    border-radius: 4px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    page-break-inside: avoid;
+  }
+  .kpi-block h2 {
+    margin: 0 0 10px 0;
+    font-size: 10pt;
+    font-weight: 700;
+    color: #444;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .kpi-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .kpi {
+    flex: 1 1 28%;
+    min-width: 110px;
+    border: 1px solid #ddd;
+    border-left: 3px solid #8B0000;
+    padding: 10px 12px;
+    background: #fff;
+    text-align: center;
+    page-break-inside: avoid;
+  }
+  .kpi-row.kpi-row-4 .kpi { flex: 1 1 21%; min-width: 100px; }
+  .kpi-stack .kpi {
+    flex: none;
+    width: 100%;
+    text-align: left;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+  .kpi-stack .kpi .stat-label { text-align: left; margin-bottom: 0; flex-shrink: 0; }
+  .kpi-stack .kpi .stat-value {
+    text-align: right;
+    max-width: 58%;
+    word-break: break-word;
+    font-size: 11pt;
+    font-weight: 600;
+    color: #333;
+  }
+  .kpi-stack .kpi .stat-value.emphasis {
+    color: #8B0000;
+    font-size: 14pt;
+    font-weight: 700;
+  }
+  .stat-value {
+    font-size: 14pt;
+    font-weight: 700;
+    color: #8B0000;
+    line-height: 1.2;
+  }
+  .stat-label {
+    font-size: 8pt;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-top: 4px;
+  }
+  .header-note { font-size: 9pt; color: #666; margin-top: 8px; font-style: italic; }
+  .note-inline { margin-top: 10px; font-size: 9pt; color: #555; }
+  table.report-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+    font-size: 9pt;
+  }
+  table.report-table thead { display: table-header-group; }
+  table.report-table tfoot { display: table-footer-group; }
+  table.report-table th {
+    background: #8B0000;
+    color: #fff;
+    padding: 8px 6px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 8.5pt;
+    border: 1px solid #6d0000;
+  }
+  table.report-table td {
+    padding: 7px 6px;
+    border: 1px solid #ddd;
+    vertical-align: top;
+  }
+  table.report-table tbody tr:nth-child(even) { background: #fafafa; }
+  table.report-table tbody tr { page-break-inside: avoid; }
+  table.report-table.table-tight td { font-size: 8.5pt; padding: 5px 4px; }
+  .low-stock { color: #b00020; font-weight: 600; }
+  .wine-sub { display: block; font-size: 8.5pt; color: #555; margin-top: 2px; font-weight: normal; }
+  .doc-footer {
+    margin-top: 22px;
+    padding-top: 10px;
+    border-top: 1px solid #e5e5e5;
+    text-align: center;
+    font-size: 8pt;
+    color: #888;
+    page-break-inside: avoid;
+  }
+`;
 
 /**
  * Reportes: HTML como plantilla → PDF binario vía expo-print → compartir con expo-sharing.
@@ -27,116 +186,47 @@ export class PDFReportService {
       <html>
       <head>
         <meta charset="UTF-8">
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            padding: 20px;
-            color: #333;
-          }
-          h1 {
-            color: #8B0000;
-            border-bottom: 3px solid #8B0000;
-            padding-bottom: 10px;
-          }
-          h2 {
-            color: #555;
-            margin-top: 30px;
-          }
-          .header {
-            text-align: center;
-            margin-bottom: 30px;
-          }
-          .stats {
-            background-color: #f5f5f5;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-          }
-          .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-          }
-          .stat-item {
-            text-align: center;
-          }
-          .stat-value {
-            font-size: 24px;
-            font-weight: bold;
-            color: #8B0000;
-          }
-          .stat-label {
-            font-size: 12px;
-            color: #666;
-            text-transform: uppercase;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-          }
-          th {
-            background-color: #8B0000;
-            color: white;
-            padding: 12px;
-            text-align: left;
-          }
-          td {
-            padding: 10px;
-            border-bottom: 1px solid #ddd;
-          }
-          tr:nth-child(even) {
-            background-color: #f9f9f9;
-          }
-          .low-stock {
-            color: #dc3545;
-            font-weight: bold;
-          }
-          .footer {
-            margin-top: 40px;
-            text-align: center;
-            color: #999;
-            font-size: 12px;
-          }
-        </style>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>${REPORT_PRINT_CSS}</style>
       </head>
       <body>
-        <div class="header">
-          <h1>🍷 Reporte de Inventario</h1>
-          <p><strong>Sucursal:</strong> ${branchName}</p>
-          <p><strong>Fecha:</strong> ${date}</p>
+        <div class="doc-topbar"></div>
+        <div class="report-header">
+          <h1>Reporte de inventario</h1>
+          <p class="meta"><strong>Sucursal:</strong> ${branchName}</p>
+          <p class="meta"><strong>Fecha:</strong> ${date}</p>
         </div>
 
         ${stats ? `
-        <div class="stats">
-          <h2>Resumen General</h2>
-          <div class="stats-grid">
-            <div class="stat-item">
+        <div class="kpi-block">
+          <h2>Resumen general</h2>
+          <div class="kpi-row">
+            <div class="kpi">
               <div class="stat-value">${stats.totalWines}</div>
-              <div class="stat-label">Vinos en Catálogo</div>
+              <div class="stat-label">Vinos en catálogo</div>
             </div>
-            <div class="stat-item">
+            <div class="kpi">
               <div class="stat-value">${stats.totalBottles}</div>
-              <div class="stat-label">Botellas Totales</div>
+              <div class="stat-label">Botellas totales</div>
             </div>
-            <div class="stat-item">
+            <div class="kpi">
               <div class="stat-value">${stats.totalValue > 0 ? `$${stats.totalValue.toFixed(2)}` : '—'}</div>
-              <div class="stat-label">Valor Total</div>
+              <div class="stat-label">Valor total</div>
             </div>
           </div>
         </div>
         ` : ''}
 
-        <h2>Detalle de Inventario</h2>
-        <table>
+        <h2 class="section-title">Detalle de inventario</h2>
+        <table class="report-table">
           <thead>
             <tr>
               <th>Vino</th>
               <th>País</th>
               <th>Stock</th>
-              <th>Precio Copa</th>
-              <th>Precio Botella</th>
-              <th>Valor Total</th>
+              <th>Precio copa</th>
+              <th>Precio botella</th>
+              <th>Valor total</th>
             </tr>
           </thead>
           <tbody>
@@ -149,13 +239,12 @@ export class PDFReportService {
               return `
               <tr>
                 <td>
-                  <strong>${item.wines.name}</strong><br>
-                  <small>${item.wines.grape_variety}</small>
+                  <strong>${item.wines.name}</strong>
+                  <span class="wine-sub">${item.wines.grape_variety ?? ''}</span>
                 </td>
                 <td>${item.wines.country}</td>
                 <td ${item.stock_quantity < 5 ? 'class="low-stock"' : ''}>
-                  ${item.stock_quantity} botellas
-                  ${item.stock_quantity < 5 ? '⚠️' : ''}
+                  ${item.stock_quantity} botellas${item.stock_quantity < 5 ? ' (bajo)' : ''}
                 </td>
                 <td>${glassDisplay}</td>
                 <td>${bottleDisplay}</td>
@@ -166,8 +255,8 @@ export class PDFReportService {
           </tbody>
         </table>
 
-        <div class="footer">
-          <p>Generado por Cellarium - Sistema de Gestión de Vinos</p>
+        <div class="doc-footer">
+          <p>Cellarium · Sistema de gestión de vinos</p>
           <p>${new Date().toLocaleString('es-ES')}</p>
         </div>
       </body>
@@ -200,110 +289,45 @@ export class PDFReportService {
       <html>
       <head>
         <meta charset="UTF-8">
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            padding: 20px;
-            color: #333;
-          }
-          h1 {
-            color: #8B0000;
-            border-bottom: 3px solid #8B0000;
-            padding-bottom: 10px;
-          }
-          h2 {
-            color: #555;
-            margin-top: 30px;
-          }
-          .header {
-            text-align: center;
-            margin-bottom: 30px;
-          }
-          .stats {
-            background-color: #f5f5f5;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-          }
-          .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-          }
-          .stat-item {
-            text-align: center;
-          }
-          .stat-value {
-            font-size: 24px;
-            font-weight: bold;
-            color: #8B0000;
-          }
-          .stat-label {
-            font-size: 12px;
-            color: #666;
-            text-transform: uppercase;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-          }
-          th {
-            background-color: #8B0000;
-            color: white;
-            padding: 12px;
-            text-align: left;
-          }
-          td {
-            padding: 10px;
-            border-bottom: 1px solid #ddd;
-          }
-          tr:nth-child(even) {
-            background-color: #f9f9f9;
-          }
-          .footer {
-            margin-top: 40px;
-            text-align: center;
-            color: #999;
-            font-size: 12px;
-          }
-        </style>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>${REPORT_PRINT_CSS}</style>
       </head>
       <body>
-        <div class="header">
-          <h1>📊 Reporte de Análisis de Ventas</h1>
-          <p><strong>Sucursal:</strong> ${branchName}</p>
-          <p><strong>Fecha:</strong> ${date}</p>
+        <div class="doc-topbar"></div>
+        <div class="report-header">
+          <h1>Análisis de ventas</h1>
+          <p class="meta"><strong>Sucursal:</strong> ${branchName}</p>
+          <p class="meta"><strong>Fecha:</strong> ${date}</p>
         </div>
 
-        <div class="stats">
-          <h2>Métricas Generales</h2>
-          <div class="stats-grid">
-            <div class="stat-item">
+        <div class="kpi-block">
+          <h2>Métricas generales</h2>
+          <div class="kpi-row">
+            <div class="kpi">
               <div class="stat-value">$${metrics.total_revenue.toFixed(2)}</div>
-              <div class="stat-label">Ingresos Totales</div>
+              <div class="stat-label">Ingresos totales</div>
             </div>
-            <div class="stat-item">
+            <div class="kpi">
               <div class="stat-value">${metrics.total_sales}</div>
-              <div class="stat-label">Ventas Totales</div>
+              <div class="stat-label">Ventas totales</div>
             </div>
-            <div class="stat-item">
+            <div class="kpi">
               <div class="stat-value">${metrics.unique_wines_sold}</div>
-              <div class="stat-label">Vinos Vendidos</div>
+              <div class="stat-label">Vinos vendidos</div>
             </div>
           </div>
         </div>
 
-        <h2>Top 10 Vinos Más Vendidos</h2>
-        <table>
+        <h2 class="section-title">Top 10 vinos más vendidos</h2>
+        <table class="report-table">
           <thead>
             <tr>
-              <th>Posición</th>
+              <th>#</th>
               <th>Vino</th>
               <th>País</th>
               <th>Ventas</th>
               <th>Ingresos</th>
-              <th>Precio Promedio</th>
+              <th>Precio prom.</th>
             </tr>
           </thead>
           <tbody>
@@ -311,11 +335,11 @@ export class PDFReportService {
               <tr>
                 <td><strong>${index + 1}</strong></td>
                 <td>
-                  <strong>${wine.wine_name}</strong><br>
-                  <small>${wine.grape_variety}</small>
+                  <strong>${wine.wine_name}</strong>
+                  <span class="wine-sub">${wine.grape_variety ?? ''}</span>
                 </td>
                 <td>${wine.country}</td>
-                <td>${wine.total_sales} unidades</td>
+                <td>${wine.total_sales} u.</td>
                 <td>$${wine.total_revenue.toFixed(2)}</td>
                 <td>$${wine.avg_price.toFixed(2)}</td>
               </tr>
@@ -323,8 +347,8 @@ export class PDFReportService {
           </tbody>
         </table>
 
-        <div class="footer">
-          <p>Generado por Cellarium - Sistema de Gestión de Vinos</p>
+        <div class="doc-footer">
+          <p>Cellarium · Sistema de gestión de vinos</p>
           <p>${new Date().toLocaleString('es-ES')}</p>
         </div>
       </body>
@@ -338,24 +362,51 @@ export class PDFReportService {
    * Renderiza HTML a PDF con expo-print y comparte el archivo (mismo HTML que los generadores).
    */
   static async printHtmlAndSharePdf(html: string, filenameBase: string): Promise<void> {
+    sentryFlowBreadcrumb('pdf_export_start', { filename_base: filenameBase });
     try {
       const { uri } = await Print.printToFileAsync({
         html,
         base64: false,
       });
 
+      const safeBase =
+        filenameBase
+          .replace(/[^a-zA-Z0-9._-]+/g, '_')
+          .replace(/_+/g, '_')
+          .replace(/^_|_$/g, '') || 'cellarium_report';
+      const truncated = safeBase.length > 80 ? safeBase.slice(0, 80) : safeBase;
+      const destUri = `${FileSystem.documentDirectory}${truncated}.pdf`;
+
+      let shareUri = uri;
+      try {
+        const existing = await FileSystem.getInfoAsync(destUri);
+        if (existing.exists) {
+          await FileSystem.deleteAsync(destUri, { idempotent: true });
+        }
+        await FileSystem.copyAsync({ from: uri, to: destUri });
+        shareUri = destUri;
+      } catch {
+        /* expo-print ya dejó un PDF válido en cache; compartimos ese URI si la copia falla */
+      }
+
       const canShare = await Sharing.isAvailableAsync();
       if (!canShare) {
         throw new Error('Compartir no está disponible en este dispositivo');
       }
 
-      await Sharing.shareAsync(uri, {
+      await Sharing.shareAsync(shareUri, {
         mimeType: 'application/pdf',
-        dialogTitle: `Compartir reporte · ${filenameBase}`,
+        dialogTitle: `Compartir reporte · ${truncated}`,
         UTI: 'com.adobe.pdf',
       });
     } catch (error) {
       if (__DEV__) console.error('Error generating/sharing PDF report:', error);
+      captureCriticalError(error, {
+        feature: 'pdf_export',
+        screen: 'PDFReportService',
+        app_area: 'reports',
+        filename_base: filenameBase,
+      });
       throw error;
     }
   }
@@ -397,49 +448,36 @@ export class PDFReportService {
       <html>
       <head>
         <meta charset="UTF-8">
-        <style>
-          body { font-family: Arial, sans-serif; padding: 20px; color: #333; }
-          h1 { color: #8B0000; border-bottom: 3px solid #8B0000; padding-bottom: 10px; }
-          h2 { color: #555; margin-top: 24px; }
-          .header { text-align: center; margin-bottom: 24px; }
-          .stats { background-color: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-          .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
-          .stat-item { text-align: center; }
-          .stat-value { font-size: 22px; font-weight: bold; color: #8B0000; }
-          .stat-label { font-size: 12px; color: #666; text-transform: uppercase; }
-          table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-          th { background-color: #8B0000; color: white; padding: 10px; text-align: left; }
-          td { padding: 8px; border-bottom: 1px solid #ddd; }
-          tr:nth-child(even) { background-color: #f9f9f9; }
-          .footer { margin-top: 32px; text-align: center; color: #999; font-size: 12px; }
-        </style>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>${REPORT_PRINT_CSS}</style>
       </head>
       <body>
-        <div class="header">
-          <h1>📊 Reporte de Ventas Estimadas</h1>
-          <p><strong>Sucursal:</strong> ${branchName}</p>
-          <p><strong>Periodo:</strong> ${period.label}</p>
-          <p><strong>Generado:</strong> ${date}</p>
+        <div class="doc-topbar"></div>
+        <div class="report-header">
+          <h1>Ventas estimadas</h1>
+          <p class="meta"><strong>Sucursal:</strong> ${branchName}</p>
+          <p class="meta"><strong>Periodo:</strong> ${period.label}</p>
+          <p class="meta"><strong>Generado:</strong> ${date}</p>
         </div>
-        <div class="stats">
+        <div class="kpi-block">
           <h2>Resumen</h2>
-          <div class="stats-grid">
-            <div class="stat-item">
+          <div class="kpi-row">
+            <div class="kpi">
               <div class="stat-value">${summary.total_sold_estimated}</div>
               <div class="stat-label">Botellas vendidas (est.)</div>
             </div>
-            <div class="stat-item">
+            <div class="kpi">
               <div class="stat-value">${summary.total_revenue_estimated != null ? `$${summary.total_revenue_estimated.toFixed(2)}` : '—'}</div>
               <div class="stat-label">Ingresos estimados</div>
             </div>
-            <div class="stat-item">
+            <div class="kpi">
               <div class="stat-value">${summary.total_received}</div>
               <div class="stat-label">Botellas recibidas</div>
             </div>
           </div>
         </div>
-        <h2>Detalle por vino</h2>
-        <table>
+        <h2 class="section-title">Detalle por vino</h2>
+        <table class="report-table">
           <thead>
             <tr>
               <th>Vino</th>
@@ -461,8 +499,8 @@ export class PDFReportService {
             `).join('')}
           </tbody>
         </table>
-        <div class="footer">
-          <p>Generado por Cellarium - Ventas estimadas a partir de conteos físicos</p>
+        <div class="doc-footer">
+          <p>Cellarium · Ventas estimadas a partir de conteos físicos</p>
         </div>
       </body>
       </html>
@@ -512,78 +550,64 @@ export class PDFReportService {
       <html>
       <head>
         <meta charset="UTF-8">
-        <style>
-          body { font-family: Arial, sans-serif; padding: 20px; color: #333; }
-          h1 { color: #8B0000; border-bottom: 3px solid #8B0000; padding-bottom: 10px; }
-          h2 { color: #555; margin-top: 24px; }
-          .header { text-align: center; margin-bottom: 24px; }
-          .header-note { font-size: 12px; color: #666; margin-top: 8px; font-style: italic; }
-          .stats { background-color: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-          .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
-          .stat-item { text-align: center; }
-          .stat-value { font-size: 18px; font-weight: bold; color: #8B0000; white-space: nowrap; }
-          .stat-label { font-size: 12px; color: #666; text-transform: uppercase; }
-          table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-          th { background-color: #8B0000; color: white; padding: 10px; text-align: left; }
-          td { padding: 8px; border-bottom: 1px solid #ddd; white-space: nowrap; }
-          tr:nth-child(even) { background-color: #f9f9f9; }
-          .footer { margin-top: 32px; text-align: center; color: #999; font-size: 12px; }
-        </style>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>${REPORT_PRINT_CSS}</style>
       </head>
       <body>
-        <div class="header">
-          <h1>Reporte de Ventas estimadas</h1>
-          <p><strong>Sucursal:</strong> ${branchName}</p>
-          <p><strong>Periodo:</strong> ${period.label}</p>
-          <p><strong>Conteo inicial:</strong> ${startAt} &nbsp; <strong>Conteo final:</strong> ${endAt}</p>
+        <div class="doc-topbar"></div>
+        <div class="report-header">
+          <h1>Ventas estimadas (cortes)</h1>
+          <p class="meta"><strong>Sucursal:</strong> ${branchName}</p>
+          <p class="meta"><strong>Periodo:</strong> ${period.label}</p>
+          <p class="meta"><strong>Conteo inicial:</strong> ${startAt} · <strong>Conteo final:</strong> ${endAt}</p>
           <p class="header-note">Estimado con base en cortes físicos y movimientos registrados.</p>
-          <p><strong>Generado:</strong> ${date}</p>
+          <p class="meta"><strong>Generado:</strong> ${date}</p>
         </div>
-        <div class="stats">
+        <div class="kpi-block">
           <h2>Resumen</h2>
-          <div class="stats-grid">
-            <div class="stat-item">
+          <div class="kpi-row kpi-row-4">
+            <div class="kpi">
               <div class="stat-value">${summary.total_sold_estimated}</div>
               <div class="stat-label">Consumo estimado</div>
             </div>
-            <div class="stat-item">
+            <div class="kpi">
               <div class="stat-value">${revenueStr}</div>
               <div class="stat-label">Ingresos estimados</div>
             </div>
-            <div class="stat-item">
+            <div class="kpi">
               <div class="stat-value">${summary.total_entries}</div>
               <div class="stat-label">Entradas</div>
             </div>
-            <div class="stat-item">
+            <div class="kpi">
               <div class="stat-value">${summary.total_special_outs}</div>
               <div class="stat-label">Salidas especiales</div>
             </div>
           </div>
           ${unpricedTotal > 0 || unpricedCount > 0 ? `
-          <p style="margin-top: 12px; font-size: 12px; color: #666;">
-            <strong>Consumo sin precio configurado:</strong> ${unpricedTotal} botellas
-            ${unpricedCount > 0 ? ` &nbsp;|&nbsp; <strong>Vinos sin precio configurado:</strong> ${unpricedCount}` : ''}
+          <p class="note-inline">
+            <strong>Consumo sin precio:</strong> ${unpricedTotal} botellas
+            ${unpricedCount > 0 ? ` · <strong>Vinos sin precio:</strong> ${unpricedCount}` : ''}
           </p>
           ` : ''}
         </div>
-        <h2>Detalle por vino</h2>
-        <table>
+        <h2 class="section-title">Detalle por vino</h2>
+        <table class="report-table table-tight">
           <thead>
             <tr>
               <th>Vino</th>
-              <th>Stock inicio</th>
-              <th>Entradas</th>
-              <th>Salidas especiales</th>
-              <th>Stock fin</th>
-              <th>Consumo estimado</th>
-              <th>Ingresos estimados</th>
+              <th>St. ini.</th>
+              <th>Entr.</th>
+              <th>Sal. esp.</th>
+              <th>St. fin</th>
+              <th>Consumo</th>
+              <th>Ingresos</th>
             </tr>
           </thead>
           <tbody>
             ${rows.map((r) => {
               const hasPrice = r.revenue_estimated != null && isValidPrice(r.revenue_estimated);
               const revStr = hasPrice ? formatCurrencyMXN(r.revenue_estimated!) : '—';
-              const revCell = hasPrice ? revStr : (r.sold_estimated > 0 ? '— (Sin precio)' : '—');
+              const revCell = hasPrice ? revStr : (r.sold_estimated > 0 ? '— (s/p)' : '—');
               return `
               <tr>
                 <td>${r.wine_name}</td>
@@ -598,8 +622,8 @@ export class PDFReportService {
             }).join('')}
           </tbody>
         </table>
-        <div class="footer">
-          <p>Generado por Cellarium - Ventas estimadas con base en cortes físicos y movimientos registrados</p>
+        <div class="doc-footer">
+          <p>Cellarium · Ventas estimadas (cortes físicos)</p>
         </div>
       </body>
       </html>
@@ -664,58 +688,47 @@ export class PDFReportService {
       <html>
       <head>
         <meta charset="UTF-8">
-        <style>
-          body { font-family: Arial, sans-serif; padding: 20px; color: #333; }
-          h1 { color: #8B0000; border-bottom: 3px solid #8B0000; padding-bottom: 10px; }
-          h2 { color: #555; margin-top: 24px; }
-          .header { text-align: center; margin-bottom: 24px; }
-          .header-note { font-size: 12px; color: #666; margin-top: 8px; font-style: italic; }
-          .stats { background-color: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-          .stat-item { text-align: center; margin-bottom: 8px; }
-          .stat-value { font-size: 18px; font-weight: bold; color: #8B0000; }
-          .stat-label { font-size: 12px; color: #666; text-transform: uppercase; }
-          table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-          th { background-color: #8B0000; color: white; padding: 10px; text-align: left; font-size: 12px; }
-          td { padding: 8px; border-bottom: 1px solid #ddd; font-size: 12px; }
-          tr:nth-child(even) { background-color: #f9f9f9; }
-          .footer { margin-top: 32px; text-align: center; color: #999; font-size: 12px; }
-        </style>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>${REPORT_PRINT_CSS}</style>
       </head>
       <body>
-        <div class="header">
-          <h1>Reporte comparativo entre sucursales</h1>
-          <p><strong>Periodo:</strong> ${period.label}</p>
+        <div class="doc-topbar"></div>
+        <div class="report-header">
+          <h1>Comparativo entre sucursales</h1>
+          <p class="meta"><strong>Periodo:</strong> ${period.label}</p>
           <p class="header-note">Estimado con base en cortes físicos y movimientos registrados.</p>
-          <p><strong>Generado:</strong> ${date}</p>
+          <p class="meta"><strong>Generado:</strong> ${date}</p>
         </div>
-        <div class="stats">
+        <div class="kpi-block">
           <h2>Resumen</h2>
-          <div class="stat-item">
-            <span class="stat-label">Mejor sucursal</span>
-            <div class="stat-value">${summary.best_branch}</div>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">A mejorar</span>
-            <div class="stat-value">${summary.worst_branch}</div>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">Ingresos estimados totales</span>
-            <div class="stat-value">${revenueStr}</div>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">Consumo estimado total</span>
-            <div class="stat-value">${summary.total_consumption_estimated}</div>
+          <div class="kpi-row kpi-stack">
+            <div class="kpi">
+              <span class="stat-label">Mejor sucursal</span>
+              <div class="stat-value">${summary.best_branch}</div>
+            </div>
+            <div class="kpi">
+              <span class="stat-label">A mejorar</span>
+              <div class="stat-value">${summary.worst_branch}</div>
+            </div>
+            <div class="kpi">
+              <span class="stat-label">Ingresos estimados totales</span>
+              <div class="stat-value emphasis">${revenueStr}</div>
+            </div>
+            <div class="kpi">
+              <span class="stat-label">Consumo estimado total</span>
+              <div class="stat-value emphasis">${summary.total_consumption_estimated}</div>
+            </div>
           </div>
         </div>
-        <h2>Detalle por sucursal</h2>
-        <table>
+        <h2 class="section-title">Detalle por sucursal</h2>
+        <table class="report-table table-tight">
           <thead>
             <tr>
               <th>#</th>
               <th>Sucursal</th>
-              <th>Ingresos est.</th>
-              <th>Consumo est.</th>
-              <th>Contribución</th>
+              <th>Ing. est.</th>
+              <th>Cons.</th>
+              <th>%</th>
               <th>Más movido</th>
               <th>Menos movido</th>
               <th>Notas</th>
@@ -725,8 +738,8 @@ export class PDFReportService {
             ${rowsHtml}
           </tbody>
         </table>
-        <div class="footer">
-          <p>Generado por Cellarium - Comparativo con base en cortes físicos y movimientos registrados</p>
+        <div class="doc-footer">
+          <p>Cellarium · Comparativo (cortes físicos)</p>
         </div>
       </body>
       </html>

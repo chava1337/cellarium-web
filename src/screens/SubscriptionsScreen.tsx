@@ -24,6 +24,7 @@ import { log } from '../utils/logger';
 import { getEffectivePlan, isBusiness } from '../utils/effectivePlan';
 import { isSensitiveAllowed } from '../utils/sensitiveActionGating';
 import CellariumLoader from '../components/CellariumLoader';
+import { captureCriticalError, sentryFlowBreadcrumb } from '../utils/sentryContext';
 
 // Paleta y layout alineados con Catálogo Cellarium
 const PALETTE = {
@@ -894,6 +895,11 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
               await refreshUserWithBackoffUntilUpdated(expectedPlan);
             } catch (error: any) {
               if (__DEV__) console.error('Error en suscripción:', error);
+              captureCriticalError(error, {
+                feature: 'stripe_checkout',
+                screen: 'Subscriptions',
+                app_area: 'billing',
+              });
               Alert.alert(t('msg.error'), t('subscription.error_generic'));
             } finally {
               setLoadingAction(null);
@@ -919,6 +925,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     try {
       setLoadingAction('open-portal');
+      sentryFlowBreadcrumb('stripe_portal_start', {});
       const { data, error } = await invokeAuthedFunction<{ url: string }>(
         'create-portal-session',
         {}
@@ -960,6 +967,11 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       }
     } catch (error: any) {
       if (__DEV__) console.error('Error en portal:', error);
+      captureCriticalError(error, {
+        feature: 'stripe_customer_portal',
+        screen: 'Subscriptions',
+        app_area: 'billing',
+      });
       Alert.alert(t('msg.error'), t('subscription.error_generic'));
     } finally {
       setLoadingAction(null);

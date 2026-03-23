@@ -6,7 +6,12 @@ const STRIPE_PLUGIN = [
     enableGooglePay: true,
   },
 ];
-const OTHER_PLUGINS = ["expo-font", "expo-secure-store", "expo-web-browser"];
+const OTHER_PLUGINS = [
+  "expo-font",
+  "expo-secure-store",
+  "expo-web-browser",
+  "@sentry/react-native",
+];
 
 // Icono principal (App Store, Play Store legacy, etc.): PNG 1024x1024.
 const config = {
@@ -108,6 +113,8 @@ const config = {
     extra: {
       appStoreUrl: "https://apps.apple.com/app/cellarium/id123456789",
       playStoreUrl: "https://play.google.com/store/apps/details?id=com.cellarium.winecatalog",
+      /** Inyectado en build (EAS); alternativa: EXPO_PUBLIC_SENTRY_DSN en .env */
+      sentryDsn: process.env.EXPO_PUBLIC_SENTRY_DSN || "",
       eas: {
         projectId: "d69705be-f13a-4241-be49-0cbe7a34d8d9"
       }
