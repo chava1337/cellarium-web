@@ -4,7 +4,7 @@ import { getEffectivePlan } from './effectivePlan';
 /**
  * Reglas de negocio:
  * - Plan efectivo 'additional-branch' = Business (incluye 3 sucursales base); usa getEffectivePlan (active + no expirado).
- * - subscription_branch_addons_count = add-ons comprados.
+ * - subscription_branch_addons_count = add-ons comprados (solo cuentan con plan efectivo Business).
  * - limit = included + addons.
  * Comprar add-on NO crea una branch; solo aumenta el límite.
  */
@@ -31,7 +31,9 @@ export function getBranchLimit(user: User | null): BranchLimitResult {
   }
   const effectivePlan = getEffectivePlan(user);
   const included = effectivePlan === 'additional-branch' ? 3 : 1;
-  const addons = user.subscription_branch_addons_count ?? 0;
+  /** Add-ons solo aplican con Business efectivo (alineado con get_branch_limit_for_owner en BD). */
+  const addons =
+    effectivePlan === 'additional-branch' ? user.subscription_branch_addons_count ?? 0 : 0;
   const limit = included + addons;
   return { included, addons, limit };
 }

@@ -19,6 +19,11 @@ export interface CellariumHeaderProps {
   /** Misma anchura que la columna derecha; mantiene el título centrado en pantalla */
   leftSlot?: React.ReactNode;
   rightSlot?: React.ReactNode;
+  /**
+   * Menos padding inferior y cuerpo más bajo (formularios largos).
+   * Por defecto false: no altera el resto de pantallas.
+   */
+  compact?: boolean;
 }
 
 const CellariumHeader: React.FC<CellariumHeaderProps> = ({
@@ -26,12 +31,16 @@ const CellariumHeader: React.FC<CellariumHeaderProps> = ({
   subtitle,
   leftSlot,
   rightSlot,
+  compact = false,
 }) => {
   const insets = useSafeAreaInsets();
   const L = CELLARIUM_LAYOUT;
   /** Estrategia superior: siempre el inset del dispositivo (sin min artificial) para menos “aire muerto” */
   const paddingTop = insets.top;
-  const bodyMinH = subtitle ? L.headerBodyWithSubtitleMinHeight : L.headerBodyMinHeight;
+  const bodyMinH = subtitle
+    ? L.headerBodyWithSubtitleMinHeight - (compact ? 8 : 0)
+    : L.headerBodyMinHeight - (compact ? 6 : 0);
+  const bottomPad = L.headerBottomPadding - (compact ? 6 : 0);
   const slotW = L.headerSlotWidth;
 
   return (
@@ -43,7 +52,7 @@ const CellariumHeader: React.FC<CellariumHeaderProps> = ({
         styles.gradient,
         {
           paddingTop,
-          paddingBottom: L.headerBottomPadding,
+          paddingBottom: bottomPad,
           paddingHorizontal: L.headerHorizontalPadding,
         },
       ]}

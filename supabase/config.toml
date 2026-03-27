@@ -10,3 +10,6 @@ verify_jwt = false
 
 [functions.get-addon-price]
 verify_jwt = false
+
+[functions.validate-apple-receipt]
+verify_jwt = false

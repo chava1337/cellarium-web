@@ -11,6 +11,7 @@ const OTHER_PLUGINS = [
   "expo-secure-store",
   "expo-web-browser",
   "@sentry/react-native",
+  "react-native-iap",
 ];
 
 // Icono principal (App Store, Play Store legacy, etc.): PNG 1024x1024.
@@ -59,8 +60,7 @@ const config = {
         "applinks:www.cellarium.net"
       ],
       infoPlist: {
-        NSCameraUsageDescription: "Esta app necesita acceso a la cámara para capturar etiquetas de vino.",
-        NSMicrophoneUsageDescription: "Esta app necesita acceso al micrófono para grabar videos."
+        NSCameraUsageDescription: "Esta app necesita acceso a la cámara para capturar etiquetas de vino."
       }
     },
 
@@ -76,7 +76,6 @@ const config = {
       },
       permissions: [
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.READ_EXTERNAL_STORAGE"
       ],

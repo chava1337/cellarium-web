@@ -9,7 +9,7 @@ import { logger } from '../utils/logger';
 import { Payment, PaymentStatus, PaymentMethod } from '../types';
 
 export interface CreatePaymentIntentData {
-  amount: number; // En centavos (ej: 95000 = $950.00 MXN)
+  amount: number; // En centavos (ej: 129000 = $1,290.00 MXN)
   currency?: string; // Por defecto 'MXN'
   description?: string;
   metadata?: Record<string, any>;

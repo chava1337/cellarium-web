@@ -18,8 +18,8 @@ export const STRIPE_CONFIG = {
     basic: {
       id: 'basic',
       name: 'Básico',
-      price: 95000, // $950.00 MXN en centavos
-      priceFormatted: '$950.00',
+      price: 129000, // $1,290.00 MXN en centavos (Pro)
+      priceFormatted: '$1290.00',
     },
     'additional-branch': {
       id: 'additional-branch',

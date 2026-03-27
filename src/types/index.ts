@@ -55,6 +55,9 @@ export interface Branch {
   email: string;
   created_at: string;
   updated_at: string;
+  /** Sucursal bloqueada por límite de suscripción (p. ej. downgrade a free). */
+  is_locked?: boolean;
+  is_main?: boolean;
 }
 
 export interface WineStock {
@@ -129,6 +132,8 @@ export interface User {
   signup_method?: string | null;
   /** For owners: true when email verified (Google or after verify-owner-email). */
   owner_email_verified?: boolean;
+  /** Origen de facturación (backend); Apple IAP solo en iOS. */
+  billing_provider?: 'none' | 'stripe' | 'apple' | null;
   created_at: string;
   updated_at: string;
 }

@@ -3,6 +3,11 @@
 // 100% Deno Edge: Deno.serve, Web APIs only. NO std/node, NO stripe SDK.
 // Lazy imports to avoid top-level side effects; EDGE_MINIMAL_MODE for crash isolation.
 
+import {
+  handleStripeSubscriptionDeleted,
+  handleSubscriptionUpdate,
+} from '../_shared/handle_subscription_update.ts';
+
 // ——— Contención global (DIAG ONLY): evita que UncaughtException se propague; loguea contexto sin secretos ———
 function truncate(s: string, max: number): string {
   if (typeof s !== 'string') return String(s);
@@ -465,28 +470,22 @@ Deno.serve(async (req: Request) => {
     }
     const { data: userRow, error: findErr } = await supabaseAdmin
       .from('users')
-      .select('id')
+      .select('id, owner_id')
       .eq('stripe_customer_id', customerId)
       .maybeSingle();
     if (findErr || !userRow) {
       console.log('[SUB_DELETED] no user for stripe_customer_id, ack 200', customerId);
       return json(200, { received: true });
     }
-    const dbOpsDeleted = [
-      supabaseAdmin
-        .from('users')
-        .update({
-          subscription_active: false,
-          stripe_subscription_id: null,
-          subscription_expires_at: null,
-          subscription_plan: 'free',
-          subscription_cancel_at_period_end: false,
-        })
-        .eq('stripe_customer_id', customerId),
-    ];
-    const [updateResult] = await Promise.all(dbOpsDeleted);
-    if (updateResult.error) {
-      console.error('[SUB_DELETED] update failed', updateResult.error.message);
+    const ownerId = (userRow as { owner_id?: string }).owner_id ?? userRow.id;
+    const delRes = await handleStripeSubscriptionDeleted({
+      supabaseAdmin,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: subId,
+      ownerId,
+    });
+    if (delRes.error) {
+      console.error('[SUB_DELETED] update failed', delRes.error);
     } else {
       console.log('[SUB_DELETED]', { userId: userRow.id, customerId, subscriptionId: subId });
     }
@@ -599,31 +598,26 @@ Deno.serve(async (req: Request) => {
       } as Record<string, unknown>,
       updated_at: nowSub,
     };
-    const [updateResult, upsertSubResult] = await Promise.all([
-      supabaseAdmin
-        .from('users')
-        .update({
-          stripe_subscription_id: subId,
-          subscription_active: active,
-          subscription_expires_at: expiresAt,
-          subscription_plan: subscriptionPlan,
-          subscription_cancel_at_period_end: subscriptionPlan === 'free' ? false : cancelScheduled,
-        })
-        .eq('stripe_customer_id', customerId),
-      supabaseAdmin
-        .from('subscriptions')
-        .upsert(subRow, { onConflict: 'stripe_subscription_id' }),
-    ]);
-    if (updateResult.error) {
-      console.error('[SUB_UPDATED] users update failed', updateResult.error.message, updateResult.error.code ?? '');
-    } else {
-      console.log('[SUB_UPDATED] users update ok', { subIdSuffix, custIdSuffix, subscription_active: active, subscription_cancel_at_period_end: cancelScheduled });
-    }
-    if (upsertSubResult.error) {
-      console.error('[SUB_UPDATED] subscriptions upsert failed', upsertSubResult.error.message, upsertSubResult.error.code ?? '');
-    } else {
-      console.log('[SUB_UPDATED] subscriptions upsert ok', { subIdSuffix, cancel_at_period_end: subRow.cancel_at_period_end });
-    }
+    await handleSubscriptionUpdate({
+      supabaseAdmin,
+      ownerId,
+      userId: userRow.id,
+      plan: subscriptionPlan,
+      expiresAt,
+      provider: 'stripe',
+      addonsCount: null,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: subId,
+      subscriptionActive: active,
+      subscriptionCancelAtPeriodEnd: subscriptionPlan === 'free' ? false : cancelScheduled,
+      userPatchOverride: null,
+      subscriptionsUpsertRow: subRow,
+      reconcileBranchLocks: true,
+      reconcileOnlyWhenPlanFree: true,
+      parallelUserUpdateAndSubscriptionsUpsert: true,
+      diagSkipReconcile: envTrue('DIAG_SKIP_RECONCILE_BRANCH_LOCKS'),
+    });
+    console.log('[SUB_UPDATED] sync delegated to handleSubscriptionUpdate', { subIdSuffix, subscription_active: active });
     await new Promise((resolve) => setTimeout(resolve, 0));
     return json(200, { received: true });
   }
@@ -836,40 +830,6 @@ Deno.serve(async (req: Request) => {
     return json(200, { received: true, diag: 'skip_db_upsert' });
   }
 
-  const { data: upsertData, error: upsertError } = await supabaseAdmin
-    .from('subscriptions')
-    .upsert(row, { onConflict: 'stripe_subscription_id' })
-    .select('id, owner_id, stripe_subscription_id')
-    .single();
-
-  if (upsertError) {
-    console.error('❌ UPSERT subscriptions FAILED', { error: upsertError, attemptedRow: row });
-    return new Response(JSON.stringify({ error: 'Database UPSERT failed' }), {
-      status: 500,
-      headers: defaultHeaders,
-    });
-  }
-
-  console.log('event.type', event.type, 'subscriptionId', subscriptionId, 'owner_id', owner_id, 'UPSERT result', upsertData?.id ?? 'ok');
-  console.log('[DIAG] reached: AFTER_DB_UPSERT', { eventType, eventId });
-
-  // Saneamiento: solo 1 suscripción activa por owner (marca el resto como canceled)
-  const currentRowId = upsertData?.id;
-  if (currentRowId && owner_id) {
-    const { data: cleanupData, error: cleanupError } = await supabaseAdmin
-      .from('subscriptions')
-      .update({ status: 'canceled' })
-      .eq('owner_id', owner_id)
-      .eq('status', 'active')
-      .neq('id', currentRowId)
-      .select('id');
-    if (cleanupError) {
-      console.error('[CLEANUP] Error marcando otras suscripciones como canceled:', cleanupError.message);
-    } else if (cleanupData && cleanupData.length > 0) {
-      console.log('[CLEANUP] Marcadas otras suscripciones activas como canceled para owner', owner_id, 'count:', cleanupData.length);
-    }
-  }
-
   const statusIsActiveOrTrialing = row.status === 'active' || row.status === 'trialing';
   const periodNotExpired = !currentPeriodEnd || new Date(currentPeriodEnd) > new Date();
   const subscriptionActive = statusIsActiveOrTrialing && periodNotExpired;
@@ -938,32 +898,42 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  const updateUsersPromise = supabaseAdmin
-    .from('users')
-    .update(userUpdatePayload)
-    .eq('stripe_customer_id', stripeCustomerId);
-  const reconcilePromise = envTrue('DIAG_SKIP_RECONCILE_BRANCH_LOCKS')
-    ? Promise.resolve({ error: null as { message: string } | null })
-    : supabaseAdmin.rpc('reconcile_branch_locks', { p_owner_id: owner_id });
-  const dbOpsMain = [updateUsersPromise, reconcilePromise];
-  const [updateUserResult, reconcileResult] = await Promise.all(dbOpsMain);
+  const syncResult = await handleSubscriptionUpdate({
+    supabaseAdmin,
+    ownerId: owner_id,
+    userId: user_id,
+    plan: finalPlanId,
+    expiresAt: null,
+    provider: 'stripe',
+    addonsCount: null,
+    stripeCustomerId,
+    stripeSubscriptionId: subscriptionId,
+    subscriptionActive,
+    subscriptionCancelAtPeriodEnd: cancelScheduled,
+    userPatchOverride: userUpdatePayload,
+    subscriptionsUpsertRow: row,
+    reconcileBranchLocks: true,
+    reconcileOnlyWhenPlanFree: false,
+    parallelUserUpdateAndSubscriptionsUpsert: false,
+    afterUpsertCleanupOtherActives: { ownerId: owner_id },
+    afterSuccessfulUpsert: ({ upsertId }) => {
+      console.log('event.type', event.type, 'subscriptionId', subscriptionId, 'owner_id', owner_id, 'UPSERT result', upsertId ?? 'ok');
+      console.log('[DIAG] reached: AFTER_DB_UPSERT', { eventType, eventId });
+    },
+    diagSkipReconcile: envTrue('DIAG_SKIP_RECONCILE_BRANCH_LOCKS'),
+  });
 
-  if (updateUserResult.error) {
-    console.error('Error actualizando user:', updateUserResult.error.message);
-  } else {
-    console.log('[USER_UPDATED]', { payload: userUpdatePayload });
+  if (syncResult.error) {
+    return new Response(JSON.stringify({ error: 'Database UPSERT failed' }), {
+      status: 500,
+      headers: defaultHeaders,
+    });
   }
-  if (!envTrue('DIAG_SKIP_RECONCILE_BRANCH_LOCKS')) {
-    if (reconcileResult.error) {
-      console.error('Error reconcile_branch_locks:', reconcileResult.error.message);
-    } else {
-      console.log('reconcile_branch_locks ok:', owner_id);
-    }
-  } else {
+
+  if (envTrue('DIAG_SKIP_RECONCILE_BRANCH_LOCKS')) {
     console.log('[DIAG] DIAG_SKIP_RECONCILE_BRANCH_LOCKS=true (skipping reconcile_branch_locks)', { eventType, eventId });
   }
 
-  await new Promise((resolve) => setTimeout(resolve, 0));
   console.log('[DIAG] reached: BEFORE_RETURN_200', { eventType, eventId });
   return json(200, { received: true });
 });

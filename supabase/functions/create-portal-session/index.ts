@@ -4,6 +4,7 @@
 const PORTAL_VERSION = 'portal@2026-02-07_v9';
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { hasActiveAppleSubscription } from '../_shared/billing_coexistence.ts';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -76,7 +77,7 @@ Deno.serve(async (req: Request) => {
     const userId = user.id;
     const { data: row, error: rowErr } = await supabaseAdmin
       .from('users')
-      .select('stripe_customer_id, role, owner_id, signup_method, owner_email_verified')
+      .select('stripe_customer_id, role, owner_id, signup_method, owner_email_verified, billing_provider')
       .eq('id', userId)
       .maybeSingle();
 
@@ -100,6 +101,21 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(
         { code: 'EMAIL_VERIFICATION_REQUIRED', message: 'Debes verificar tu correo antes de acceder al portal.' },
         403
+      );
+    }
+
+    const billingProvider = (row as { billing_provider?: string | null }).billing_provider;
+    if (
+      billingProvider === 'apple' ||
+      (await hasActiveAppleSubscription(supabaseAdmin, ownerId))
+    ) {
+      return jsonResponse(
+        {
+          code: 'APPLE_SUBSCRIPTION_ACTIVE',
+          message:
+            'Tu suscripción está gestionada vía Apple. Usa Ajustes > Suscripción en iOS para cambios o cancelación.',
+        },
+        409
       );
     }
 

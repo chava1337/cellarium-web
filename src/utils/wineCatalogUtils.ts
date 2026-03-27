@@ -19,6 +19,25 @@ export const toValidPrice = (v: unknown): number | undefined => {
 };
 
 /**
+ * Parsea precios/cantidades numéricas desde el API (Postgres numeric a veces llega como string en JSON).
+ */
+export function parseNullablePositiveNumber(v: unknown): number | null {
+  if (v == null) return null;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    let t = v.trim().replace(/\s/g, '');
+    if (t.includes(',') && !t.includes('.')) {
+      t = t.replace(',', '.');
+    } else {
+      t = t.replace(/,/g, '');
+    }
+    const n = parseFloat(t);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
  * Formatea un número como moneda MXN (ej. $1,234.56).
  * Usa Intl.NumberFormat cuando existe; si no, fallback a toFixed(2).
  */

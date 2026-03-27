@@ -16,6 +16,7 @@ import {
   Platform,
   Dimensions,
   PixelRatio,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,13 +34,15 @@ import { useBranch } from '../contexts/BranchContext';
 import { useGuest } from '../contexts/GuestContext';
 import WineGlassSaleConfig from '../components/WineGlassSaleConfig';
 import { getWineCarouselDimensions, getWineCarouselDimensionsForTablet } from '../constants/theme';
+import { CELLARIUM as CELLARIUM_DS, CELLARIUM_LAYOUT, CELLARIUM_TEXT } from '../theme/cellariumTheme';
 import CellariumLoader from '../components/CellariumLoader';
 import LanguageSelector from '../components/LanguageSelector';
 import { getCocktailMenu, CocktailDrink } from '../services/CocktailService';
 import { getBilingualValue as getBilingualFromCatalog } from '../services/GlobalWineCatalogService';
 import { 
-  isValidPrice, 
-  toValidPrice, 
+  isValidPrice,
+  toValidPrice,
+  parseNullablePositiveNumber,
   chunkArray, 
   normalizeWineFromCanonical,
   extractTasteLevelsFromCanonical,
@@ -104,8 +107,10 @@ function mapPublicMenuToWineCatalogItems(menu: PublicMenuResponse): { branch: Br
     return Math.round(Math.max(1, Math.min(5, Number(n))));
   };
   const wines: Wine[] = (menu.wines || []).map((w: PublicMenuWine) => {
-    const priceBottle = typeof w.price_by_bottle === 'number' && Number.isFinite(w.price_by_bottle) ? w.price_by_bottle : null;
-    const priceGlass = typeof w.price_by_glass === 'number' && Number.isFinite(w.price_by_glass) ? w.price_by_glass : null;
+    const rawBottle = parseNullablePositiveNumber(w.price_by_bottle);
+    const rawGlass = parseNullablePositiveNumber(w.price_by_glass);
+    const priceBottle = rawBottle != null && isValidPrice(rawBottle) ? rawBottle : null;
+    const priceGlass = rawGlass != null && isValidPrice(rawGlass) ? rawGlass : null;
     const alcohol = w.alcohol_content != null
       ? (typeof w.alcohol_content === 'number' ? w.alcohol_content : parseFloat(String(w.alcohol_content).replace(',', '.')))
       : undefined;
@@ -197,10 +202,11 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
   // TODO: Implementar guard admin si esta pantalla tiene funciones administrativas
   // useAdminGuard({ navigation, route, requireAuth: false }); // Solo bloquear guests, no requerir auth
   const { user } = useAuth(); // Obtener usuario autenticado
-  const { currentBranch, setCurrentBranch, availableBranches, setAvailableBranches, isInitialized } = useBranch(); // Obtener sucursal actual y estado de inicialización
+  const { currentBranch, setCurrentBranch, availableBranches, refreshBranches, isInitialized } = useBranch();
   const { session: guestSession, currentBranch: guestBranch } = useGuest(); // Obtener sesión e información de sucursal si existe
   const { language, getBilingualValue, t } = useLanguage(); // Obtener idioma y funciones bilingües
   const deviceInfo = useDeviceInfo();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const layout = getRecommendedLayout(deviceInfo);
   
   const stableDeviceTypeRef = useRef<'tablet' | 'phone'>(deviceInfo.deviceType === 'tablet' ? 'tablet' : 'phone');
@@ -279,6 +285,21 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     [stableIsTablet, carouselDimensions.ITEM_WIDTH, carouselDimensions.ITEM_SPACING, carouselDimensions.ITEM_FULL]
   );
 
+  /** Solo UX modal maridajes: tablet + modo comensal (no admin, no cócteles como card distinta) */
+  const guestTabletPairingsUx = isGuest && stableIsTablet;
+
+  /** Modal maridajes guest tablet: tope de alto/ancho + alto útil para lista con scroll */
+  const pairingsGuestTabletDims = useMemo(() => {
+    if (!guestTabletPairingsUx) return null;
+    const cardW = Math.min(760, windowWidth * 0.78);
+    const maxH = Math.min(520, windowHeight * 0.62);
+    const reservedTitle = 52;
+    const reservedClose = 52;
+    const paddingV = 40;
+    const listMax = Math.max(120, maxH - reservedTitle - reservedClose - paddingV);
+    return { cardW, maxH, listMax };
+  }, [guestTabletPairingsUx, windowWidth, windowHeight]);
+
   const insets = useSafeAreaInsets();
 
   // Estados para modal de maridajes
@@ -323,6 +344,19 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
       : (stableIsTablet ? 30 : 40);
     return Math.max(base + guestExtra, 24);
   }, [insets.bottom, isGuest, stableIsTablet]);
+
+  /**
+   * Guest + tablet: el ítem del FlatList horizontal tiene alto ≈ ventana − header − filtros − padding.
+   * minHeight 628px (card) + minHeight 260px (ficha) forzaba altura mínima > hueco visible en landscape;
+   * wineCardInnerClip overflow:hidden recortaba el footer de precios. Limitamos maxHeight y permitimos
+   * que el hero/ficha se compriman con flex (solo guest+tablet).
+   */
+  const GUEST_TABLET_LIST_CHROME = 240;
+  const guestTabletWineCardStyle = useMemo(() => {
+    if (!isGuest || !stableIsTablet) return undefined;
+    const usable = windowHeight - insets.top - insets.bottom - GUEST_TABLET_LIST_CHROME;
+    return { maxHeight: Math.max(340, usable) };
+  }, [isGuest, stableIsTablet, windowHeight, insets.top, insets.bottom]);
   
   const [wines, setWines] = useState<Wine[]>([]);
   const [filteredWines, setFilteredWines] = useState<Wine[]>([]);
@@ -1356,8 +1390,9 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         return require('../../assets/images/wine-card-dessert.png');
       case 'fortified':
         return require('../../assets/images/wine-card-fortified.png');
-      // case 'rose':
-      //   return require('../../assets/images/wine-card-rose.png');
+      /** Rosado: mismo fondo visual que postre (`wine-card-dessert.png`). */
+      case 'rose':
+        return require('../../assets/images/wine-card-dessert.png');
       default:
         return null; // Sin imagen de fondo para tipos no definidos
     }
@@ -1714,7 +1749,8 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
       <View key={cocktail.id} style={{ width: carouselDimensions.ITEM_WIDTH }}>
         <View style={[
           styles.wineCard,
-          isGuest && { minHeight: stableIsTablet ? GUEST_CARD.cardMinHeightTablet : GUEST_CARD.cardMinHeight },
+          isGuest && !stableIsTablet && { minHeight: GUEST_CARD.cardMinHeight },
+          isGuest && stableIsTablet && guestTabletWineCardStyle,
         ]}>
           {/* Contenedor principal - Imagen centrada ocupando todo el espacio */}
           <View style={styles.wineCardBody}>
@@ -1771,8 +1807,9 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                   imageStyle={{ opacity: 1 }}
                   style={[
                     styles.wineAdditionalInfo,
+                    isGuest && stableIsTablet && styles.wineAdditionalInfoGuestTabletCocktail,
                     stableIsTablet && !isGuest && { maxHeight: 300 },
-                    isGuest && { maxHeight: stableIsTablet ? GUEST_CARD.heroMaxHeightTablet : GUEST_CARD.heroMaxHeight },
+                    isGuest && !stableIsTablet && { maxHeight: GUEST_CARD.heroMaxHeight },
                   ]}
                 >
                   {/* Overlay oscuro para legibilidad del texto */}
@@ -1785,11 +1822,14 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                     />
                   </View>
                     <ScrollView 
-                      style={styles.wineAdditionalInfoScroll}
+                      style={[
+                        styles.wineAdditionalInfoScroll,
+                        isGuest && stableIsTablet && styles.wineAdditionalInfoScrollGuestTabletCocktail,
+                      ]}
                       contentContainerStyle={[
                         styles.wineAdditionalInfoContent,
                         { alignItems: 'center', flexGrow: 1 },
-                        isGuest && { minHeight: 260 },
+                        isGuest && !stableIsTablet && { minHeight: 260 },
                       ]}
                       showsVerticalScrollIndicator={false}
                       nestedScrollEnabled={true}
@@ -1845,33 +1885,39 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
             })()}
           </View>
 
-          {/* Footer: Precio - Similar a vinos (texto claro para contraste sobre card oscura) */}
-          <View
+          {/* Footer: precio sobre el mismo gradiente que vinos (antes: texto blanco sobre card blanca → invisible) */}
+          <LinearGradient
+            colors={[CELLARIUM.primaryDarker, CELLARIUM.primary, CELLARIUM.primaryDark]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
             style={[
               styles.pricesContainer,
-              { paddingHorizontal: stableIsTablet ? 20 : 16 },
+              {
+                paddingHorizontal: stableIsTablet ? 20 : 16,
+                paddingTop: stableIsTablet ? 10 : 8,
+                paddingBottom: stableIsTablet ? 10 : 8,
+              },
               isGuest && styles.pricesContainerGuest,
+              isGuest && stableIsTablet && styles.winePricesFooterWrap,
             ]}
           >
-            <View style={styles.priceContainer}>
-              <View style={styles.priceRowTop}>
-                <Text style={[
-                  styles.priceBottle,
-                  {
-                    fontSize: isGuest ? 20 : (stableIsTablet ? 18 : 16),
-                    lineHeight: isGuest ? 24 : undefined,
-                    color: '#FFFFFF',
-                  }
-                ]}>
-                  ${cocktail.price.toFixed(2)}
-                </Text>
-              </View>
+            <View style={[styles.priceContainer, { alignItems: 'center' }]}>
+              <Text
+                style={[
+                  styles.priceValue,
+                  stableIsTablet && !isGuest && styles.priceValueTablet,
+                  !stableIsTablet && !isGuest && styles.priceValuePhone,
+                  isGuest && styles.priceValueGuest,
+                ]}
+              >
+                ${cocktail.price.toFixed(2)}
+              </Text>
             </View>
-          </View>
+          </LinearGradient>
         </View>
       </View>
     );
-  }, [stableIsTablet, carouselDimensions.ITEM_WIDTH, t, language, isGuest, GUEST_CARD]);
+  }, [stableIsTablet, carouselDimensions.ITEM_WIDTH, t, language, isGuest, GUEST_CARD, guestTabletWineCardStyle]);
 
   // Subcomponente: Bloque de imagen del vino
   const WineImageBlock = ({ wine, isTablet, isGuest = false, guestCard }: { wine: Wine; isTablet: boolean; isGuest?: boolean; guestCard?: { imageHeight: number; imageHeightTablet: number; sensoryHeight: number; sensoryHeightTablet: number } }) => {
@@ -1978,11 +2024,26 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
       });
     };
 
+    const abvBadgeEl = (() => {
+      const val = wine.alcohol_content;
+      if (val == null) return null;
+      const num = typeof val === 'number'
+        ? val
+        : parseFloat(String(val).replace(',', '.').match(/[\d.]+/)?.[0] ?? '');
+      const display = Number.isFinite(num) ? num.toFixed(1) : String(val);
+      return (
+        <View style={[styles.abvBadge, isGuest && styles.abvBadgeGuest]}>
+          <Text style={[styles.abvBadgeText, isGuest && styles.abvBadgeTextGuest]}>{display}% vol.</Text>
+        </View>
+      );
+    })();
+
     return (
       <View
         style={[
           styles.wineInfoBlockContainer,
-          isGuest && styles.wineInfoBlockContainerGuest,
+          isGuest && !isTablet && styles.wineInfoBlockContainerGuest,
+          isGuest && isTablet && styles.wineInfoBlockContainerGuestTabletFit,
         ]}
         onLayout={handleContainerLayout}
       >
@@ -2039,40 +2100,48 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                 </Text>
               )}
             </View>
-            {/* ABV Badge - fijo a la derecha, NO participa en wrap */}
-            {(() => {
-              const val = wine.alcohol_content;
-              if (val == null) return null;
-              const num = typeof val === 'number'
-                ? val
-                : parseFloat(String(val).replace(',', '.').match(/[\d.]+/)?.[0] ?? '');
-              const display = Number.isFinite(num) ? num.toFixed(1) : String(val);
-              return (
-                <View style={[styles.abvBadge, isGuest && styles.abvBadgeGuest]}>
-                  <Text style={[styles.abvBadgeText, isGuest && styles.abvBadgeTextGuest]}>{display}% vol.</Text>
-                </View>
-              );
-            })()}
+            {/* Comensal: ABV va a fila inferior dedicada (evita traslape con Maridajes) */}
+            {!isGuest && abvBadgeEl}
           </View>
           
           {/* Añada - SOLO mostrar si NO viene del catálogo global */}
           {vintageDisplay && (
             <Text style={[styles.wineVintage, isGuest && styles.wineVintageGuest]} numberOfLines={1} ellipsizeMode="tail">{t('wine.vintage_label')} {vintageDisplay}</Text>
           )}
+
+          {/* Comensal: fila inferior estable — alcohol + Maridajes (sin absolute) */}
+          {isGuest && (
+            <View style={styles.wineGuestFooterRow}>
+              <View style={styles.wineGuestFooterLeft}>{abvBadgeEl}</View>
+              <TouchableOpacity
+                style={styles.pairingsChipButtonGuest}
+                onPress={() => onOpenPairings(wine)}
+                activeOpacity={0.7}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Ionicons name="restaurant-outline" size={14} color={CELLARIUM_DS.primary} />
+                  <Text style={styles.pairingsChipTextGuest}>{t('wine.food_pairings')}</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
         
-        {/* Botón de maridaje - absolute, no afecta el flujo vertical */}
-        <TouchableOpacity
-          style={styles.pairingsChipButton}
-          onPress={() => onOpenPairings(wine)}
-          activeOpacity={0.7}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <Ionicons name="restaurant-outline" size={14} color="#3A3534" />
-            <Text style={styles.pairingsChipText}>{t('wine.food_pairings')}</Text>
-          </View>
-        </TouchableOpacity>
+        {/* Staff: chip Maridajes absoluto (layout legacy) */}
+        {!isGuest && (
+          <TouchableOpacity
+            style={styles.pairingsChipButton}
+            onPress={() => onOpenPairings(wine)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="restaurant-outline" size={14} color="#3A3534" />
+              <Text style={styles.pairingsChipText}>{t('wine.food_pairings')}</Text>
+            </View>
+          </TouchableOpacity>
+        )}
       </View>
     );
   };
@@ -2209,12 +2278,16 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         style={[
           styles.wineCard,
           stableIsTablet && !isGuest && { minHeight: 540 },
-          isGuest && { minHeight: stableIsTablet ? GUEST_CARD.cardMinHeightTablet : GUEST_CARD.cardMinHeight },
+          isGuest && !stableIsTablet && { minHeight: GUEST_CARD.cardMinHeight },
+          isGuest && stableIsTablet && guestTabletWineCardStyle,
         ]}
         onLayout={logCardLayout('wineCard')}
       >
         {/* Wrapper interno para recorte de esquinas redondeadas */}
-        <View style={styles.wineCardInnerClip} onLayout={logCardLayout('wineCardInnerClip')}>
+        <View
+          style={[styles.wineCardInnerClip, isGuest && stableIsTablet && styles.wineCardInnerClipGuestTablet]}
+          onLayout={logCardLayout('wineCardInnerClip')}
+        >
           {/* Contenedor principal dividido */}
           <View style={styles.wineCardBody} onLayout={logCardLayout('wineCardBody')}>
         {/* Grid superior: Imagen izquierda + Sensorial derecha */}
@@ -2238,8 +2311,9 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                 imageStyle={{ opacity: 1 }}
                 style={[
                   styles.wineAdditionalInfo,
+                  isGuest && stableIsTablet && styles.wineAdditionalInfoGuestTablet,
                   stableIsTablet && !isGuest && { maxHeight: 300 },
-                  isGuest && { maxHeight: stableIsTablet ? GUEST_CARD.heroMaxHeightTablet : GUEST_CARD.heroMaxHeight },
+                  isGuest && !stableIsTablet && { maxHeight: GUEST_CARD.heroMaxHeight },
                 ]}
                 onLayout={logCardLayout('wineAdditionalInfo')}
               >
@@ -2256,9 +2330,22 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                     style={StyleSheet.absoluteFillObject}
                   />
                 </View>
-                <View style={styles.wineAdditionalInfoContent} onLayout={logCardLayout('wineAdditionalInfoContent')}>
-                  <WineInfoBlock wine={wine} t={t} onOpenPairings={openPairingsModal} isTablet={stableIsTablet} isGuest={isGuest} />
-                </View>
+                {isGuest && stableIsTablet ? (
+                  <ScrollView
+                    style={styles.wineInfoHeroScrollGuestTablet}
+                    contentContainerStyle={styles.wineInfoHeroScrollContentGuestTablet}
+                    onLayout={logCardLayout('wineAdditionalInfoContent')}
+                    nestedScrollEnabled={true}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    <WineInfoBlock wine={wine} t={t} onOpenPairings={openPairingsModal} isTablet={stableIsTablet} isGuest={isGuest} />
+                  </ScrollView>
+                ) : (
+                  <View style={styles.wineAdditionalInfoContent} onLayout={logCardLayout('wineAdditionalInfoContent')}>
+                    <WineInfoBlock wine={wine} t={t} onOpenPairings={openPairingsModal} isTablet={stableIsTablet} isGuest={isGuest} />
+                  </View>
+                )}
             </ImageBackground>
           );
         } else {
@@ -2266,21 +2353,38 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
             <View
               style={[
                 styles.wineAdditionalInfo,
+                isGuest && stableIsTablet && styles.wineAdditionalInfoGuestTablet,
                 stableIsTablet && !isGuest && { minHeight: 240, maxHeight: 300 },
-                isGuest && { maxHeight: stableIsTablet ? GUEST_CARD.heroMaxHeightTablet : GUEST_CARD.heroMaxHeight },
+                isGuest && !stableIsTablet && { maxHeight: GUEST_CARD.heroMaxHeight },
               ]}
               onLayout={logCardLayout('wineAdditionalInfo')}
             >
-              <View style={styles.wineAdditionalInfoContent} onLayout={logCardLayout('wineAdditionalInfoContent')}>
-                <WineInfoBlock wine={wine} t={t} onOpenPairings={openPairingsModal} isTablet={stableIsTablet} isGuest={isGuest} />
-              </View>
+              {isGuest && stableIsTablet ? (
+                <ScrollView
+                  style={styles.wineInfoHeroScrollGuestTablet}
+                  contentContainerStyle={styles.wineInfoHeroScrollContentGuestTablet}
+                  onLayout={logCardLayout('wineAdditionalInfoContent')}
+                  nestedScrollEnabled={true}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  <WineInfoBlock wine={wine} t={t} onOpenPairings={openPairingsModal} isTablet={stableIsTablet} isGuest={isGuest} />
+                </ScrollView>
+              ) : (
+                <View style={styles.wineAdditionalInfoContent} onLayout={logCardLayout('wineAdditionalInfoContent')}>
+                  <WineInfoBlock wine={wine} t={t} onOpenPairings={openPairingsModal} isTablet={stableIsTablet} isGuest={isGuest} />
+                </View>
+              )}
             </View>
           );
         }
       })()}
           </View>
 
-          <View onLayout={logCardLayout('WinePricesBlock')}>
+          <View
+            style={styles.winePricesFooterWrap}
+            onLayout={logCardLayout('WinePricesBlock')}
+          >
             <WinePricesBlock
               wine={wine}
               hasBottle={!!hasBottle}
@@ -2297,7 +2401,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
       </View>
     </View>
     );
-  }, [stableIsTablet, carouselDimensions.ITEM_WIDTH, navigation, t, isGuest, user, handleConfigGlassSaleMemo, getWineCardBackground, renderSensoryProfile, insets, openPairingsModal, logCardLayout, GUEST_CARD]);
+  }, [stableIsTablet, carouselDimensions.ITEM_WIDTH, navigation, t, isGuest, user, handleConfigGlassSaleMemo, getWineCardBackground, renderSensoryProfile, insets, openPairingsModal, logCardLayout, GUEST_CARD, guestTabletWineCardStyle]);
 
   // Crear renderCatalogItem memoizado
   const renderCatalogItem = useCallback(({ item }: { item: Wine | CocktailDrink }) => {
@@ -2314,13 +2418,31 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     <View style={{ width: carouselDimensions.ITEM_SPACING }} />
   ), [carouselDimensions.ITEM_SPACING]);
 
-  const flatListExtraData = useMemo(() => ({
-    showCocktails,
-    selectedTypeFilter,
-    availabilityFilter,
-    sortOrder,
-    language,
-  }), [showCocktails, selectedTypeFilter, availabilityFilter, sortOrder, language]);
+  const catalogDataLength = showCocktails ? filteredCocktails.length : filteredWines.length;
+  const catalogFlatListKey = useMemo(
+    () => `${stableIsTablet ? 'tablet' : 'phone'}-${showCocktails ? 'cocktail' : 'wine'}-${catalogDataLength}`,
+    [stableIsTablet, showCocktails, catalogDataLength]
+  );
+
+  const flatListExtraData = useMemo(
+    () => ({
+      showCocktails,
+      selectedTypeFilter,
+      availabilityFilter,
+      sortOrder,
+      language,
+      catalogDataLength,
+    }),
+    [showCocktails, selectedTypeFilter, availabilityFilter, sortOrder, language, catalogDataLength]
+  );
+
+  /** Tras cambiar dataset (alta/baja) o modo tablet, el offset interno puede quedar inválido; reset + getItemLayout con padding evita lista “vacía” hasta tocar. */
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [showCocktails, catalogDataLength, stableIsTablet]);
 
   // Bloquear catálogo/stock para usuarios pending (solo modo no-guest)
   if (user && user.status === 'pending' && !isGuest) {
@@ -2440,11 +2562,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
 
                             if (data) {
                               setCurrentBranch(data);
-                              // Actualizar availableBranches con el branch actualizado
-                              const updatedBranches = availableBranches.map((branch: Branch) => 
-                                branch.id === data.id ? data : branch
-                              );
-                              setAvailableBranches(updatedBranches);
+                              await refreshBranches();
                               Alert.alert(t('catalog.branch_name_updated'), t('catalog.branch_name_updated_message'));
                             }
 
@@ -2639,7 +2757,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         ref={flatListRef}
         data={showCocktails ? filteredCocktails : filteredWines}
         keyExtractor={(item) => String(item.id)}
-        key={stableIsTablet ? 'tablet' : 'phone'}
+        key={catalogFlatListKey}
         horizontal
         showsHorizontalScrollIndicator={false}
         snapToInterval={carouselDimensions.ITEM_FULL}
@@ -2650,7 +2768,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         ItemSeparatorComponent={itemSeparatorComponent}
         getItemLayout={(_, index) => ({
           length: carouselDimensions.ITEM_FULL,
-          offset: carouselDimensions.ITEM_FULL * index,
+          offset: carouselDimensions.CONTENT_PAD + carouselDimensions.ITEM_FULL * index,
           index,
         })}
         style={styles.winesContainer}
@@ -2660,7 +2778,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         maxToRenderPerBatch={4}
         updateCellsBatchingPeriod={50}
         windowSize={5}
-        removeClippedSubviews={Platform.OS === 'android'}
+        removeClippedSubviews={Platform.OS === 'android' && !(isGuest && stableIsTablet)}
         ListEmptyComponent={
           loading ? (
             <View style={styles.loadingContainer}>
@@ -2697,48 +2815,85 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         onRequestClose={closePairingsModal}
       >
         <Pressable 
-          style={styles.pairingsModalBackdrop}
+          style={[styles.pairingsModalBackdrop, guestTabletPairingsUx && styles.pairingsModalBackdropGuestTablet]}
           onPress={closePairingsModal}
         >
           <Pressable 
-            style={styles.pairingsModalCard}
+            style={[
+              styles.pairingsModalCard,
+              guestTabletPairingsUx && styles.pairingsModalCardGuestTablet,
+              guestTabletPairingsUx &&
+                pairingsGuestTabletDims && {
+                  width: pairingsGuestTabletDims.cardW,
+                  maxHeight: pairingsGuestTabletDims.maxH,
+                  alignSelf: 'center',
+                },
+            ]}
             onPress={(e) => e.stopPropagation()}
           >
             {pairingsWine && (() => {
               const finalPairings = getFinalPairings(pairingsWine);
-              
+              const gt = guestTabletPairingsUx;
+
+              const listBlock = finalPairings.length > 0 ? (
+                <ScrollView
+                  style={
+                    gt
+                      ? [
+                          styles.pairingsModalScrollGuestTablet,
+                          pairingsGuestTabletDims && { maxHeight: pairingsGuestTabletDims.listMax },
+                        ]
+                      : { maxHeight: 180 }
+                  }
+                  contentContainerStyle={gt ? styles.pairingsModalScrollContentGuestTablet : undefined}
+                  showsVerticalScrollIndicator={gt}
+                  nestedScrollEnabled={true}
+                >
+                  <View style={[styles.pairingsModalList, gt && styles.pairingsModalListGuestTablet]}>
+                    {finalPairings.map((pairing: string, idx: number) => (
+                      <View key={idx} style={[styles.pairingItem, gt && styles.pairingItemGuestTablet]}>
+                        <Text style={[styles.pairingBullet, gt && styles.pairingBulletGuestTablet]}>•</Text>
+                        <Text style={[styles.pairingsTextCompact, gt && styles.pairingsTextGuestTablet]}>{pairing}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </ScrollView>
+              ) : (
+                <Text style={[styles.pairingsModalSubtitle, gt && styles.pairingsModalSubtitleGuestTablet]}>
+                  {t('catalog.pairings_no_suggested')}
+                </Text>
+              );
+
+              if (gt) {
+                return (
+                  <View style={styles.pairingsModalInnerGuestTablet}>
+                    <Text style={[styles.pairingsModalTitle, styles.pairingsModalTitleGuestTablet]}>
+                      {t('wine.pairings_modal_heading_premium')}
+                    </Text>
+                    {finalPairings.length > 0 ? (
+                      listBlock
+                    ) : (
+                      <View style={styles.pairingsModalEmptyCenterGuestTablet}>{listBlock}</View>
+                    )}
+                    <TouchableOpacity
+                      style={[styles.pairingsModalCloseButtonGuestTabletOutline]}
+                      onPress={closePairingsModal}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.pairingsModalCloseButtonTextGuestTablet}>
+                        {t('catalog.close')}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              }
+
               return (
                 <>
                   <Text style={styles.pairingsModalTitle}>{t('wine.recommended_pairings')}</Text>
-                  
-                  {finalPairings.length > 0 ? (
-                    <ScrollView 
-                      style={{ maxHeight: 180 }}
-                      showsVerticalScrollIndicator={false}
-                      nestedScrollEnabled={true}
-                    >
-                      <View style={styles.pairingsModalList}>
-                        {finalPairings.map((pairing: string, idx: number) => (
-                          <View key={idx} style={styles.pairingItem}>
-                            <Text style={styles.pairingBullet}>•</Text>
-                            <Text style={styles.pairingsTextCompact}>{pairing}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    </ScrollView>
-                  ) : (
-                    <Text style={styles.pairingsModalSubtitle}>
-                      {t('catalog.pairings_no_suggested')}
-                    </Text>
-                  )}
-                  
-                  <TouchableOpacity
-                    style={styles.pairingsModalCloseButton}
-                    onPress={closePairingsModal}
-                  >
-                    <Text style={styles.pairingsModalCloseButtonText}>
-                      {t('catalog.close')}
-                    </Text>
+                  {listBlock}
+                  <TouchableOpacity style={styles.pairingsModalCloseButton} onPress={closePairingsModal}>
+                    <Text style={styles.pairingsModalCloseButtonText}>{t('catalog.close')}</Text>
                   </TouchableOpacity>
                 </>
               );
@@ -3011,6 +3166,17 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'column',
   },
+  /** Guest tablet: reparte espacio entre body y footer para que el gradiente de precios no quede fuera del clip */
+  wineCardInnerClipGuestTablet: {
+    justifyContent: 'space-between',
+  },
+  /** Evita que el footer de precios se comprima o quede fuera del flujo en tablet/guest */
+  winePricesFooterWrap: {
+    flexShrink: 0,
+    width: '100%',
+    zIndex: 2,
+    elevation: 2,
+  },
   wineCardBody: {
     flex: 1,
     minHeight: 0,
@@ -3243,6 +3409,27 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#eee',
   },
+  /** Guest tablet: sube el techo del hero para que flex pueda repartir dentro del maxHeight de la card */
+  wineAdditionalInfoGuestTablet: {
+    maxHeight: 2000,
+  },
+  /** Guest tablet cóctel: hero flexible dentro de la card acotada (prioriza footer de precio) */
+  wineAdditionalInfoGuestTabletCocktail: {
+    flex: 1,
+    minHeight: 0,
+    maxHeight: 2000,
+  },
+  /** Guest tablet vino: scroll interno discreto cuando nombre/uvas desbordan (ABV + Maridajes accesibles) */
+  wineInfoHeroScrollGuestTablet: {
+    flex: 1,
+    minHeight: 0,
+  },
+  wineInfoHeroScrollContentGuestTablet: {
+    padding: 16,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    flexGrow: 1,
+  },
   wineAdditionalInfoContent: {
     flex: 1,
     justifyContent: 'center',
@@ -3252,6 +3439,11 @@ const styles = StyleSheet.create({
   // Estilo legacy para cocteles (mantener ScrollView en cocteles)
   wineAdditionalInfoScroll: {
     flex: 1, // Ocupa todo el espacio disponible del contenedor padre
+  },
+  /** Cóctel guest tablet: el ScrollView del hero debe poder encogerse dentro del flex */
+  wineAdditionalInfoScrollGuestTabletCocktail: {
+    flex: 1,
+    minHeight: 0,
   },
   // Contenedor del bloque de información con glass card
   wineInfoBlockContainer: {
@@ -3265,9 +3457,44 @@ const styles = StyleSheet.create({
     minHeight: 260,
     justifyContent: 'space-between',
   },
+  /** Guest tablet: sin minHeight 260; si no, topGrid+hero mínimo > alto útil y el footer se recorta */
+  wineInfoBlockContainerGuestTabletFit: {
+    minHeight: 0,
+    flexShrink: 1,
+    justifyContent: 'flex-start',
+  },
   wineInfoBlockContentGuest: {
     paddingVertical: 14,
-    paddingBottom: 36,
+    paddingBottom: 12,
+  },
+  /** Comensal: fila inferior fija para ABV + Maridajes (flujo real, sin absolute) */
+  wineGuestFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    width: '100%',
+    gap: 10,
+  },
+  wineGuestFooterLeft: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pairingsChipButtonGuest: {
+    flexShrink: 0,
+    backgroundColor: 'rgba(146, 64, 72, 0.08)',
+    borderRadius: CELLARIUM_LAYOUT.inputRadius,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: CELLARIUM_DS.border,
+  },
+  pairingsChipTextGuest: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: CELLARIUM_DS.primary,
   },
   // Guest: tipografía más grande en ficha (variante menú comensal)
   wineNameGuest: { fontSize: 22, lineHeight: 28 },
@@ -3314,11 +3541,21 @@ const styles = StyleSheet.create({
     marginBottom: 1,
     lineHeight: 16,
   },
+  pairingItemGuestTablet: {
+    marginBottom: 14,
+    paddingVertical: 2,
+  },
   pairingBullet: {
     fontSize: 10,
     color: '#8B0000',
     marginRight: 4,
     marginTop: 1,
+  },
+  pairingBulletGuestTablet: {
+    fontSize: 15,
+    marginRight: 10,
+    marginTop: 3,
+    color: CELLARIUM_DS.primary,
   },
   pairingsTextCompact: {
     fontSize: 10,
@@ -3327,6 +3564,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 14,
     flex: 1,
+  },
+  pairingsTextGuestTablet: {
+    fontSize: 15,
+    lineHeight: 24,
+    color: CELLARIUM_DS.text,
+    fontStyle: 'normal',
+    fontWeight: '400',
   },
   priceContainer: {
     paddingVertical: 0,
@@ -3549,6 +3793,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
+  pairingsModalBackdropGuestTablet: {
+    paddingHorizontal: 28,
+    paddingVertical: 24,
+  },
   pairingsModalCard: {
     backgroundColor: '#fff',
     borderRadius: 18,
@@ -3557,11 +3805,57 @@ const styles = StyleSheet.create({
     maxWidth: 340,
     maxHeight: 320,
   },
+  pairingsModalCardGuestTablet: {
+    flexDirection: 'column',
+    paddingVertical: 22,
+    paddingHorizontal: 24,
+    borderRadius: CELLARIUM_LAYOUT.cardRadius,
+    overflow: 'hidden',
+    backgroundColor: CELLARIUM_DS.card,
+    borderWidth: 1,
+    borderColor: CELLARIUM_DS.border,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.12,
+        shadowRadius: 24,
+      },
+      android: {
+        elevation: 10,
+      },
+      default: {},
+    }),
+  },
+  pairingsModalInnerGuestTablet: {
+    width: '100%',
+  },
+  pairingsModalEmptyCenterGuestTablet: {
+    paddingVertical: 20,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pairingsModalScrollGuestTablet: {
+    width: '100%',
+  },
+  pairingsModalScrollContentGuestTablet: {
+    paddingBottom: 12,
+  },
   pairingsModalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#1a1a1a',
     marginBottom: 8,
+    textAlign: 'center',
+  },
+  pairingsModalTitleGuestTablet: {
+    ...CELLARIUM_TEXT.cardTitle,
+    fontSize: 18,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+    marginBottom: 14,
+    color: CELLARIUM_DS.text,
     textAlign: 'center',
   },
   pairingsModalSubtitle: {
@@ -3570,9 +3864,20 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     textAlign: 'center',
   },
+  pairingsModalSubtitleGuestTablet: {
+    ...CELLARIUM_TEXT.body,
+    fontSize: 15,
+    marginBottom: 0,
+    color: CELLARIUM_DS.muted,
+    textAlign: 'center',
+  },
   pairingsModalList: {
     marginTop: 16,
     marginBottom: 20,
+  },
+  pairingsModalListGuestTablet: {
+    marginTop: 0,
+    marginBottom: 0,
   },
   pairingsModalCloseButton: {
     backgroundColor: '#8B0000',
@@ -3581,6 +3886,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     alignSelf: 'center',
     marginTop: 8,
+  },
+  pairingsModalCloseButtonGuestTabletOutline: {
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: CELLARIUM_LAYOUT.buttonRadius,
+    alignSelf: 'stretch',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: CELLARIUM_DS.border,
+  },
+  pairingsModalCloseButtonTextGuestTablet: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: CELLARIUM_DS.primary,
+    textAlign: 'center',
   },
   pairingsModalCloseButtonText: {
     color: '#fff',

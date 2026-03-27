@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { User, AuthContextType, UserDataStatus, Branch, normalizeRole } from '../types';
 import { supabase } from '../lib/supabase';
 import { Session } from '@supabase/supabase-js';
@@ -19,10 +19,10 @@ interface AuthProviderProps {
   children: React.ReactNode;
 }
 
-const USERS_SELECT_COLUMNS = 'id, email, name, role, status, branch_id, owner_id, created_at, updated_at, subscription_plan, subscription_active, subscription_expires_at, subscription_cancel_at_period_end, subscription_branches_count, subscription_branch_addons_count, subscription_id, stripe_customer_id, signup_method, owner_email_verified';
+const USERS_SELECT_COLUMNS = 'id, email, name, role, status, branch_id, owner_id, created_at, updated_at, subscription_plan, subscription_active, subscription_expires_at, subscription_cancel_at_period_end, subscription_branches_count, subscription_branch_addons_count, subscription_id, stripe_customer_id, signup_method, owner_email_verified, billing_provider';
 
 /** Select mínimo para bootstrap rápido; incluye campos de suscripción para que la UI muestre el plan correcto al arranque. */
-const USERS_BOOTSTRAP_SELECT = 'id,email,name,role,status,owner_id,branch_id,created_at,updated_at,subscription_plan,subscription_active,subscription_expires_at,subscription_cancel_at_period_end,signup_method,owner_email_verified';
+const USERS_BOOTSTRAP_SELECT = 'id,email,name,role,status,owner_id,branch_id,created_at,updated_at,subscription_plan,subscription_active,subscription_expires_at,subscription_cancel_at_period_end,signup_method,owner_email_verified,billing_provider';
 
 const HYDRATE_BACKOFF_MS = [300, 600, 1200, 2500, 4000];
 
@@ -645,7 +645,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, [user, userDataStatus]);
 
-  const refreshUser = async () => {
+  /** Referencia estable: evita que useFocusEffect([refreshUser]) vuelva a ejecutarse tras cada setUser (p. ej. Suscripciones). */
+  const refreshUser = useCallback(async () => {
     try {
       // Obtener sesión actual
       const { data: { session: currentSession } } = await supabase.auth.getSession();
@@ -698,7 +699,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         app_area: 'auth',
       });
     }
-  };
+  }, []);
 
   const value: AuthContextType = {
     user,

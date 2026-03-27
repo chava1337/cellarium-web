@@ -11,6 +11,7 @@
 //   });
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { hasActiveAppleSubscription } from '../_shared/billing_coexistence.ts';
 
 console.log('🚀 create-checkout-session: Function iniciada');
 
@@ -245,7 +246,9 @@ Deno.serve(async (req: Request) => {
     // Obtener datos del usuario desde public.users
     const { data: userData, error: userDataError } = await supabaseAdmin
       .from('users')
-      .select('id, role, owner_id, stripe_customer_id, email, subscription_active, subscription_id, subscription_plan, signup_method, owner_email_verified')
+      .select(
+        'id, role, owner_id, stripe_customer_id, email, subscription_active, subscription_id, subscription_plan, signup_method, owner_email_verified, billing_provider'
+      )
       .eq('id', authUser.id)
       .single();
 
@@ -299,6 +302,20 @@ Deno.serve(async (req: Request) => {
           message: 'Debes verificar tu correo antes de suscribirte. Abre la app y ve a Verificar correo.',
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403 }
+      );
+    }
+
+    if (
+      userData.billing_provider === 'apple' ||
+      (await hasActiveAppleSubscription(supabaseAdmin, ownerId))
+    ) {
+      return new Response(
+        JSON.stringify({
+          code: 'APPLE_SUBSCRIPTION_ACTIVE',
+          message:
+            'Tu suscripción está activa vía Apple. Gestiona el plan desde la app en iOS (Ajustes > Suscripción).',
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409 }
       );
     }
 

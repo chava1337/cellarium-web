@@ -1,8 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://sejhpjfzznskhmbifrum.supabase.co';
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlamhwamZ6em5za2htYmlmcnVtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk4NDUxNjUsImV4cCI6MjA3NTQyMTE2NX0.TWV4LlM6v2MkQ7Sz1fuw-jzsjT4c6QrsOjJmdmOqSqY';
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim();
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error(
+    'Missing Supabase environment variables: EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY are required.'
+  );
+}
 
 const FETCH_TIMEOUT_MS = 12000;
 

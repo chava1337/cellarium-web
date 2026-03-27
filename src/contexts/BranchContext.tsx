@@ -6,6 +6,10 @@ import { supabase } from '../lib/supabase';
 interface BranchContextType {
   currentBranch: Branch | null;
   setCurrentBranch: (branch: Branch) => void;
+  /** Todas las sucursales del owner (incluye bloqueadas); para conteos y administración. */
+  allBranches: Branch[];
+  setAllBranches: (branches: Branch[]) => void;
+  /** Sucursales operables (no bloqueadas); selector y operación diaria. */
   availableBranches: Branch[];
   setAvailableBranches: (branches: Branch[]) => void;
   refreshBranches: () => Promise<void>;
@@ -29,6 +33,7 @@ interface BranchProviderProps {
 export const BranchProvider: React.FC<BranchProviderProps> = ({ children }) => {
   const { user, profileReady } = useAuth();
   const [currentBranch, setCurrentBranch] = useState<Branch | null>(null);
+  const [allBranches, setAllBranches] = useState<Branch[]>([]);
   const [availableBranches, setAvailableBranches] = useState<Branch[]>([]);
   const [isInitialized, setIsInitialized] = useState(false);
 
@@ -46,25 +51,34 @@ export const BranchProvider: React.FC<BranchProviderProps> = ({ children }) => {
         throw error;
       }
 
-      let filteredBranches: Branch[] = [];
+      const rows = (branches || []) as Branch[];
+      let fullList: Branch[] = [];
+      let operableList: Branch[] = [];
+
       if (ownerUser.role === 'owner') {
-        filteredBranches = branches || [];
+        fullList = rows;
+        operableList = rows.filter(b => b.is_locked !== true);
       } else {
-        filteredBranches = (branches || []).filter(
-          branch => branch.id === ownerUser.branch_id
-        );
+        fullList = rows.filter(branch => branch.id === ownerUser.branch_id);
+        operableList = fullList;
       }
-      setAvailableBranches(filteredBranches);
-      if (filteredBranches.length > 0) {
-        if (ownerUser.role === 'owner') {
-          setCurrentBranch(filteredBranches[0]);
-        } else {
-          const assignedBranch = filteredBranches.find(b => b.id === ownerUser.branch_id);
-          setCurrentBranch(assignedBranch || filteredBranches[0]);
-        }
+
+      setAllBranches(fullList);
+      setAvailableBranches(operableList);
+
+      if (operableList.length > 0) {
+        setCurrentBranch(prev => {
+          const stillOk = prev && operableList.some(b => b.id === prev.id);
+          if (stillOk && prev) return prev;
+          const main = operableList.find(b => b.is_main === true);
+          return main ?? operableList[0];
+        });
+      } else {
+        setCurrentBranch(null);
       }
       setIsInitialized(true);
     } catch (error) {
+      setAllBranches([]);
       setAvailableBranches([]);
       setCurrentBranch(null);
       setIsInitialized(true);
@@ -79,6 +93,7 @@ export const BranchProvider: React.FC<BranchProviderProps> = ({ children }) => {
     if (user && profileReady) {
       loadBranchesFromDB(user as User);
     } else if (!user) {
+      setAllBranches([]);
       setAvailableBranches([]);
       setCurrentBranch(null);
       setIsInitialized(true);
@@ -88,6 +103,8 @@ export const BranchProvider: React.FC<BranchProviderProps> = ({ children }) => {
   const value: BranchContextType = {
     currentBranch,
     setCurrentBranch,
+    allBranches,
+    setAllBranches,
     availableBranches,
     setAvailableBranches,
     refreshBranches,

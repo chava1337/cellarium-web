@@ -95,7 +95,7 @@ export default function AppNavigator() {
       <Stack.Screen 
         name="AddWineToCatalog" 
         component={AddWineToCatalogScreen}
-        options={{ title: 'Agregar al Catálogo' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen 
         name="QrScanner" 

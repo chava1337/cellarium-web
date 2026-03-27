@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,13 +7,18 @@ import {
   ScrollView,
   TextInput,
   Image,
-  Alert,
   ActivityIndicator,
   Modal,
   Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CellariumHeader } from '../components/cellarium';
+import {
+  CellariumHeader,
+  CellariumModal,
+  CellariumPrimaryButton,
+  CellariumSecondaryButton,
+} from '../components/cellarium';
+import CellariumLoader from '../components/CellariumLoader';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
@@ -27,7 +32,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { useAdminGuard } from '../hooks/useAdminGuard';
 import { PendingApprovalMessage } from '../components/PendingApprovalMessage';
 import { supabase } from '../lib/supabase';
-import { CELLARIUM } from '../theme/cellariumTheme';
+import { CELLARIUM, CELLARIUM_LAYOUT, CELLARIUM_TEXT } from '../theme/cellariumTheme';
 
 type WineManagementScreenNavigationProp = StackNavigationProp<RootStackParamList, 'WineManagement'>;
 type WineManagementScreenRouteProp = RouteProp<RootStackParamList, 'WineManagement'>;
@@ -36,6 +41,15 @@ interface Props {
   navigation: WineManagementScreenNavigationProp;
   route: WineManagementScreenRouteProp;
 }
+
+type FeedbackDialogState = {
+  title: string;
+  message: string;
+  primaryLabel: string;
+  onPrimary: () => void;
+  secondaryLabel?: string;
+  onSecondary?: () => void;
+};
 
 interface WineFormData {
   name: string;
@@ -77,6 +91,15 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
   const [processing, setProcessing] = useState(false);
   const [wineData, setWineData] = useState<Partial<WineFormData>>({});
   const [showProCamera, setShowProCamera] = useState(false);
+  const [feedbackDialog, setFeedbackDialog] = useState<FeedbackDialogState | null>(null);
+
+  const dismissFeedbackDialog = useCallback(() => {
+    setFeedbackDialog(null);
+  }, []);
+
+  const showFeedbackDialog = useCallback((config: FeedbackDialogState) => {
+    setFeedbackDialog(config);
+  }, []);
 
   if (guardStatus === 'loading' || guardStatus === 'profile_loading') {
     return (
@@ -101,7 +124,12 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       
       if (!permissionResult.granted) {
-        Alert.alert(t('wine_mgmt.permission_required'), t('wine_mgmt.gallery_access'));
+        showFeedbackDialog({
+          title: t('wine_mgmt.permission_required'),
+          message: t('wine_mgmt.gallery_access'),
+          primaryLabel: t('wine_mgmt.understood'),
+          onPrimary: dismissFeedbackDialog,
+        });
         return;
       }
 
@@ -117,7 +145,12 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       }
     } catch (error) {
       console.error('Error seleccionando imagen del anverso:', error);
-      Alert.alert(t('msg.error'), t('wine_mgmt.error_select_front'));
+      showFeedbackDialog({
+        title: t('msg.error'),
+        message: t('wine_mgmt.error_select_front'),
+        primaryLabel: t('btn.close'),
+        onPrimary: dismissFeedbackDialog,
+      });
     }
   };
 
@@ -158,8 +191,13 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // Manejar error de la cámara profesional
   const handleProCameraError = (error: string) => {
-    Alert.alert(t('wine_mgmt.error_camera'), error);
     setShowProCamera(false);
+    showFeedbackDialog({
+      title: t('wine_mgmt.error_camera'),
+      message: error,
+      primaryLabel: t('btn.close'),
+      onPrimary: dismissFeedbackDialog,
+    });
   };
 
   // Guardar vino
@@ -178,26 +216,42 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 
     if (missingFields.length > 0) {
       const fieldNames = missingFields.map(({ label }) => label).join(', ');
-      Alert.alert(
-        t('wine_mgmt.missing_fields'),
-        `${t('wine_mgmt.missing_fields_msg')}\n\n${fieldNames}`,
-        [{ text: t('wine_mgmt.understood'), style: 'default' }]
-      );
+      showFeedbackDialog({
+        title: t('wine_mgmt.missing_fields'),
+        message: `${t('wine_mgmt.missing_fields_msg')}\n\n${fieldNames}`,
+        primaryLabel: t('wine_mgmt.understood'),
+        onPrimary: dismissFeedbackDialog,
+      });
       return;
     }
 
     if (!wineData.initial_stock || wineData.initial_stock <= 0) {
-      Alert.alert(t('msg.error'), t('wine_mgmt.error_stock'));
+      showFeedbackDialog({
+        title: t('msg.error'),
+        message: t('wine_mgmt.error_stock'),
+        primaryLabel: t('btn.close'),
+        onPrimary: dismissFeedbackDialog,
+      });
       return;
     }
 
     if (!currentBranch) {
-      Alert.alert(t('msg.error'), t('wine_mgmt.error_branch'));
+      showFeedbackDialog({
+        title: t('msg.error'),
+        message: t('wine_mgmt.error_branch'),
+        primaryLabel: t('btn.close'),
+        onPrimary: dismissFeedbackDialog,
+      });
       return;
     }
 
     if (!user) {
-      Alert.alert(t('msg.error'), t('wine_mgmt.error_auth'));
+      showFeedbackDialog({
+        title: t('msg.error'),
+        message: t('wine_mgmt.error_auth'),
+        primaryLabel: t('btn.close'),
+        onPrimary: dismissFeedbackDialog,
+      });
       return;
     }
 
@@ -237,8 +291,13 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 
           if (uploadError) {
             console.error('Error subiendo imagen:', uploadError);
-            Alert.alert(t('msg.error'), t('wine_mgmt.error_save') + ' ' + (uploadError.message || ''));
             setProcessing(false);
+            showFeedbackDialog({
+              title: t('msg.error'),
+              message: `${t('wine_mgmt.error_save')} ${uploadError.message || ''}`.trim(),
+              primaryLabel: t('btn.close'),
+              onPrimary: dismissFeedbackDialog,
+            });
             return;
           }
 
@@ -291,17 +350,16 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       );
 
       console.log('✅ Vino guardado exitosamente:', savedWine.id);
-      
-      Alert.alert(
-        t('wine_mgmt.success_title'),
-        `${wineData.name} ${t('wine_mgmt.success_msg')} ${wineData.initial_stock} ${t('wine_mgmt.success_bottles')}`,
-        [
-          {
-            text: t('btn.back'),
-            onPress: () => navigation.navigate('AdminDashboard'),
-          },
-        ]
-      );
+
+      showFeedbackDialog({
+        title: t('wine_mgmt.success_title'),
+        message: `${wineData.name} ${t('wine_mgmt.success_msg')} ${wineData.initial_stock} ${t('wine_mgmt.success_bottles')}`,
+        primaryLabel: t('btn.back'),
+        onPrimary: () => {
+          dismissFeedbackDialog();
+          navigation.navigate('AdminDashboard');
+        },
+      });
     } catch (error: any) {
       console.error('Error guardando vino:', error);
       
@@ -309,16 +367,26 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       const { mapSupabaseErrorToUi } = await import('../utils/supabaseErrorMapper');
       const errorUi = mapSupabaseErrorToUi(error, t);
       
-      // Mostrar Alert con CTA si aplica
-      const alertButtons: any[] = [{ text: t('btn.close') }];
       if (errorUi.ctaAction === 'subscriptions' && errorUi.ctaLabel) {
-        alertButtons.push({
-          text: errorUi.ctaLabel,
-          onPress: () => navigation.navigate('Subscriptions'),
+        showFeedbackDialog({
+          title: errorUi.title,
+          message: errorUi.message,
+          primaryLabel: t('btn.close'),
+          onPrimary: dismissFeedbackDialog,
+          secondaryLabel: errorUi.ctaLabel,
+          onSecondary: () => {
+            dismissFeedbackDialog();
+            navigation.navigate('Subscriptions');
+          },
+        });
+      } else {
+        showFeedbackDialog({
+          title: errorUi.title,
+          message: errorUi.message,
+          primaryLabel: t('btn.close'),
+          onPrimary: dismissFeedbackDialog,
         });
       }
-      
-      Alert.alert(errorUi.title, errorUi.message, alertButtons);
     } finally {
       setProcessing(false);
     }
@@ -578,11 +646,9 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
           onPress={handleSaveWine}
           disabled={processing}
         >
-          {processing ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.saveButtonText}>{t('wine_mgmt.save_wine')}</Text>
-          )}
+          <Text style={styles.saveButtonText}>
+            {processing ? t('wine_mgmt.processing') : t('wine_mgmt.save_wine')}
+          </Text>
         </TouchableOpacity>
       </View>
         </>
@@ -590,27 +656,52 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
     </ScrollView>
   );
 
+  const feedbackDialogFooter =
+    feedbackDialog == null ? null : (
+      <View style={styles.feedbackModalFooter}>
+        {feedbackDialog.secondaryLabel && feedbackDialog.onSecondary ? (
+          <CellariumSecondaryButton
+            title={feedbackDialog.secondaryLabel}
+            onPress={feedbackDialog.onSecondary}
+            variant="outline"
+          />
+        ) : null}
+        <CellariumPrimaryButton title={feedbackDialog.primaryLabel} onPress={feedbackDialog.onPrimary} />
+      </View>
+    );
+
   return (
     <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
-      <CellariumHeader title={t('wine_mgmt.title')} />
+      <CellariumHeader title={t('wine_mgmt.title')} compact />
 
       {renderCaptureScreen()}
 
-      {/* Modal de carga al guardar */}
-      {processing && (
-        <Modal
-          visible={processing}
-          transparent={true}
-          animationType="fade"
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <ActivityIndicator size="large" color={CELLARIUM.primary} />
-              <Text style={styles.modalText}>{t('wine_mgmt.processing')}</Text>
-            </View>
+      <CellariumModal
+        visible={feedbackDialog != null}
+        onRequestClose={dismissFeedbackDialog}
+        title={feedbackDialog?.title}
+        scrollable={false}
+        contentPaddingBottom={insets.bottom}
+        footer={feedbackDialogFooter}
+      >
+        {feedbackDialog ? (
+          <Text style={[CELLARIUM_TEXT.body, styles.feedbackModalMessage]}>{feedbackDialog.message}</Text>
+        ) : null}
+      </CellariumModal>
+
+      {/* Overlay de guardado: Lottie + bloqueo táctil */}
+      {processing ? (
+        <Modal visible={true} transparent animationType="fade" statusBarTranslucent>
+          <View style={styles.savingOverlayRoot} pointerEvents="auto">
+            <CellariumLoader
+              overlay
+              fullscreen
+              size={140}
+              label={t('wine_mgmt.processing_label')}
+            />
           </View>
         </Modal>
-      )}
+      ) : null}
 
       {/* Modal de Cámara Profesional */}
       {showProCamera && (
@@ -677,16 +768,16 @@ const styles = StyleSheet.create({
     backgroundColor: CELLARIUM.bg,
   },
   captureContent: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 44,
+    paddingHorizontal: CELLARIUM_LAYOUT.screenPadding,
+    paddingTop: 12,
+    paddingBottom: 28,
   },
   heroCard: {
     backgroundColor: CELLARIUM.card,
-    borderRadius: 18,
-    paddingHorizontal: 18,
-    paddingVertical: 18,
-    marginBottom: 14,
+    borderRadius: CELLARIUM_LAYOUT.cardRadius,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.04)',
     shadowColor: '#000',
@@ -696,17 +787,18 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   heroDescription: {
-    fontSize: 15,
-    lineHeight: 22,
-    color: '#555',
+    ...CELLARIUM_TEXT.body,
+    fontSize: 14,
+    lineHeight: 20,
+    color: CELLARIUM.muted,
   },
   photoSectionCard: {
     backgroundColor: CELLARIUM.card,
-    borderRadius: 20,
-    paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 18,
-    marginBottom: 18,
+    borderRadius: CELLARIUM_LAYOUT.cardRadius,
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 14,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.04)',
     shadowColor: '#000',
@@ -716,16 +808,13 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   photoSectionTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: CELLARIUM.text,
-    marginBottom: 6,
+    ...CELLARIUM_TEXT.sectionTitle,
+    fontSize: 16,
+    marginBottom: 4,
   },
   photoSectionHint: {
-    fontSize: 13,
-    lineHeight: 18,
-    color: CELLARIUM.muted,
-    marginBottom: 16,
+    ...CELLARIUM_TEXT.caption,
+    marginBottom: 10,
   },
   photoButtonsRow: {
     flexDirection: 'row',
@@ -734,8 +823,8 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     flex: 1,
-    minHeight: 52,
-    borderRadius: 16,
+    minHeight: CELLARIUM_LAYOUT.buttonHeight - 2,
+    borderRadius: CELLARIUM_LAYOUT.buttonRadius,
     backgroundColor: CELLARIUM.primary,
     alignItems: 'center',
     justifyContent: 'center',
@@ -748,8 +837,8 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     flex: 1,
-    minHeight: 52,
-    borderRadius: 16,
+    minHeight: CELLARIUM_LAYOUT.buttonHeight - 2,
+    borderRadius: CELLARIUM_LAYOUT.buttonRadius,
     backgroundColor: CELLARIUM.card,
     alignItems: 'center',
     justifyContent: 'center',
@@ -771,7 +860,7 @@ const styles = StyleSheet.create({
   },
   previewImage: {
     width: '100%',
-    height: 260,
+    height: 220,
     resizeMode: 'cover',
   },
   removeImageButton: {
@@ -791,39 +880,35 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   sectionTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: CELLARIUM.text,
-    marginTop: 6,
-    marginBottom: 12,
-    letterSpacing: 0.2,
+    ...CELLARIUM_TEXT.sectionTitle,
+    fontSize: 16,
+    marginTop: 4,
+    marginBottom: 8,
   },
   formGroup: {
-    marginBottom: 14,
+    marginBottom: 10,
   },
   formGroupFlex: {
     flex: 1,
-    marginBottom: 14,
+    marginBottom: 10,
   },
   formRow: {
     flexDirection: 'row',
     gap: 12,
   },
   label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: CELLARIUM.text,
-    marginBottom: 6,
+    ...CELLARIUM_TEXT.label,
+    marginBottom: 4,
   },
   input: {
-    minHeight: 48,
+    minHeight: 44,
     backgroundColor: CELLARIUM.card,
     borderWidth: 1,
-    borderColor: '#E5E5E8',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
+    borderColor: CELLARIUM.border,
+    borderRadius: CELLARIUM_LAYOUT.inputRadius,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
     color: CELLARIUM.text,
   },
   typeChipsRow: {
@@ -832,11 +917,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   typeChip: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
     borderRadius: 999,
     borderWidth: 1.5,
-    borderColor: '#D9D9DE',
+    borderColor: CELLARIUM.border,
     backgroundColor: CELLARIUM.card,
   },
   typeChipSelected: {
@@ -844,9 +929,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(146,64,72,0.10)',
   },
   typeChipText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
-    color: '#444',
+    color: CELLARIUM.text,
   },
   typeChipTextSelected: {
     color: CELLARIUM.primary,
@@ -854,15 +939,15 @@ const styles = StyleSheet.create({
   },
   sensoryRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 4,
+    gap: 6,
+    marginTop: 2,
   },
   sensoryBtn: {
     flex: 1,
-    minHeight: 42,
-    borderRadius: 12,
+    minHeight: 38,
+    borderRadius: CELLARIUM_LAYOUT.inputRadius,
     borderWidth: 1.5,
-    borderColor: '#D9D9DE',
+    borderColor: CELLARIUM.border,
     backgroundColor: CELLARIUM.card,
     alignItems: 'center',
     justifyContent: 'center',
@@ -872,7 +957,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(146,64,72,0.12)',
   },
   sensoryBtnText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: CELLARIUM.text,
   },
@@ -880,22 +965,21 @@ const styles = StyleSheet.create({
     color: CELLARIUM.primary,
   },
   helpText: {
-    fontSize: 12,
-    color: CELLARIUM.muted,
-    marginTop: 5,
+    ...CELLARIUM_TEXT.caption,
+    marginTop: 4,
     fontStyle: 'italic',
   },
   actionButtons: {
-    marginTop: 22,
-    marginBottom: 40,
+    marginTop: 14,
+    marginBottom: 24,
   },
   saveButton: {
-    minHeight: 54,
-    borderRadius: 16,
+    minHeight: CELLARIUM_LAYOUT.buttonHeight,
+    borderRadius: CELLARIUM_LAYOUT.buttonRadius,
     backgroundColor: CELLARIUM.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.14,
@@ -907,32 +991,18 @@ const styles = StyleSheet.create({
     backgroundColor: CELLARIUM.muted,
   },
   saveButtonText: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#FFFFFF',
+    ...CELLARIUM_TEXT.buttonText,
+    fontSize: 16,
   },
-  modalOverlay: {
+  savingOverlayRoot: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
   },
-  modalContent: {
-    width: '100%',
-    maxWidth: 320,
-    backgroundColor: CELLARIUM.card,
-    borderRadius: 20,
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    alignItems: 'center',
+  feedbackModalFooter: {
+    gap: 10,
   },
-  modalText: {
-    marginTop: 14,
-    fontSize: 15,
-    color: '#444',
+  feedbackModalMessage: {
     textAlign: 'center',
-    lineHeight: 22,
+    marginBottom: 4,
   },
   proCameraContainer: {
     flex: 1,

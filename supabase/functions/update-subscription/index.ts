@@ -1,9 +1,10 @@
 // Edge Function: update-subscription
-// Actualiza el add-on mensual de sucursales en Stripe y sincroniza con public.users
+// Actualiza el add-on mensual de sucursales en Stripe y sincroniza con public.users (UI: sucursales adicionales)
 // Solo owners en plan Business pueden ejecutar esta función
 // Usa REST API directa (sin Stripe SDK) para evitar node polyfills
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { hasActiveAppleSubscription } from '../_shared/billing_coexistence.ts';
 import { stripeRequest } from '../_shared/stripe_rest.ts';
 
 const corsHeaders = {
@@ -70,7 +71,9 @@ Deno.serve(async (req: Request) => {
     // Cargar usuario desde public.users (fuente de verdad para plan)
     const { data: userData, error: userDataError } = await supabaseAdmin
       .from('users')
-      .select('id, role, owner_id, subscription_plan, stripe_customer_id, signup_method, owner_email_verified')
+      .select(
+        'id, role, owner_id, subscription_plan, stripe_customer_id, signup_method, owner_email_verified, billing_provider'
+      )
       .eq('id', authUser.id)
       .single();
 
@@ -93,9 +96,20 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    if (
+      userData.billing_provider === 'apple' ||
+      (await hasActiveAppleSubscription(supabaseAdmin, ownerId))
+    ) {
+      return json(409, {
+        error:
+          'Las sucursales adicionales con Stripe no aplican a la suscripción de Apple. Gestiona el plan desde iOS.',
+        code: 'APPLE_SUBSCRIPTION_ACTIVE',
+      });
+    }
+
     if (userData.subscription_plan !== 'additional-branch') {
       return json(403, {
-        error: 'Los add-ons de sucursales solo están disponibles en el plan Business',
+        error: 'Las sucursales adicionales solo están disponibles en el plan Business',
         code: 'PLAN_NOT_ALLOWED',
       });
     }
@@ -133,6 +147,32 @@ Deno.serve(async (req: Request) => {
     }
 
     const safeQty = Math.min(Math.max(Math.floor(addonBranchesQty), 0), 50);
+
+    /** Business: sucursales base incluidas (alineado con get_branch_limit / app). */
+    const BUSINESS_BASE_BRANCHES = 3;
+    const { count: activeBranchCount, error: branchCountError } = await supabaseAdmin
+      .from('branches')
+      .select('*', { count: 'exact', head: true })
+      .eq('owner_id', ownerId);
+
+    if (branchCountError) {
+      console.error('[update-subscription] branch count:', branchCountError.message);
+      return json(500, {
+        error: 'No se pudo validar sucursales activas',
+        code: 'BRANCH_COUNT_ERROR',
+      });
+    }
+
+    const newAllowedBranches = BUSINESS_BASE_BRANCHES + safeQty;
+    const active = activeBranchCount ?? 0;
+    if (active > newAllowedBranches) {
+      return json(400, {
+        error:
+          'No puedes reducir sucursales adicionales porque tienes más sucursales activas de las permitidas.',
+        code: 'BRANCH_REDUCTION_NOT_ALLOWED',
+        details: { activeBranches: active, allowed: newAllowedBranches },
+      });
+    }
 
     const stripeSecretKey = Deno.env.get('STRIPE_SECRET_KEY');
     if (!stripeSecretKey) {

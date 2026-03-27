@@ -45,7 +45,7 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
     route,
     allowedRoles: ['owner', 'gerente', 'sommelier', 'supervisor'],
   });
-  const { availableBranches, setAvailableBranches, refreshBranches, setCurrentBranch } = useBranch();
+  const { allBranches, setAllBranches, setAvailableBranches, refreshBranches, setCurrentBranch } = useBranch();
   const { user } = useAuth();
   const { t } = useLanguage();
   const [subscriptionAllowed, setSubscriptionAllowed] = useState<'pending' | true | false>('pending');
@@ -157,17 +157,18 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         if (error) throw error;
 
         // Actualizar estado local
-        const updatedBranches = availableBranches.map(branch =>
+        const updatedBranches = allBranches.map(branch =>
           branch.id === editingBranch.id ? data : branch
         );
-        setAvailableBranches(updatedBranches);
+        setAllBranches(updatedBranches);
+        setAvailableBranches(updatedBranches.filter(b => b.is_locked !== true));
         Alert.alert('Éxito', `Sucursal ${normalizedName} actualizada correctamente`);
         setIsEditModalVisible(false);
         setEditingBranch(null);
         setFormData({ name: '', address: '', phone: '', email: '' });
       } else {
         const uniqueBranches = Array.from(
-          new Map(availableBranches.map(b => [b.id, b])).values()
+          new Map(allBranches.map(b => [b.id, b])).values()
         );
         const existingNames = new Set(uniqueBranches.map(b => b.name.trim().toLowerCase()));
         if (existingNames.has(normalizedLower)) {
@@ -364,7 +365,7 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         </TouchableOpacity>
         {(() => {
           const uniqueBranches = Array.from(
-            new Map(availableBranches.map(b => [b.id, b])).values()
+            new Map(allBranches.map(b => [b.id, b])).values()
           );
           return (
             <>
@@ -378,6 +379,9 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                 {branch.name}
                 {(branch as Branch & { is_main?: boolean }).is_main && (
                   <Text style={styles.mainBadge}> {' ⭐ Principal'}</Text>
+                )}
+                {branch.is_locked && (
+                  <Text style={styles.lockedHint}> — {t('branches.locked_by_subscription')}</Text>
                 )}
               </Text>
             </View>
@@ -524,6 +528,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: CELLARIUM.primary,
+  },
+  lockedHint: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#888',
   },
   branchAddress: {
     fontSize: 14,

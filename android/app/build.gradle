@@ -104,15 +104,26 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // Release: credenciales vía gradle.properties (MYAPP_UPLOAD_*) o inyectadas por EAS Build.
+        // No usar signingConfigs.debug para release (inválido para Play Store).
+        // https://reactnative.dev/docs/signed-apk-android
+        release {
+            if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
+                storeFile file(MYAPP_UPLOAD_STORE_FILE)
+                storePassword MYAPP_UPLOAD_STORE_PASSWORD
+                keyAlias MYAPP_UPLOAD_KEY_ALIAS
+                keyPassword MYAPP_UPLOAD_KEY_PASSWORD
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
+                signingConfig signingConfigs.release
+            }
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
@@ -179,4 +190,11 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+}
+
+// EAS Build: inyecta android/app/eas-build.gradle en CI con firma desde credentials.json.
+// https://docs.expo.dev/build-reference/android-builds/#configuring-gradle
+def easBuildGradleFile = file("eas-build.gradle")
+if (easBuildGradleFile.exists()) {
+    apply from: easBuildGradleFile
 }

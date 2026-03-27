@@ -9,6 +9,7 @@ import {
   TextInput,
   ScrollView,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -21,6 +22,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { supabase } from '../lib/supabase';
 import { CELLARIUM, CELLARIUM_LAYOUT } from '../theme/cellariumTheme';
 import { CellariumHeader } from '../components/cellarium';
+import { LEGAL_URLS } from '../config/legalUrls';
 
 type SettingsScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Settings'>;
 type SettingsScreenRouteProp = RouteProp<RootStackParamList, 'Settings'>;
@@ -61,6 +63,28 @@ async function extractFunctionsHttpErrorDetails(
   } catch (e) {
     if (__DEV__) console.log('[delete-user-account] extractFunctionsHttpErrorDetails failed:', e);
     return null;
+  }
+}
+
+async function openExternalLegalUrl(
+  url: string,
+  errorTitle: string,
+  errorMessage: string
+): Promise<void> {
+  const trimmed = url.trim();
+  if (!trimmed) {
+    Alert.alert(errorTitle, errorMessage);
+    return;
+  }
+  try {
+    const supported = await Linking.canOpenURL(trimmed);
+    if (!supported) {
+      Alert.alert(errorTitle, errorMessage);
+      return;
+    }
+    await Linking.openURL(trimmed);
+  } catch {
+    Alert.alert(errorTitle, errorMessage);
   }
 }
 
@@ -159,17 +183,19 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
 
         if (error) {
           const err = error as Record<string, unknown>;
-          console.log('[delete-user-account] error.message:', err?.message);
-          console.log('[delete-user-account] error.name:', err?.name);
-          console.log('[delete-user-account] error.code:', err?.code);
-          try {
-            const str = JSON.stringify(error, null, 2);
-            const safe = str.length > 2000 ? str.slice(0, 2000) + '... [truncated]' : str;
-            console.log('[delete-user-account] JSON.stringify(error):', safe);
-          } catch (e) {
-            console.log('[delete-user-account] JSON.stringify(error) failed:', e);
+          if (__DEV__) {
+            console.log('[delete-user-account] error.message:', err?.message);
+            console.log('[delete-user-account] error.name:', err?.name);
+            console.log('[delete-user-account] error.code:', err?.code);
+            try {
+              const str = JSON.stringify(error, null, 2);
+              const safe = str.length > 2000 ? str.slice(0, 2000) + '... [truncated]' : str;
+              console.log('[delete-user-account] JSON.stringify(error):', safe);
+            } catch (e) {
+              console.log('[delete-user-account] JSON.stringify(error) failed:', e);
+            }
+            console.log('[delete-user-account] Object.keys(error):', Object.keys(err ?? {}));
           }
-          console.log('[delete-user-account] Object.keys(error):', Object.keys(err ?? {}));
 
           let status: number | undefined;
           let bodyText = '';
@@ -177,7 +203,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
           if (details) {
             status = details.status;
             bodyText = details.bodyText;
-          } else {
+          } else if (__DEV__) {
             console.log('[delete-user-account] no response in error.context (network/cors/platform block)');
           }
 
@@ -248,12 +274,12 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
           setIsDeleting(false);
         }
       } catch (e) {
-        console.log('[delete-user-account] caught exception:', e);
+        if (__DEV__) console.log('[delete-user-account] caught exception:', e);
         Alert.alert(t('msg.error'), 'Error inesperado');
         setIsDeleting(false);
       }
     } catch (error: any) {
-      console.error('Error en eliminación:', error);
+      if (__DEV__) console.error('Error en eliminación:', error);
       Alert.alert(t('msg.error'), t('msg.error'));
       setIsDeleting(false);
     }
@@ -295,6 +321,63 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
                user?.role === 'personal' ? 'Personal' : user?.role || 'N/A'}
             </Text>
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{t('settings.legal_section')}</Text>
+
+          <TouchableOpacity
+            style={styles.legalRow}
+            onPress={() =>
+              openExternalLegalUrl(
+                LEGAL_URLS.privacyPolicy,
+                t('msg.error'),
+                t('settings.link_open_error')
+              )
+            }
+            activeOpacity={0.7}
+            accessibilityRole="link"
+            accessibilityLabel={t('settings.privacy_policy')}
+          >
+            <Text style={styles.legalRowLabel}>{t('settings.privacy_policy')}</Text>
+            <Text style={styles.legalRowChevron} accessible={false}>
+              ›
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.legalRow}
+            onPress={() =>
+              openExternalLegalUrl(
+                LEGAL_URLS.termsOfService,
+                t('msg.error'),
+                t('settings.link_open_error')
+              )
+            }
+            activeOpacity={0.7}
+            accessibilityRole="link"
+            accessibilityLabel={t('settings.terms_of_service')}
+          >
+            <Text style={styles.legalRowLabel}>{t('settings.terms_of_service')}</Text>
+            <Text style={styles.legalRowChevron} accessible={false}>
+              ›
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.legalRow, styles.legalRowLast]}
+            onPress={() =>
+              openExternalLegalUrl(LEGAL_URLS.support, t('msg.error'), t('settings.link_open_error'))
+            }
+            activeOpacity={0.7}
+            accessibilityRole="link"
+            accessibilityLabel={t('settings.support')}
+          >
+            <Text style={styles.legalRowLabel}>{t('settings.support')}</Text>
+            <Text style={styles.legalRowChevron} accessible={false}>
+              ›
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.section}>
@@ -446,6 +529,28 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#2C2C2C',
+  },
+  legalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: CELLARIUM.border,
+  },
+  legalRowLast: {
+    borderBottomWidth: 0,
+  },
+  legalRowLabel: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '500',
+    color: CELLARIUM.primary,
+  },
+  legalRowChevron: {
+    fontSize: 20,
+    color: CELLARIUM.muted,
+    marginLeft: 8,
   },
   actionButton: {
     height: UI.buttonHeight,

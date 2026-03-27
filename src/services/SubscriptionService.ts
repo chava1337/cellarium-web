@@ -38,7 +38,7 @@ export async function createSubscription(
 
     const planPrices: Record<SubscriptionPlan, number> = {
       free: 0,
-      basic: 95000, // $950.00 MXN en centavos
+      basic: 129000, // $1,290.00 MXN en centavos (Pro; alineado con UI / Stripe test)
       'additional-branch': 49900, // $499.00 MXN en centavos (add-on por sucursal)
     };
 

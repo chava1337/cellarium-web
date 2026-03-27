@@ -1,26 +1,71 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  TouchableOpacity,
+} from 'react-native';
 import { StackScreenProps } from '@react-navigation/stack';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranch } from '../contexts/BranchContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { addWineToUserCatalog, getBilingualValue } from '../services/GlobalWineCatalogService';
 import { mapSupabaseErrorToUi } from '../utils/supabaseErrorMapper';
+import {
+  CELLARIUM,
+  CELLARIUM_LAYOUT,
+  CELLARIUM_TEXT,
+} from '../theme/cellariumTheme';
+import {
+  CellariumHeader,
+  CellariumCard,
+  CellariumModal,
+  CellariumPrimaryButton,
+  CellariumSecondaryButton,
+  CellariumTextField,
+} from '../components/cellarium';
 
 type Props = StackScreenProps<RootStackParamList, 'AddWineToCatalog'>;
+
+type DialogState = {
+  title: string;
+  message: string;
+  primaryLabel: string;
+  onPrimary: () => void;
+  secondaryLabel?: string;
+  onSecondary?: () => void;
+};
 
 const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
   const { wine } = route.params;
   const { user, profileReady } = useAuth();
   const { currentBranch } = useBranch();
   const { t } = useLanguage();
+  const insets = useSafeAreaInsets();
 
   const [priceBottle, setPriceBottle] = useState('');
   const [priceGlass, setPriceGlass] = useState('');
   const [stock, setStock] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [hasWarnedForBranchName, setHasWarnedForBranchName] = useState(false);
+  const [dialog, setDialog] = useState<DialogState | null>(null);
+
+  const wineDisplayName =
+    getBilingualValue(wine.label) || getBilingualValue(wine.winery) || 'Vino';
+
+  const showDialog = useCallback((config: DialogState) => {
+    setDialog(config);
+  }, []);
+
+  const dismissDialog = useCallback(() => {
+    setDialog(null);
+  }, []);
 
   useEffect(() => {
     if (hasWarnedForBranchName) return;
@@ -36,39 +81,70 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
       ? 'Antes de agregar vinos debes definir el nombre de tu restaurante o centro de consumo. Puedes editarlo desde Gestión de Sucursales.'
       : 'El owner debe definir el nombre del restaurante o centro de consumo antes de agregar vinos. Contacta al responsable para que lo configure.';
 
-    const buttons = isOwner
-      ? [
-          { text: 'Volver', style: 'cancel' as const, onPress: () => navigation.goBack() },
-          { text: 'Configurar ahora', onPress: () => navigation.replace('BranchManagement') },
-        ]
-      : [
-          { text: 'Entendido', onPress: () => navigation.goBack() },
-        ];
-
-    Alert.alert(title, message, buttons);
-  }, [currentBranch, hasWarnedForBranchName, navigation, user?.role]);
+    if (isOwner) {
+      showDialog({
+        title,
+        message,
+        primaryLabel: 'Configurar ahora',
+        onPrimary: () => {
+          dismissDialog();
+          navigation.replace('BranchManagement');
+        },
+        secondaryLabel: 'Volver',
+        onSecondary: () => {
+          dismissDialog();
+          navigation.goBack();
+        },
+      });
+    } else {
+      showDialog({
+        title,
+        message,
+        primaryLabel: 'Entendido',
+        onPrimary: () => {
+          dismissDialog();
+          navigation.goBack();
+        },
+      });
+    }
+  }, [currentBranch, dismissDialog, hasWarnedForBranchName, navigation, showDialog, user?.role]);
 
   const onSubmit = async () => {
     if (!user || !profileReady || !currentBranch) {
-      Alert.alert('Error', 'Usuario o sucursal no identificados');
+      showDialog({
+        title: 'Error',
+        message: 'Usuario o sucursal no identificados',
+        primaryLabel: t('btn.close'),
+        onPrimary: dismissDialog,
+      });
       return;
     }
 
     const branchName = currentBranch.name?.trim();
     if (!branchName) {
       const isOwner = user.role === 'owner';
-      Alert.alert(
-        'Nombre del restaurante requerido',
-        isOwner
-          ? 'Define el nombre de tu restaurante o centro de consumo antes de agregar vinos.'
-          : 'Contacta al owner para que defina el nombre del restaurante o centro de consumo.',
-        isOwner
-          ? [
-              { text: 'Cancelar', style: 'cancel' },
-              { text: 'Ir a Gestión', onPress: () => navigation.replace('BranchManagement') },
-            ]
-          : [{ text: 'Entendido', style: 'default' }]
-      );
+      if (isOwner) {
+        showDialog({
+          title: 'Nombre del restaurante requerido',
+          message:
+            'Define el nombre de tu restaurante o centro de consumo antes de agregar vinos.',
+          primaryLabel: 'Ir a Gestión',
+          onPrimary: () => {
+            dismissDialog();
+            navigation.replace('BranchManagement');
+          },
+          secondaryLabel: 'Cancelar',
+          onSecondary: dismissDialog,
+        });
+      } else {
+        showDialog({
+          title: 'Nombre del restaurante requerido',
+          message:
+            'Contacta al owner para que defina el nombre del restaurante o centro de consumo.',
+          primaryLabel: 'Entendido',
+          onPrimary: dismissDialog,
+        });
+      }
       return;
     }
 
@@ -78,15 +154,30 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
     const qty = stock ? Number(stock) : undefined;
 
     if (bottle != null && isNaN(bottle)) {
-      Alert.alert('Dato inválido', 'Precio por botella no es un número');
+      showDialog({
+        title: 'Dato inválido',
+        message: 'Precio por botella no es un número',
+        primaryLabel: t('btn.close'),
+        onPrimary: dismissDialog,
+      });
       return;
     }
     if (glass != null && isNaN(glass)) {
-      Alert.alert('Dato inválido', 'Precio por copa no es un número');
+      showDialog({
+        title: 'Dato inválido',
+        message: 'Precio por copa no es un número',
+        primaryLabel: t('btn.close'),
+        onPrimary: dismissDialog,
+      });
       return;
     }
     if (qty != null && isNaN(qty)) {
-      Alert.alert('Dato inválido', 'Stock debe ser un número');
+      showDialog({
+        title: 'Dato inválido',
+        message: 'Stock debe ser un número',
+        primaryLabel: t('btn.close'),
+        onPrimary: dismissDialog,
+      });
       return;
     }
 
@@ -103,152 +194,187 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
         canonicalWine: wine,
       });
 
-      Alert.alert('✅ Vino agregado', 'Se agregó correctamente al catálogo', [
-        { 
-          text: 'OK', 
-          onPress: () => {
-            // Notificar a la pantalla anterior que se actualice la lista
-            navigation.goBack();
-          }
+      showDialog({
+        title: 'Vino agregado',
+        message: 'Se agregó correctamente al catálogo.',
+        primaryLabel: 'OK',
+        onPrimary: () => {
+          dismissDialog();
+          navigation.goBack();
         },
-      ]);
-    } catch (e: any) {
-      console.error('add wine error', e);
-      
-      // Mapear error de Supabase a UI amigable
+      });
+    } catch (e: unknown) {
+      if (__DEV__) console.error('add wine error', e);
+
       const errorUi = mapSupabaseErrorToUi(e, t);
-      
-      // Mostrar Alert con CTA si aplica
-      const alertButtons: any[] = [{ text: t('btn.close') }];
+
       if (errorUi.ctaAction === 'subscriptions' && errorUi.ctaLabel) {
-        alertButtons.push({
-          text: errorUi.ctaLabel,
-          onPress: () => navigation.navigate('Subscriptions'),
+        showDialog({
+          title: errorUi.title,
+          message: errorUi.message,
+          primaryLabel: t('btn.close'),
+          onPrimary: dismissDialog,
+          secondaryLabel: errorUi.ctaLabel,
+          onSecondary: () => {
+            dismissDialog();
+            navigation.navigate('Subscriptions');
+          },
+        });
+      } else {
+        showDialog({
+          title: errorUi.title,
+          message: errorUi.message,
+          primaryLabel: t('btn.close'),
+          onPrimary: dismissDialog,
         });
       }
-      
-      Alert.alert(errorUi.title, errorUi.message, alertButtons);
     } finally {
       setSubmitting(false);
     }
   };
 
+  const dialogFooter =
+    dialog == null ? null : (
+      <View style={styles.modalFooter}>
+        {dialog.secondaryLabel && dialog.onSecondary ? (
+          <CellariumSecondaryButton
+            title={dialog.secondaryLabel}
+            onPress={dialog.onSecondary}
+            variant="outline"
+          />
+        ) : null}
+        <CellariumPrimaryButton title={dialog.primaryLabel} onPress={dialog.onPrimary} />
+      </View>
+    );
+
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Agregar al Catálogo</Text>
-        <Text style={styles.subtitle}>
-          {getBilingualValue(wine.label) || getBilingualValue(wine.winery) || 'Vino'}
-        </Text>
-
-        <View style={styles.field}> 
-          <Text style={styles.label}>Precio por botella</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Ej. 450"
-            keyboardType="numeric"
-            value={priceBottle}
-            onChangeText={setPriceBottle}
-          />
-        </View>
-
-        <View style={styles.field}> 
-          <Text style={styles.label}>Precio por copa (opcional)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Ej. 120"
-            keyboardType="numeric"
-            value={priceGlass}
-            onChangeText={setPriceGlass}
-          />
-        </View>
-
-        <View style={styles.field}> 
-          <Text style={styles.label}>Stock inicial (opcional)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Ej. 6"
-            keyboardType="numeric"
-            value={stock}
-            onChangeText={setStock}
-          />
-        </View>
-
-        <View style={styles.actions}>
-          <TouchableOpacity style={[styles.btn, styles.btnSecondary]} disabled={submitting} onPress={() => navigation.goBack()}>
-            <Text style={styles.btnText}>Cancelar</Text>
+    <SafeAreaView style={styles.safe} edges={['bottom', 'left', 'right']}>
+      <CellariumHeader
+        title="Agregar al Catálogo"
+        subtitle={wineDisplayName}
+        leftSlot={
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityRole="button"
+            accessibilityLabel={t('btn.back') || 'Volver'}
+          >
+            <Ionicons name="chevron-back" size={26} color={CELLARIUM.textOnDark} />
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.btn, styles.btnPrimary]} disabled={submitting} onPress={onSubmit}>
-            <Text style={styles.btnText}>{submitting ? 'Guardando…' : 'Guardar'}</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        }
+      />
+
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: Math.max(insets.bottom, 24) + CELLARIUM_LAYOUT.sectionGap },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <CellariumCard style={styles.card}>
+            <CellariumTextField
+              label="Precio por botella"
+              placeholder="Ej. 450"
+              keyboardType="numeric"
+              value={priceBottle}
+              onChangeText={setPriceBottle}
+              containerStyle={styles.field}
+            />
+            <CellariumTextField
+              label="Precio por copa (opcional)"
+              placeholder="Ej. 120"
+              keyboardType="numeric"
+              value={priceGlass}
+              onChangeText={setPriceGlass}
+              containerStyle={styles.field}
+            />
+            <CellariumTextField
+              label="Stock inicial (opcional)"
+              placeholder="Ej. 6"
+              keyboardType="numeric"
+              value={stock}
+              onChangeText={setStock}
+              containerStyle={styles.field}
+            />
+
+            <View style={styles.actions}>
+              <View style={styles.actionHalf}>
+                <CellariumSecondaryButton
+                  title="Cancelar"
+                  onPress={() => navigation.goBack()}
+                  disabled={submitting}
+                  variant="neutral"
+                />
+              </View>
+              <View style={styles.actionHalf}>
+                <CellariumPrimaryButton
+                  title={submitting ? 'Guardando…' : 'Guardar'}
+                  onPress={onSubmit}
+                  disabled={submitting}
+                  loading={submitting}
+                />
+              </View>
+            </View>
+          </CellariumCard>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      <CellariumModal
+        visible={dialog != null}
+        onRequestClose={dismissDialog}
+        title={dialog?.title}
+        scrollable={false}
+        contentPaddingBottom={insets.bottom}
+        footer={dialogFooter}
+      >
+        {dialog ? (
+          <Text style={[CELLARIUM_TEXT.body, styles.modalMessage]}>{dialog.message}</Text>
+        ) : null}
+      </CellariumModal>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    padding: 20,
-    backgroundColor: '#fff',
-    flexGrow: 1,
+  safe: {
+    flex: 1,
+    backgroundColor: CELLARIUM.bg,
   },
-  title: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    marginBottom: 4,
-    color: '#8B0000',
+  flex: {
+    flex: 1,
   },
-  subtitle: {
-    fontSize: 16,
-    color: '#555',
-    marginBottom: 20,
+  scrollContent: {
+    paddingHorizontal: CELLARIUM_LAYOUT.screenPadding,
+    paddingTop: CELLARIUM_LAYOUT.sectionGap,
+  },
+  card: {
+    marginBottom: CELLARIUM_LAYOUT.sectionGap,
   },
   field: {
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 14,
-    color: '#333',
-    marginBottom: 6,
-  },
-  input: {
-    height: 46,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    backgroundColor: '#fff',
+    marginBottom: CELLARIUM_LAYOUT.sectionGap,
   },
   actions: {
     flexDirection: 'row',
+    marginTop: CELLARIUM_LAYOUT.sectionGap,
     gap: 12,
-    marginTop: 24,
   },
-  btn: {
+  actionHalf: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
+    minWidth: 0,
   },
-  btnPrimary: {
-    backgroundColor: '#8B0000',
+  modalFooter: {
+    gap: 10,
   },
-  btnSecondary: {
-    backgroundColor: '#666',
-  },
-  btnText: {
-    color: '#fff',
-    fontWeight: '600',
+  modalMessage: {
+    textAlign: 'center',
+    marginBottom: 4,
   },
 });
 
 export default AddWineToCatalogScreen;
-
-
-
-
-
-
-
-
