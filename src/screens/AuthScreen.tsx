@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { supabase } from '../lib/supabase';
 import { withTimeout, TimeoutError } from '../utils/withTimeout';
 import { useAuth } from '../contexts/AuthContext';
+import AppleSignInButton from '../components/auth/AppleSignInButton';
 
 interface AuthScreenProps {
   onAuthSuccess: () => void;
@@ -36,6 +37,10 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [appleAuthBusy, setAppleAuthBusy] = useState(false);
+  const onAppleBusyChange = useCallback((busy: boolean) => {
+    setAppleAuthBusy(busy);
+  }, []);
 
   // Al detectar user en contexto (tras loadUserData), apagar loading local y opcionalmente limpiar campos
   useEffect(() => {
@@ -439,13 +444,17 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
             </View>
 
             <View style={styles.form}>
+              <AppleSignInButton
+                disabled={loading || submitting}
+                onBusyChange={onAppleBusyChange}
+              />
               <TouchableOpacity
-                style={[styles.googleButtonContainer, loading && styles.buttonDisabled]}
+                style={[styles.googleButtonContainer, (loading || appleAuthBusy) && styles.buttonDisabled]}
                 onPress={handleGoogleAuth}
-                disabled={loading}
+                disabled={loading || appleAuthBusy}
                 activeOpacity={0.8}
               >
-                {loading ? (
+                {loading || appleAuthBusy ? (
                   <View style={styles.googleButtonLoading}>
                     <ActivityIndicator size="small" color="#1f2937" />
                   </View>
@@ -566,9 +575,9 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
               )}
 
               <TouchableOpacity
-                style={[styles.emailButton, (loading || submitting) && styles.buttonDisabled]}
+                style={[styles.emailButton, (loading || submitting || appleAuthBusy) && styles.buttonDisabled]}
                 onPress={handleEmailPasswordAuth}
-                disabled={loading || submitting}
+                disabled={loading || submitting || appleAuthBusy}
               >
                 <View style={styles.buttonContent}>
                   {loading && (

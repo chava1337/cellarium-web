@@ -10,6 +10,7 @@ const OTHER_PLUGINS = [
   "expo-font",
   "expo-secure-store",
   "expo-web-browser",
+  "expo-apple-authentication",
   "@sentry/react-native",
   "react-native-iap",
 ];
@@ -52,6 +53,7 @@ const config = {
     // Configuración específica para iOS
     ios: {
       supportsTablet: true,
+      usesAppleSignIn: true,
       merchantIdentifier: "merchant.com.cellarium.app",
       orientation: "default",
       bundleIdentifier: "com.cellarium.winecatalog",
