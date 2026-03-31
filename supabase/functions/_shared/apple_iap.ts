@@ -3,7 +3,9 @@ export const APPLE_IAP_PRODUCT_MAP: Record<
   string,
   { planId: 'basic' | 'additional-branch'; planName: string }
 > = {
+  /** Legacy ASC id; mantener mientras existan recibos antiguos. */
   cellarium_pro: { planId: 'basic', planName: 'apple_iap_pro' },
+  cellarium_pro_monthly: { planId: 'basic', planName: 'apple_iap_pro' },
   cellarium_business: { planId: 'additional-branch', planName: 'apple_iap_business' },
 };
 

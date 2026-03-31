@@ -3,7 +3,7 @@
  * Deben coincidir con supabase/functions/_shared/apple_iap.ts y validate-apple-receipt.
  */
 export const APPLE_IAP_PRODUCT_IDS = {
-  pro: 'cellarium_pro',
+  pro: 'cellarium_pro_monthly',
   business: 'cellarium_business',
 } as const;
 

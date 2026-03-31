@@ -1,10 +1,11 @@
 import {
+  fetchProducts,
   finishTransaction,
   getAvailablePurchases,
   getReceiptIOS,
-  getSubscriptions,
   initConnection,
-  requestSubscription,
+  requestPurchase,
+  requestReceiptRefreshIOS,
 } from 'react-native-iap';
 import type { Purchase } from 'react-native-iap';
 import { APPLE_IAP_PRODUCT_IDS, APPLE_IAP_SKUS_ALL } from '../constants/appleIap';
@@ -25,14 +26,17 @@ function skuForPlan(plan: ApplePlanUiId): string {
 }
 
 /**
- * Compra: requestSubscription → (caller) validate-apple-receipt → finishTransaction SOLO si el backend confirma.
+ * Compra: requestPurchase (subs) → (caller) validate-apple-receipt → finishTransaction SOLO si el backend confirma.
  * No llamar finishTransaction si el backend falla (timeout/5xx): la transacción queda pendiente y el usuario puede reintentar.
  */
 export async function purchaseAppleSubscription(plan: ApplePlanUiId): Promise<{ purchase: Purchase }> {
   const sku = skuForPlan(plan);
   await ensureIapConnection();
-  await getSubscriptions({ skus: [...APPLE_IAP_SKUS_ALL] });
-  const result = await requestSubscription({ sku });
+  await fetchProducts({ skus: [...APPLE_IAP_SKUS_ALL], type: 'subs' });
+  const result = await requestPurchase({
+    type: 'subs',
+    request: { apple: { sku } },
+  });
   const purchase = Array.isArray(result) ? result[0] : result;
   if (!purchase) {
     throw new Error('Compra cancelada o sin resultado');
@@ -42,13 +46,14 @@ export async function purchaseAppleSubscription(plan: ApplePlanUiId): Promise<{ 
 
 export async function getReceiptBase64(forceRefresh = false): Promise<string | null> {
   await ensureIapConnection();
-  return getReceiptIOS({ forceRefresh });
+  const receipt = forceRefresh ? await requestReceiptRefreshIOS() : await getReceiptIOS();
+  return receipt?.length ? receipt : null;
 }
 
 /** Restaura transacciones en StoreKit para que el recibo refleje compras previas (idempotente en repetición). */
 export async function restoreApplePurchasesForReceipt(): Promise<void> {
   await ensureIapConnection();
-  await getAvailablePurchases({ automaticallyFinishRestoredTransactions: false });
+  await getAvailablePurchases({ onlyIncludeActiveItemsIOS: false });
 }
 
 export async function finishAppleTransactionIfNeeded(purchase: Purchase): Promise<void> {
@@ -61,7 +66,7 @@ export async function finishAppleTransactionIfNeeded(purchase: Purchase): Promis
  */
 export async function finishApplePurchasesAfterBackendSync(): Promise<void> {
   await ensureIapConnection();
-  const purchases = await getAvailablePurchases({ automaticallyFinishRestoredTransactions: false });
+  const purchases = await getAvailablePurchases({ onlyIncludeActiveItemsIOS: false });
   for (const p of purchases) {
     if (!CELLARIUM_SKU_SET.has(p.productId)) continue;
     try {

@@ -299,10 +299,11 @@ const AdminDashboardScreen: React.FC<Props> = ({ navigation, route }) => {
     return set;
   }, [user, isOwner, ownerPlanForGating, filteredMenuItems]);
 
-  // Staff no debe ver tarjetas bloqueadas por suscripción; owner sí las ve (con candado).
+  // Staff: ocultar ítems cuyo feature está bloqueado por plan del owner (p. ej. free → sin inventario/tastings).
+  // Owner: ver todas las tarjetas; las bloqueadas muestran candado en renderMenuItem.
   const visibleMenuItems = useMemo(() => {
     if (isOwner) return filteredMenuItems;
-    return filteredMenuItems.filter(item => !blockedFeatureIds.has(item.id));
+    return filteredMenuItems.filter((item) => !blockedFeatureIds.has(item.id));
   }, [isOwner, filteredMenuItems, blockedFeatureIds]);
 
   // Renderizar item del menú

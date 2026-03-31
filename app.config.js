@@ -6,6 +6,16 @@ const STRIPE_PLUGIN = [
     enableGooglePay: true,
   },
 ];
+/** iOS: static frameworks — alinea resolución CocoaPods (RCT-Folly / react-native-iap en EAS). */
+const BUILD_PROPERTIES_PLUGIN = [
+  "expo-build-properties",
+  {
+    ios: {
+      useFrameworks: "static",
+    },
+  },
+];
+
 const OTHER_PLUGINS = [
   "expo-font",
   "expo-secure-store",
@@ -57,13 +67,16 @@ const config = {
       merchantIdentifier: "merchant.com.cellarium.app",
       orientation: "default",
       bundleIdentifier: "com.cellarium.winecatalog",
+      buildNumber: "1",
       associatedDomains: [
         "applinks:cellarium.net",
         "applinks:www.cellarium.net"
       ],
       infoPlist: {
-        NSCameraUsageDescription: "Esta app necesita acceso a la cámara para capturar etiquetas de vino."
-      }
+        NSCameraUsageDescription: "Esta app necesita acceso a la cámara para capturar etiquetas de vino.",
+        ITSAppUsesNonExemptEncryption: false,
+        NSLocationWhenInUseUsageDescription: "Cellarium utiliza la ubicación únicamente para mejorar la experiencia del usuario dentro de la app. No se recopila información sensible.",
+      },
     },
 
     // Configuración específica para Android
@@ -136,6 +149,9 @@ const withRequired = [...withoutStripe];
 if (!hasPlugin("@stripe/stripe-react-native")) withRequired.push(STRIPE_PLUGIN);
 for (const name of OTHER_PLUGINS) {
   if (!hasPlugin(name)) withRequired.push(name);
+}
+if (!hasPlugin("expo-build-properties")) {
+  withRequired.unshift(BUILD_PROPERTIES_PLUGIN);
 }
 config.expo.plugins = withRequired;
 

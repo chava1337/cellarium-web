@@ -23,7 +23,20 @@ function mapRpcPlanToEffective(rpcPlan: string | null | undefined): EffectivePla
  * si no está disponible, consultar public.users por owner_id y usar getEffectivePlan del row.
  */
 export async function getOwnerEffectivePlan(user: User | null): Promise<EffectivePlanId> {
-  const ownerId = user?.owner_id;
+  let ownerId = user?.owner_id ?? null;
+  // Fallback para staff legacy: resolver owner por branch_id cuando owner_id no viene hidratado.
+  if (!ownerId && user?.role && user.role !== 'owner' && user?.branch_id) {
+    try {
+      const { data: branchRow, error: branchError } = await supabase
+        .from('branches')
+        .select('owner_id')
+        .eq('id', user.branch_id)
+        .maybeSingle();
+      if (!branchError && branchRow?.owner_id) {
+        ownerId = String(branchRow.owner_id);
+      }
+    } catch (_) {}
+  }
   if (!ownerId) return 'free';
 
   try {
@@ -58,8 +71,14 @@ export function getEffectivePlan(user: User | null): EffectivePlanId {
     const expiresAt = new Date(user.subscription_expires_at);
     if (!isNaN(expiresAt.getTime()) && expiresAt <= new Date()) return 'free';
   }
-  const plan = user.subscription_plan ?? 'free';
-  if (plan === 'free' || plan === 'basic' || plan === 'additional-branch') return plan;
+  // Compatibilidad con valores legacy almacenados en BD:
+  // - UI: pro/business
+  // - Plan efectivo interno: basic/additional-branch
+  const rawPlan = (user.subscription_plan ?? 'free') as unknown;
+  const p = String(rawPlan).toLowerCase();
+  if (p === 'free') return 'free';
+  if (p === 'basic' || p === 'pro') return 'basic';
+  if (p === 'additional-branch' || p === 'business') return 'additional-branch';
   return 'free';
 }
 
