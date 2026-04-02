@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import { withTimeout, TimeoutError } from '../utils/withTimeout';
 import { captureCriticalError, clearSentryUserContext, setSentryUserContext } from '../utils/sentryContext';
+import { resolveDisplayName } from '../utils/resolveDisplayName';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -33,11 +34,17 @@ function uidSuffix(uid: string): string {
 }
 
 function optimisticUserFromAuth(authUser: any): User {
-  const name = authUser.user_metadata?.name ?? authUser.email?.split('@')[0] ?? '';
+  const meta = authUser.user_metadata ?? {};
+  const username = resolveDisplayName({
+    dbName: null,
+    metaFullName: meta.full_name,
+    metaName: meta.name,
+    email: authUser.email ?? null,
+  });
   return {
     id: authUser.id,
     email: authUser.email ?? '',
-    username: name,
+    username,
     role: undefined,
     status: 'loading',
     branch_id: undefined,
@@ -128,7 +135,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (currentSession?.user?.id !== authUser.id) return;
     const { data: existing } = await supabase.from('users').select('id').eq('id', authUser.id).maybeSingle();
     if (existing) return;
-    const name = authUser.user_metadata?.name ?? authUser.email?.split('@')[0] ?? '';
+    const meta = authUser.user_metadata ?? {};
+    const name = resolveDisplayName({
+      dbName: null,
+      metaFullName: meta.full_name,
+      metaName: meta.name,
+      email: authUser.email ?? null,
+    });
     const invitationType = authUser.user_metadata?.invitationType;
     if (invitationType === 'admin_invite') {
       await supabase.from('users').insert({
@@ -207,7 +220,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           return {
             ...prev,
             email: data.email ?? prev.email,
-            username: (data.name || data.email?.split('@')[0]) ?? prev.username,
+            username: resolveDisplayName({
+              dbName: data.name,
+              metaFullName: authUser.user_metadata?.full_name,
+              metaName: authUser.user_metadata?.name,
+              email: data.email ?? authUser.email,
+            }),
             role: normalizedRole ?? prev.role,
             status: (data.status as User['status']) ?? 'active',
             branch_id: data.branch_id ?? prev.branch_id,
@@ -337,12 +355,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       .maybeSingle();
     let userData: any = userRow;
     if (!userData && !userError) {
+      const meta = authUser.user_metadata ?? {};
+      const resolvedName = resolveDisplayName({
+        dbName: null,
+        metaFullName: meta.full_name,
+        metaName: meta.name,
+        email: authUser.email ?? null,
+      });
       const { data: createdUser, error: createError } = await supabase
         .from('users')
         .insert({
           id: authUser.id,
           email: authUser.email,
-          name: authUser.user_metadata?.name || authUser.email.split('@')[0],
+          name: resolvedName,
           role: 'owner',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -353,7 +378,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         userData = {
           id: authUser.id,
           email: authUser.email,
-          name: authUser.user_metadata?.name || authUser.email.split('@')[0],
+          name: resolvedName,
           role: 'owner',
           status: 'active',
           created_at: new Date().toISOString(),
@@ -405,10 +430,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const createOwnerUser = async (authUser: any) => {
     try {
+      const meta = authUser.user_metadata ?? {};
+      const resolvedName = resolveDisplayName({
+        dbName: null,
+        metaFullName: meta.full_name,
+        metaName: meta.name,
+        email: authUser.email ?? null,
+      });
       const insertUserPromise = supabase.from('users').insert({
         id: authUser.id,
         email: authUser.email,
-        name: authUser.user_metadata?.name || authUser.email.split('@')[0],
+        name: resolvedName,
         role: 'owner',
         signup_method: 'password',
         owner_email_verified: false,
@@ -462,7 +494,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           userData = {
             id: authUser.id,
             email: authUser.email,
-            name: authUser.user_metadata?.name || authUser.email.split('@')[0],
+            name: resolvedName,
             role: 'owner',
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
@@ -496,7 +528,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const appUser: User = {
         id: userData.id,
         email: userData.email,
-        username: userData.name,
+        username: resolveDisplayName({
+          dbName: userData.name,
+          metaFullName: meta.full_name,
+          metaName: meta.name,
+          email: userData.email ?? authUser.email,
+        }),
         role: normalizeRole(userData.role),
         status: 'active',
         branch_id: branchData?.id ?? undefined,
@@ -673,7 +710,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return {
           id: userData.id,
           email: userData.email,
-          username: userData.name || userData.email.split('@')[0],
+          username: resolveDisplayName({
+            dbName: userData.name,
+            metaFullName: currentSession.user.user_metadata?.full_name,
+            metaName: currentSession.user.user_metadata?.name,
+            email: userData.email ?? currentSession.user.email,
+          }),
           role: normalizeRole(userData.role),
           status: userData.status || 'active',
           branch_id: userData.branch_id,

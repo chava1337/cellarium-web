@@ -23,6 +23,7 @@ import { supabase } from '../lib/supabase';
 import { CELLARIUM, CELLARIUM_LAYOUT } from '../theme/cellariumTheme';
 import { CellariumHeader } from '../components/cellarium';
 import { LEGAL_URLS } from '../config/legalUrls';
+import { resolveDisplayName } from '../utils/resolveDisplayName';
 
 type SettingsScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Settings'>;
 type SettingsScreenRouteProp = RouteProp<RootStackParamList, 'Settings'>;
@@ -91,7 +92,7 @@ async function openExternalLegalUrl(
 const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
   const { status: guardStatus } = useAdminGuard({ navigation, route });
-  const { user, signOut, profileReady } = useAuth();
+  const { user, session, signOut, profileReady } = useAuth();
   const { t } = useLanguage();
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const [confirmText, setConfirmText] = useState('');
@@ -117,6 +118,14 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
   if (guardStatus === 'denied') return null;
 
   const isOwner = profileReady && user?.role === 'owner';
+
+  const su = session?.user as { user_metadata?: Record<string, unknown>; email?: string } | undefined;
+  const displayNameResolved = resolveDisplayName({
+    dbName: user?.username,
+    metaFullName: typeof su?.user_metadata?.full_name === 'string' ? su.user_metadata.full_name : null,
+    metaName: typeof su?.user_metadata?.name === 'string' ? su.user_metadata.name : null,
+    email: user?.email ?? su?.email ?? null,
+  });
 
   const handleSignOut = () => {
     Alert.alert(
@@ -307,7 +316,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
 
           <View style={styles.userInfoRow}>
             <Text style={styles.userInfoLabel}>{t('settings.user')}:</Text>
-            <Text style={styles.userInfoValue}>{user?.username || user?.email || 'N/A'}</Text>
+            <Text style={styles.userInfoValue}>{displayNameResolved}</Text>
           </View>
 
           <View style={[styles.userInfoRow, styles.userInfoRowLast]}>

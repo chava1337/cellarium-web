@@ -30,7 +30,7 @@ const config = {
   expo: {
     name: "Cellarium",
     slug: "cellarium-wine-catalog",
-    version: "1.0.0",
+    version: "1.0.2",
     orientation: "default",
     userInterfaceStyle: "light",
     icon: "./assets/icon.png",
@@ -67,7 +67,7 @@ const config = {
       merchantIdentifier: "merchant.com.cellarium.app",
       orientation: "default",
       bundleIdentifier: "com.cellarium.winecatalog",
-      buildNumber: "1",
+      buildNumber: "3",
       associatedDomains: [
         "applinks:cellarium.net",
         "applinks:www.cellarium.net"

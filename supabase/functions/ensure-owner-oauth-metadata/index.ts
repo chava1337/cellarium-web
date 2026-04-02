@@ -16,6 +16,16 @@ function jsonResponse(body: object, status: number): Response {
   return new Response(JSON.stringify(body), { headers: corsHeaders, status });
 }
 
+/** Hide My Email: el trigger puede haber guardado split_part(email) como name (opaco). */
+function isRelayPlaceholderName(name: string, email: string | null | undefined): boolean {
+  if (!email || !name.trim()) return false;
+  const em = email.toLowerCase();
+  if (!em.endsWith('@privaterelay.appleid.com')) return false;
+  const at = email.indexOf('@');
+  const local = at > 0 ? email.slice(0, at) : '';
+  return local === name.trim();
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405);
@@ -42,7 +52,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow, error: userErr } = await supabaseAdmin
       .from('users')
-      .select('id, role, signup_method, owner_email_verified, name')
+      .select('id, role, signup_method, owner_email_verified, name, email')
       .eq('id', authUser.id)
       .maybeSingle();
 
@@ -82,8 +92,14 @@ Deno.serve(async (req: Request) => {
     const needsSignup =
       userRow.signup_method == null || String(userRow.signup_method).trim() === '';
     const nameFromMeta = fullName.length > 0 ? fullName : null;
+    const rowEmail = typeof userRow.email === 'string' ? userRow.email : '';
+    const currentName =
+      userRow.name != null && String(userRow.name).trim() !== ''
+        ? String(userRow.name).trim()
+        : '';
     const shouldFillName = Boolean(
-      nameFromMeta && (!userRow.name || String(userRow.name).trim() === ''),
+      nameFromMeta &&
+        (!currentName || isRelayPlaceholderName(currentName, rowEmail || authUser.email)),
     );
 
     if (!needsSignup && !shouldFillName) {

@@ -40,30 +40,30 @@ import {
 } from '../services/appleIapSubscription';
 import { validateAppleReceiptBackend } from '../services/validateAppleReceipt';
 
-// Paleta y layout alineados con Catálogo Cellarium
+// Paleta: CELLARIUM como base; admin legacy solo sombra / warning donde no hay equivalente único.
 const PALETTE = {
   headerBg: CELLARIUM.primaryDark,
   headerTitle: CELLARIUM.textOnDark,
   headerSubtitle: CELLARIUM.textOnDarkMuted,
   cardBg: CELLARIUM_THEME.admin.card,
   cardShadow: CELLARIUM_THEME.admin.shadow,
-  text: CELLARIUM_THEME.admin.text,
-  subtext: CELLARIUM_THEME.admin.subtext,
-  border: CELLARIUM_THEME.admin.border,
+  text: CELLARIUM.text,
+  subtext: CELLARIUM.muted,
+  border: CELLARIUM.border,
   primary: CELLARIUM.primary,
   primaryDark: CELLARIUM.primaryDark,
   pillBg: CELLARIUM_THEME.admin.pillBg,
+  /** Sin token "success" en cellariumTheme; verde para badge OK / CTA add-ons. */
   success: '#2d6a4f',
-  muted: '#6c757d',
   blocked: CELLARIUM_THEME.admin.warning,
 } as const;
-const LAYOUT = {
-  cardRadius: 12,
-  pillRadius: 20,
-  minTouchSize: 44,
-  spacing: 16,
-  padding: 20,
-} as const;
+
+/**
+ * Radio 12 en cards legacy y fila de CTAs: densidad compacta en lista.
+ * Distinto de CELLARIUM_LAYOUT.cardRadius (18), usado en bloques premium ya migrados.
+ */
+const SUBS_COMPACT_RADIUS = 12;
+const SUBS_PILL_RADIUS = 20;
 
 type LoadingActionSubscription =
   | 'subscribe'
@@ -495,7 +495,7 @@ function AddonBranchesCard({
         disabled={addonButtonDisabled}
       >
         {isProcessing ? (
-          <ActivityIndicator color="#fff" size="small" />
+          <ActivityIndicator color={CELLARIUM.card} size="small" />
         ) : (
           <Text style={styles.addonUpdateButtonText}>{saveAddonsLabel}</Text>
         )}
@@ -516,23 +516,23 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   if (guardStatus === 'loading' || guardStatus === 'profile_loading') {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
-        <ActivityIndicator size="large" color="#8B0000" />
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: CELLARIUM.bg }}>
+        <ActivityIndicator size="large" color={CELLARIUM.primary} />
       </View>
     );
   }
   if (guardStatus === 'pending') {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa', padding: 24 }}>
-        <Text style={{ fontSize: 16, color: '#666', textAlign: 'center' }}>Pendiente de aprobación</Text>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: CELLARIUM.bg, padding: 24 }}>
+        <Text style={{ fontSize: 16, color: CELLARIUM.muted, textAlign: 'center' }}>Pendiente de aprobación</Text>
       </View>
     );
   }
   if (guardStatus === 'denied') {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa', padding: 24 }}>
-        <Text style={{ fontSize: 18, fontWeight: '600', color: '#333', textAlign: 'center' }}>Sin permiso</Text>
-        <Text style={{ marginTop: 8, fontSize: 14, color: '#666', textAlign: 'center' }}>Solo el propietario puede gestionar suscripciones.</Text>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: CELLARIUM.bg, padding: 24 }}>
+        <Text style={{ fontSize: 18, fontWeight: '600', color: CELLARIUM.text, textAlign: 'center' }}>Sin permiso</Text>
+        <Text style={{ marginTop: 8, fontSize: 14, color: CELLARIUM.muted, textAlign: 'center' }}>Solo el propietario puede gestionar suscripciones.</Text>
       </View>
     );
   }
@@ -1538,7 +1538,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
               disabled={sendingCode}
             >
               {sendingCode ? (
-                <ActivityIndicator size="small" color="#fff" />
+                <ActivityIndicator size="small" color={CELLARIUM.card} />
               ) : (
                 <Text style={styles.verifyButtonText}>Enviar código</Text>
               )}
@@ -1550,7 +1550,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
               value={verifyCode}
               onChangeText={setVerifyCode}
               placeholder="000000"
-              placeholderTextColor="#999"
+              placeholderTextColor={CELLARIUM.muted}
               keyboardType="number-pad"
               maxLength={6}
             />
@@ -1560,7 +1560,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
               disabled={verifyingCode}
             >
               {verifyingCode ? (
-                <ActivityIndicator size="small" color="#fff" />
+                <ActivityIndicator size="small" color={CELLARIUM.card} />
               ) : (
                 <Text style={styles.verifyButtonText}>Verificar</Text>
               )}
@@ -1697,7 +1697,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
               disabled={isProcessing || needsEmailVerification}
             >
               {isProcessing ? (
-                <ActivityIndicator color="#fff" size="small" />
+                <ActivityIndicator color={CELLARIUM.card} size="small" />
               ) : (
                 <Text style={styles.ctaButtonPrimaryText}>{t('subscription.cta_upgrade_to_business')}</Text>
               )}
@@ -1738,7 +1738,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                   disabled={isProcessing || needsEmailVerification}
                 >
                   {isProcessing ? (
-                    <ActivityIndicator color="#fff" size="small" />
+                    <ActivityIndicator color={CELLARIUM.card} size="small" />
                   ) : (
                     <Text style={styles.ctaButtonPrimaryText}>{t('subscription.subscribe_cta')}</Text>
                   )}
@@ -1781,13 +1781,13 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: LAYOUT.spacing,
+    padding: CELLARIUM_LAYOUT.sectionGap,
   },
   card: {
     backgroundColor: PALETTE.cardBg,
-    borderRadius: LAYOUT.cardRadius,
-    padding: LAYOUT.padding,
-    marginBottom: LAYOUT.spacing,
+    borderRadius: SUBS_COMPACT_RADIUS,
+    padding: CELLARIUM_LAYOUT.headerHorizontalPadding,
+    marginBottom: CELLARIUM_LAYOUT.sectionGap,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -1818,9 +1818,9 @@ const styles = StyleSheet.create({
   },
   verifyBlock: {
     backgroundColor: PALETTE.cardBg,
-    borderRadius: LAYOUT.cardRadius,
-    padding: LAYOUT.padding,
-    marginBottom: LAYOUT.spacing,
+    borderRadius: SUBS_COMPACT_RADIUS,
+    padding: CELLARIUM_LAYOUT.headerHorizontalPadding,
+    marginBottom: CELLARIUM_LAYOUT.sectionGap,
     borderLeftWidth: 4,
     borderLeftColor: PALETTE.primary,
     shadowColor: '#000',
@@ -1841,10 +1841,10 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   verifyButton: {
-    backgroundColor: '#666',
+    backgroundColor: CELLARIUM.neutralButton,
     paddingVertical: 14,
     paddingHorizontal: 20,
-    borderRadius: 12,
+    borderRadius: CELLARIUM_LAYOUT.inputRadius,
     alignItems: 'center',
     marginBottom: 12,
   },
@@ -1856,7 +1856,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   verifyButtonText: {
-    color: '#fff',
+    color: CELLARIUM.card,
     fontWeight: '600',
     fontSize: 16,
   },
@@ -1870,7 +1870,7 @@ const styles = StyleSheet.create({
   verifyInput: {
     borderWidth: 1,
     borderColor: PALETTE.border,
-    borderRadius: 12,
+    borderRadius: CELLARIUM_LAYOUT.inputRadius,
     padding: 16,
     fontSize: 18,
     letterSpacing: 4,
@@ -1878,9 +1878,9 @@ const styles = StyleSheet.create({
   },
   statusCard: {
     backgroundColor: PALETTE.cardBg,
-    borderRadius: LAYOUT.cardRadius,
-    padding: LAYOUT.padding,
-    marginBottom: LAYOUT.spacing,
+    borderRadius: SUBS_COMPACT_RADIUS,
+    padding: CELLARIUM_LAYOUT.headerHorizontalPadding,
+    marginBottom: CELLARIUM_LAYOUT.sectionGap,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -2020,7 +2020,7 @@ const styles = StyleSheet.create({
     backgroundColor: PALETTE.primary,
     paddingHorizontal: 14,
     paddingVertical: 6,
-    borderRadius: LAYOUT.pillRadius,
+    borderRadius: SUBS_PILL_RADIUS,
   },
   planPillText: {
     color: PALETTE.headerTitle,
@@ -2047,7 +2047,7 @@ const styles = StyleSheet.create({
     borderRadius: CELLARIUM_LAYOUT.cardRadius,
     paddingHorizontal: CELLARIUM_LAYOUT.screenPadding,
     paddingVertical: 14,
-    marginBottom: LAYOUT.spacing,
+    marginBottom: CELLARIUM_LAYOUT.sectionGap,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -2068,7 +2068,7 @@ const styles = StyleSheet.create({
     backgroundColor: PALETTE.success,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: LAYOUT.pillRadius,
+    borderRadius: SUBS_PILL_RADIUS,
   },
   currentBadgeText: {
     color: CELLARIUM.textOnDark,
@@ -2155,42 +2155,42 @@ const styles = StyleSheet.create({
   },
   ctaButtonPrimary: {
     backgroundColor: PALETTE.primary,
-    borderRadius: LAYOUT.cardRadius,
+    borderRadius: SUBS_COMPACT_RADIUS,
     paddingVertical: 16,
-    minHeight: LAYOUT.minTouchSize,
+    minHeight: CELLARIUM_LAYOUT.iconButtonSize,
     alignItems: 'center',
     justifyContent: 'center',
   },
   ctaButtonPrimaryText: {
-    color: '#fff',
+    color: CELLARIUM.card,
     fontSize: 18,
     fontWeight: 'bold',
   },
   ctaButtonDisabled: {
-    backgroundColor: PALETTE.muted,
-    borderRadius: LAYOUT.cardRadius,
+    backgroundColor: CELLARIUM.neutralButton,
+    borderRadius: SUBS_COMPACT_RADIUS,
     paddingVertical: 16,
-    minHeight: LAYOUT.minTouchSize,
+    minHeight: CELLARIUM_LAYOUT.iconButtonSize,
     alignItems: 'center',
     justifyContent: 'center',
   },
   ctaButtonDisabledText: {
-    color: '#fff',
+    color: CELLARIUM.card,
     fontSize: 16,
     fontWeight: '600',
   },
   manageButton: {
-    backgroundColor: PALETTE.muted,
-    borderRadius: LAYOUT.cardRadius,
+    backgroundColor: CELLARIUM.neutralButton,
+    borderRadius: SUBS_COMPACT_RADIUS,
     paddingVertical: 16,
-    minHeight: LAYOUT.minTouchSize,
+    minHeight: CELLARIUM_LAYOUT.iconButtonSize,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 12,
     marginBottom: 24,
   },
   manageButtonText: {
-    color: '#fff',
+    color: CELLARIUM.card,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -2202,23 +2202,23 @@ const styles = StyleSheet.create({
   },
   appleRestoreHint: {
     fontSize: 12,
-    color: PALETTE.muted,
+    color: CELLARIUM.muted,
     textAlign: 'center',
-    paddingHorizontal: LAYOUT.padding,
+    paddingHorizontal: CELLARIUM_LAYOUT.headerHorizontalPadding,
     lineHeight: 16,
   },
   secondaryButton: {
     backgroundColor: PALETTE.primary,
-    borderRadius: LAYOUT.cardRadius,
+    borderRadius: SUBS_COMPACT_RADIUS,
     paddingVertical: 16,
-    minHeight: LAYOUT.minTouchSize,
+    minHeight: CELLARIUM_LAYOUT.iconButtonSize,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 8,
     marginBottom: 24,
   },
   secondaryButtonText: {
-    color: '#fff',
+    color: CELLARIUM.card,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -2230,7 +2230,7 @@ const styles = StyleSheet.create({
     borderRadius: CELLARIUM_LAYOUT.cardRadius,
     paddingHorizontal: CELLARIUM_LAYOUT.screenPadding,
     paddingVertical: 14,
-    marginBottom: LAYOUT.spacing,
+    marginBottom: CELLARIUM_LAYOUT.sectionGap,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -2348,15 +2348,15 @@ const styles = StyleSheet.create({
   },
   addonUpdateButton: {
     backgroundColor: PALETTE.success,
-    borderRadius: LAYOUT.cardRadius,
+    borderRadius: SUBS_COMPACT_RADIUS,
     paddingVertical: 16,
-    minHeight: LAYOUT.minTouchSize,
+    minHeight: CELLARIUM_LAYOUT.iconButtonSize,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 8,
   },
   addonUpdateButtonText: {
-    color: '#fff',
+    color: CELLARIUM.card,
     fontSize: 16,
     fontWeight: '600',
   },

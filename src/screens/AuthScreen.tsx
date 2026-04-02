@@ -18,6 +18,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { supabase } from '../lib/supabase';
 import { withTimeout, TimeoutError } from '../utils/withTimeout';
 import { useAuth } from '../contexts/AuthContext';
+import { CELLARIUM, CELLARIUM_LAYOUT, CELLARIUM_TEXT } from '../theme/cellariumTheme';
 import AppleSignInButton from '../components/auth/AppleSignInButton';
 
 interface AuthScreenProps {
@@ -456,7 +457,7 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
               >
                 {loading || appleAuthBusy ? (
                   <View style={styles.googleButtonLoading}>
-                    <ActivityIndicator size="small" color="#1f2937" />
+                    <ActivityIndicator size="small" color={CELLARIUM.text} />
                   </View>
                 ) : (
                   <Image
@@ -483,7 +484,7 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
                     value={name}
                     onChangeText={setName}
                     autoCapitalize="words"
-                    placeholderTextColor="#9ca3af"
+                    placeholderTextColor={CELLARIUM.muted}
                   />
                 </View>
               )}
@@ -498,7 +499,7 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="email-address"
-                  placeholderTextColor="#9ca3af"
+                  placeholderTextColor={CELLARIUM.muted}
                 />
               </View>
 
@@ -513,7 +514,7 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
                     autoCapitalize="none"
                     autoCorrect={false}
                     keyboardType="email-address"
-                    placeholderTextColor="#9ca3af"
+                    placeholderTextColor={CELLARIUM.muted}
                   />
                 </View>
               )}
@@ -529,7 +530,7 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
                     autoCapitalize="none"
                     autoCorrect={false}
                     secureTextEntry={!showPassword}
-                    placeholderTextColor="#9ca3af"
+                    placeholderTextColor={CELLARIUM.muted}
                   />
                   <TouchableOpacity
                     style={styles.eyeButton}
@@ -539,7 +540,7 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
                     <Ionicons
                       name={showPassword ? 'eye-off' : 'eye'}
                       size={22}
-                      color="#6b7280"
+                      color={CELLARIUM.muted}
                     />
                   </TouchableOpacity>
                 </View>
@@ -557,7 +558,7 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
                       autoCapitalize="none"
                       autoCorrect={false}
                       secureTextEntry={!showConfirmPassword}
-                      placeholderTextColor="#9ca3af"
+                      placeholderTextColor={CELLARIUM.muted}
                     />
                     <TouchableOpacity
                       style={styles.eyeButton}
@@ -567,7 +568,7 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
                       <Ionicons
                         name={showConfirmPassword ? 'eye-off' : 'eye'}
                         size={22}
-                        color="#6b7280"
+                        color={CELLARIUM.muted}
                       />
                     </TouchableOpacity>
                   </View>
@@ -581,7 +582,7 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
               >
                 <View style={styles.buttonContent}>
                   {loading && (
-                    <ActivityIndicator size="small" color="#fff" style={styles.buttonLoader} />
+                    <ActivityIndicator size="small" color={CELLARIUM.card} style={styles.buttonLoader} />
                   )}
                   <Text style={styles.emailButtonText}>
                     {loading
@@ -608,16 +609,14 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
   );
 }
 
-const PRIMARY_COLOR = '#924048';
-
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: CELLARIUM.card,
   },
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: CELLARIUM.card,
   },
   scrollContainer: {
     paddingHorizontal: 24,
@@ -636,7 +635,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 24,
     fontWeight: '600',
-    color: PRIMARY_COLOR,
+    color: CELLARIUM.primary,
     textAlign: 'center',
   },
   form: {
@@ -648,35 +647,35 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#374151',
+    color: CELLARIUM.text,
     marginBottom: 6,
   },
   input: {
-    backgroundColor: '#f3f4f6',
-    borderRadius: 12,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: CELLARIUM_LAYOUT.inputRadius,
     paddingHorizontal: 14,
     paddingVertical: 14,
     height: 50,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    color: '#1f2937',
+    borderColor: CELLARIUM.border,
+    color: CELLARIUM.text,
   },
   inputWithIcon: {
     position: 'relative',
     justifyContent: 'center',
   },
   inputPassword: {
-    backgroundColor: '#f3f4f6',
-    borderRadius: 12,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: CELLARIUM_LAYOUT.inputRadius,
     paddingHorizontal: 14,
     paddingVertical: 14,
     paddingRight: 48,
     height: 50,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    color: '#1f2937',
+    borderColor: CELLARIUM.border,
+    color: CELLARIUM.text,
   },
   eyeButton: {
     position: 'absolute',
@@ -696,16 +695,16 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: CELLARIUM.border,
   },
   dividerText: {
     marginHorizontal: 16,
-    color: '#9ca3af',
+    color: CELLARIUM.muted,
     fontSize: 14,
   },
   emailButton: {
-    backgroundColor: PRIMARY_COLOR,
-    borderRadius: 12,
+    backgroundColor: CELLARIUM.primary,
+    borderRadius: CELLARIUM_LAYOUT.buttonRadius,
     paddingVertical: 16,
     paddingHorizontal: 18,
     alignItems: 'center',
@@ -721,9 +720,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   emailButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+    ...CELLARIUM_TEXT.buttonText,
   },
   googleButtonContainer: {
     width: '100%',
@@ -741,15 +738,15 @@ const styles = StyleSheet.create({
     height: 50,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f3f4f6',
-    borderRadius: 12,
+    backgroundColor: CELLARIUM.bg,
+    borderRadius: CELLARIUM_LAYOUT.inputRadius,
   },
   switchButton: {
     alignItems: 'center',
     paddingVertical: 8,
   },
   switchButtonText: {
-    color: PRIMARY_COLOR,
+    color: CELLARIUM.primary,
     fontSize: 14,
   },
 });

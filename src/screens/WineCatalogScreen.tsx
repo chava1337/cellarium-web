@@ -35,6 +35,7 @@ import { useGuest } from '../contexts/GuestContext';
 import WineGlassSaleConfig from '../components/WineGlassSaleConfig';
 import { getWineCarouselDimensions, getWineCarouselDimensionsForTablet } from '../constants/theme';
 import { CELLARIUM as CELLARIUM_DS, CELLARIUM_LAYOUT, CELLARIUM_TEXT } from '../theme/cellariumTheme';
+import { CellariumPrimaryButton } from '../components/cellarium';
 import CellariumLoader from '../components/CellariumLoader';
 import LanguageSelector from '../components/LanguageSelector';
 import { getCocktailMenu, CocktailDrink } from '../services/CocktailService';
@@ -2790,19 +2791,47 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
               />
             </View>
           ) : (
-            <View style={styles.noResults}>
-              <Text style={styles.noResultsText}>
-                {showCocktails ? 'No se encontraron cocteles' : 'No se encontraron vinos'}
-              </Text>
-              <Text style={styles.noResultsSubtext}>
-                {activeBranch ? 
-                  (showCocktails
-                    ? `No hay cocteles disponibles en ${branchDisplayName || 'esta sucursal'}`
-                    : `No hay vinos disponibles en ${branchDisplayName || 'esta sucursal'}`) : 
-                  'Selecciona una sucursal para ver el catálogo'
-                }
-              </Text>
-            </View>
+            (() => {
+              const isEmptyRealCatalog = wines.length === 0;
+              const showOnboardingEmpty =
+                isEmptyRealCatalog &&
+                !isGuest &&
+                !showCocktails &&
+                !!activeBranch &&
+                (user?.role === 'owner' || user?.role === 'gerente');
+
+              if (showOnboardingEmpty) {
+                return (
+                  <View style={styles.noResults}>
+                    <Text style={styles.noResultsText}>Aún no tienes vinos en tu menú</Text>
+                    <Text style={styles.noResultsSubtext}>
+                      Agrégalos desde nuestro catálogo Cellarium
+                    </Text>
+                    <CellariumPrimaryButton
+                      title="Agregar desde catálogo"
+                      onPress={() => navigation.navigate('GlobalWineCatalog')}
+                      style={{ marginTop: 14 }}
+                    />
+                  </View>
+                );
+              }
+
+              return (
+                <View style={styles.noResults}>
+                  <Text style={styles.noResultsText}>
+                    {showCocktails ? 'No se encontraron cocteles' : 'No se encontraron vinos'}
+                  </Text>
+                  <Text style={styles.noResultsSubtext}>
+                    {activeBranch ? 
+                      (showCocktails
+                        ? `No hay cocteles disponibles en ${branchDisplayName || 'esta sucursal'}`
+                        : `No hay vinos disponibles en ${branchDisplayName || 'esta sucursal'}`) : 
+                      'Selecciona una sucursal para ver el catálogo'
+                    }
+                  </Text>
+                </View>
+              );
+            })()
           )
         }
       />
@@ -3744,14 +3773,12 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   noResultsText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#666',
+    ...CELLARIUM_TEXT.sectionTitle,
+    textAlign: 'center',
     marginBottom: 8,
   },
   noResultsSubtext: {
-    fontSize: 14,
-    color: '#999',
+    ...CELLARIUM_TEXT.caption,
     textAlign: 'center',
   },
   loadingContainer: {
@@ -3763,7 +3790,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 18,
-    color: '#8B0000',
+    color: CELLARIUM_DS.primary,
     textAlign: 'center',
     fontWeight: '500',
   },
