@@ -202,8 +202,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (__DEV__) {
           const effective = data.subscription_active === true
             && (data.subscription_expires_at == null || new Date(data.subscription_expires_at) > new Date())
-            ? (data.subscription_plan ?? 'free')
-            : 'free';
+            ? (data.subscription_plan ?? 'cafe')
+            : 'cafe';
           console.log('[hydrateProfile] done', {
             uid,
             'data.role (raw from DB)': data.role,
@@ -703,10 +703,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser((prev) => {
         const plan = userData.subscription_plan ?? prev?.subscription_plan;
         const rawBranches = userData.subscription_branches_count ?? prev?.subscription_branches_count;
-        const subscription_branches_count =
-          plan === 'additional-branch' && (rawBranches === null || rawBranches === undefined)
-            ? 3
-            : (rawBranches ?? undefined);
+        const subscription_branches_count = rawBranches ?? undefined;
         return {
           id: userData.id,
           email: userData.email,

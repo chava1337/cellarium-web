@@ -1,8 +1,9 @@
 import { User } from '../types';
 import { FeatureId } from '../constants/subscriptionFeatures';
 import { getEffectivePlan } from './effectivePlan';
+import { getBranchLimit } from './branchLimit';
 
-export type SubscriptionPlan = 'free' | 'basic' | 'additional-branch';
+export type SubscriptionPlan = import('../types').CanonicalPlanId;
 
 export interface PlanLimits {
   maxBranches: number;
@@ -12,41 +13,47 @@ export interface PlanLimits {
   blockedFeatureIds: FeatureId[];
 }
 
+/**
+ * maxBranches: referencia documental; el límite real de sucursales es getBranchLimit (1 + add-ons).
+ * Staff total: cafe +1, bistro +2 adicionales => 3 gerentes si el owner cuenta aparte — aquí maxManagers es cupo de managers además del owner (3 en bistro).
+ */
 export const PLAN_LIMITS: Record<SubscriptionPlan, PlanLimits> = {
-  free: {
+  cafe: {
     maxBranches: 1,
     maxWines: 10,
     maxManagers: 1,
     maxCocktails: 10,
-    blockedFeatureIds: [
-      'inventory',
-      'tastings',
-      'branches_additional',
-    ],
+    blockedFeatureIds: ['inventory', 'tastings'],
   },
-  basic: {
+  bistro: {
     maxBranches: 1,
-    maxWines: 100,
-    maxManagers: -1, // Ilimitado
-    maxCocktails: -1,
+    maxWines: 50,
+    maxManagers: 3,
+    maxCocktails: 50,
     blockedFeatureIds: [],
   },
-  'additional-branch': {
-    maxBranches: -1, // Sin límite
-    maxWines: -1, // Sin límite
-    maxManagers: -1, // Ilimitado
+  trattoria: {
+    maxBranches: 1,
+    maxWines: 150,
+    maxManagers: -1,
+    maxCocktails: 75,
+    blockedFeatureIds: [],
+  },
+  'grand-maison': {
+    maxBranches: 1,
+    maxWines: -1,
+    maxManagers: -1,
     maxCocktails: -1,
     blockedFeatureIds: [],
   },
 };
 
 export const checkSubscriptionFeature = (user: User | null, featureId: FeatureId | string): boolean => {
-  if (!user || user.role !== 'owner') return true; // Solo owners tienen límites (staff usa plan del owner en UI vía checkSubscriptionFeatureByPlan)
+  if (!user || user.role !== 'owner') return true;
 
   const plan = getEffectivePlan(user);
   const limits = PLAN_LIMITS[plan];
-  
-  // Si el plan bloquea la función (usando FeatureId estable)
+
   if (limits.blockedFeatureIds.includes(featureId as FeatureId)) {
     return false;
   }
@@ -54,10 +61,6 @@ export const checkSubscriptionFeature = (user: User | null, featureId: FeatureId
   return true;
 };
 
-/**
- * Comprueba si un plan permite un feature (para gating por plan sin depender del rol).
- * Usar cuando el plan efectivo ya fue resuelto (p. ej. plan del owner para staff).
- */
 export function checkSubscriptionFeatureByPlan(
   plan: SubscriptionPlan,
   featureId: FeatureId | string
@@ -68,27 +71,36 @@ export function checkSubscriptionFeatureByPlan(
 
 export const checkSubscriptionLimit = (
   user: User | null,
-  limitType: 'branches' | 'wines' | 'managers',
+  limitType: 'branches' | 'wines' | 'managers' | 'cocktails',
   currentCount: number
 ): boolean => {
-  if (!user || user.role !== 'owner') return true; // Solo owners tienen límites
+  if (!user || user.role !== 'owner') return true;
 
   const plan = getEffectivePlan(user);
+
+  if (limitType === 'branches') {
+    const maxBranches = getBranchLimit(user).limit;
+    return currentCount < maxBranches;
+  }
+
   const limits = PLAN_LIMITS[plan];
-  
-  const maxLimit = limits[`max${limitType.charAt(0).toUpperCase() + limitType.slice(1)}` as keyof PlanLimits] as number;
-  
-  // -1 significa ilimitado
+  const key =
+    limitType === 'wines'
+      ? 'maxWines'
+      : limitType === 'managers'
+        ? 'maxManagers'
+        : 'maxCocktails';
+  const maxLimit = limits[key] as number;
   if (maxLimit === -1) return true;
-  
   return currentCount < maxLimit;
 };
 
 export const getSubscriptionPlanName = (plan: SubscriptionPlan): string => {
   const names: Record<SubscriptionPlan, string> = {
-    free: 'Gratis',
-    basic: 'Básico',
-    'additional-branch': 'Sucursal Adicional',
+    cafe: 'Cafe',
+    bistro: 'Bistro',
+    trattoria: 'Trattoria',
+    'grand-maison': 'Grand Maison',
   };
   return names[plan];
 };
@@ -102,41 +114,3 @@ export const isSubscriptionActive = (user: User | null): boolean => {
   }
   return true;
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

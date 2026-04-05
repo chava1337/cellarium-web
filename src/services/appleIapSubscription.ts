@@ -1,13 +1,17 @@
 /**
- * Stubs para Android / Web: la compra Apple solo existe en iOS (ver .ios.ts).
+ * Stubs Android/Web. iOS: appleIapSubscription.ios.ts
  */
-export type ApplePlanUiId = 'pro' | 'business';
+export type ApplePlanUiId = 'bistro' | 'trattoria' | 'grand_maison';
 
 export async function ensureIapConnection(): Promise<void> {
   /* no-op */
 }
 
 export async function purchaseAppleSubscription(_plan: ApplePlanUiId): Promise<{ purchase: unknown }> {
+  throw new Error('Apple IAP solo está disponible en iOS');
+}
+
+export async function purchaseAppleBranchAddon(_slots: 1 | 3): Promise<{ purchase: unknown }> {
   throw new Error('Apple IAP solo está disponible en iOS');
 }
 
@@ -23,7 +27,6 @@ export async function finishAppleTransactionIfNeeded(_purchase: unknown): Promis
   /* no-op */
 }
 
-/** Tras validate-apple-receipt OK: finaliza transacciones en cola (restauración). No-op fuera de iOS. */
 export async function finishApplePurchasesAfterBackendSync(): Promise<void> {
   /* no-op */
 }

@@ -25,15 +25,17 @@ const OTHER_PLUGINS = [
   "react-native-iap",
 ];
 
-// Icono principal (App Store, Play Store legacy, etc.): PNG 1024x1024.
+// IMPORTANT: Icon filenames changed to avoid Android/EAS cache issues (use icon-v2 / adaptive-icon-v2; then `npx expo prebuild --clean` before EAS).
 const config = {
   expo: {
     name: "Cellarium",
     slug: "cellarium-wine-catalog",
-    version: "1.0.2",
+    // Versión de marketing (CFBundleShortVersionString). Con appVersionSource: remote en eas.json, iOS puede tomar la de App Store Connect; mantener alineado aquí y en package.json.
+    version: "1.0.3",
     orientation: "default",
     userInterfaceStyle: "light",
-    icon: "./assets/icon.png",
+    // App Store, Play listing, iOS: PNG 1024×1024 recomendado.
+    icon: "./assets/icon-v2.png",
 
     // Deep Linking Configuration
     scheme: "cellarium",
@@ -67,7 +69,8 @@ const config = {
       merchantIdentifier: "merchant.com.cellarium.app",
       orientation: "default",
       bundleIdentifier: "com.cellarium.winecatalog",
-      buildNumber: "3",
+      // CFBundleVersion: debe ser > al último build subido a TestFlight/App Store.
+      buildNumber: "4",
       associatedDomains: [
         "applinks:cellarium.net",
         "applinks:www.cellarium.net"
@@ -84,10 +87,10 @@ const config = {
       supportsTablet: true,
       orientation: "default",
       package: "com.cellarium.winecatalog",
-      // Foreground: asset específico para adaptive icon (margen ~20–30% para evitar recorte con la máscara).
+      // Foreground: adaptive icon (dejar margen ~20–30% para la máscara del sistema).
       adaptiveIcon: {
-        foregroundImage: "./assets/adaptive-icon.png",
-        backgroundColor: "#6D1F2B"
+        foregroundImage: "./assets/adaptive-icon-v2.png",
+        backgroundColor: "#000000",
       },
       permissions: [
         "android.permission.CAMERA",
@@ -155,7 +158,6 @@ if (!hasPlugin("expo-build-properties")) {
 }
 config.expo.plugins = withRequired;
 
-// Tras cambiar el icono: eas build --profile development --platform android
-// e instalar el nuevo dev client en el dispositivo.
+// Tras cambiar iconos: `npx expo prebuild --clean` luego `eas build` (p. ej. production) para regenerar mipmap sin caché antigua.
 
 export default config;

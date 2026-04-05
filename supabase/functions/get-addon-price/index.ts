@@ -54,7 +54,7 @@ Deno.serve(async (req: Request) => {
     const price = prices?.[0];
 
     if (priceResult.error || !price) {
-      const fallbackUnitAmount = 49900; // $499 MXN
+      const fallbackUnitAmount = 52000; // $520 MXN (add-on sucursal)
       return json(200, {
         unit_amount: fallbackUnitAmount,
         currency: 'mxn',
@@ -63,7 +63,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const unit_amount = price.unit_amount ?? 49900;
+    const unit_amount = price.unit_amount ?? 52000;
     const currency = (price.currency ?? 'mxn').toLowerCase();
 
     return json(200, {

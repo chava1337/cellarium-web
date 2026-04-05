@@ -1,19 +1,26 @@
 /**
- * Fuente de verdad para etiquetas de plan en UI.
- * Los valores de plan_id vienen de public.users.subscription_plan (free | basic | additional-branch).
+ * Etiquetas UI para subscription_plan canónico.
  */
 
-export type PlanId = 'free' | 'basic' | 'additional-branch';
+import type { CanonicalPlanId } from '../types';
+
+export type PlanId = CanonicalPlanId;
 
 export const PLAN_LABEL_ES: Record<PlanId, string> = {
-  free: 'Gratis',
-  basic: 'Pro',
-  'additional-branch': 'Business',
+  cafe: 'Cafe',
+  bistro: 'Bistro',
+  trattoria: 'Trattoria',
+  'grand-maison': 'Grand Maison',
 };
 
 export function getPlanLabel(planId?: string): string {
-  if (planId === 'free' || planId === 'basic' || planId === 'additional-branch') {
+  if (
+    planId === 'cafe' ||
+    planId === 'bistro' ||
+    planId === 'trattoria' ||
+    planId === 'grand-maison'
+  ) {
     return PLAN_LABEL_ES[planId];
   }
-  return 'Gratis';
+  return 'Cafe';
 }

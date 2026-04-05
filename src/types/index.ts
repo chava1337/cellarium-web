@@ -104,6 +104,9 @@ export interface InventoryMovement {
   created_at: string;
 }
 
+/** Planes almacenados en public.users.subscription_plan */
+export type CanonicalPlanId = 'cafe' | 'bistro' | 'trattoria' | 'grand-maison';
+
 export interface User {
   id: string;
   email: string;
@@ -116,8 +119,8 @@ export interface User {
   invited_by?: string;
   approved_by?: string;
   approved_at?: string;
-  // Campos de suscripción (legacy - mantener para compatibilidad)
-  subscription_plan?: 'free' | 'basic' | 'additional-branch';
+  /** Plan canónico en BD (inactive/expirado se muestra como cafe vía getEffectivePlan). */
+  subscription_plan?: CanonicalPlanId;
   subscription_expires_at?: string;
   subscription_branches_count?: number;
   subscription_active?: boolean;
@@ -234,7 +237,7 @@ export interface BranchStats {
 // Tipos para Suscripciones y Pagos
 // =====================================================
 
-export type SubscriptionPlan = 'free' | 'basic' | 'additional-branch';
+export type SubscriptionPlan = CanonicalPlanId;
 export type SubscriptionStatus = 'active' | 'canceled' | 'expired' | 'past_due' | 'trialing' | 'pending';
 export type PaymentStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'refunded' | 'canceled';
 export type PaymentMethod = 'card' | 'bank_transfer' | 'cash' | 'other';

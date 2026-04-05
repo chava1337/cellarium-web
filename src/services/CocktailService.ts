@@ -111,8 +111,8 @@ export async function createCocktailDrink(
   effectivePlan?: SubscriptionPlan
 ): Promise<CocktailDrink> {
   try {
-    const allowed: SubscriptionPlan[] = ['free', 'basic', 'additional-branch'];
-    const plan = effectivePlan && allowed.includes(effectivePlan) ? effectivePlan : 'free';
+    const allowed: SubscriptionPlan[] = ['cafe', 'bistro', 'trattoria', 'grand-maison'];
+    const plan = effectivePlan && allowed.includes(effectivePlan) ? effectivePlan : 'cafe';
     const maxCocktails = PLAN_LIMITS[plan].maxCocktails;
 
     if (maxCocktails !== -1) {

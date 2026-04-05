@@ -7,6 +7,8 @@ import {
   handleStripeSubscriptionDeleted,
   handleSubscriptionUpdate,
 } from '../_shared/handle_subscription_update.ts';
+import { parseStripeSubscriptionForCellarium } from '../_shared/stripe_plan_addons.ts';
+import type { StripeCanonicalPlanId } from '../_shared/stripe_plan_addons.ts';
 
 // ——— Contención global (DIAG ONLY): evita que UncaughtException se propague; loguea contexto sin secretos ———
 function truncate(s: string, max: number): string {
@@ -182,57 +184,31 @@ function extractCustomerIdFromInvoice(invoice: any): string | null {
   return null;
 }
 
-/** Valores permitidos por subscriptions_plan_id_check en la BD. No tocar sin alinear con la migración. */
-const ALLOWED_PLAN_IDS = new Set(['free', 'basic', 'additional-branch'] as const);
-type AllowedPlanId = 'free' | 'basic' | 'additional-branch';
+/** Valores permitidos por subscriptions_plan_id_check en la BD. */
+const ALLOWED_PLAN_IDS = new Set(['cafe', 'bistro', 'trattoria', 'grand-maison'] as const);
+type AllowedPlanId = StripeCanonicalPlanId;
 
-/** Ranking para comparar planes: solo permitir upgrade (nunca degradar) desde invoice.* */
+/** Ranking: solo upgrades desde invoice.* (nunca degradar). */
 function planRank(p: AllowedPlanId): number {
-  if (p === 'free') return 0;
-  if (p === 'basic') return 1;
-  if (p === 'additional-branch') return 2;
+  if (p === 'cafe') return 0;
+  if (p === 'bistro') return 1;
+  if (p === 'trattoria') return 2;
+  if (p === 'grand-maison') return 3;
   return 0;
 }
 
-/** Blindaje: devuelve siempre un plan_id permitido por el CHECK. */
-function normalizePlanId(
-  input: string | null | undefined,
-  planLookupKey?: string | null
-): AllowedPlanId {
-  const i = (input ?? '').toLowerCase().trim();
-  const key = (planLookupKey ?? '').toLowerCase().trim();
-  if (i === 'free' || i === 'basic' || i === 'additional-branch') return i as AllowedPlanId;
-  if (i === 'pro' || i.startsWith('pro_')) return 'basic';
-  if (i === 'business' || i.startsWith('business_')) return 'additional-branch';
-  if (key.startsWith('pro_')) return 'basic';
-  if (key.startsWith('business_')) return 'additional-branch';
-  if (key.startsWith('basic_')) return 'basic';
-  if (key.startsWith('free_')) return 'free';
-  return 'basic';
+function normalizeDbPlanId(raw: string | null | undefined): AllowedPlanId {
+  const i = (raw ?? '').toLowerCase().trim();
+  if (ALLOWED_PLAN_IDS.has(i as AllowedPlanId)) return i as AllowedPlanId;
+  return 'cafe';
 }
 
 function getFinalPlanName(planId: AllowedPlanId): string {
-  if (planId === 'free') return 'Free';
-  if (planId === 'basic') return 'Pro';
-  if (planId === 'additional-branch') return 'Business';
-  return 'Pro';
-}
-
-function mapPlanFromLookupKey(lookupKey: string | null | undefined): { plan_id: string; plan_name: string } {
-  const key = (lookupKey ?? '').toLowerCase();
-  if (key.startsWith('business_')) return { plan_id: 'additional-branch', plan_name: 'Business' };
-  if (key.startsWith('pro_')) return { plan_id: 'basic', plan_name: 'Pro' };
-  if (key.startsWith('basic_')) return { plan_id: 'basic', plan_name: 'Basic' };
-  return { plan_id: 'free', plan_name: 'Free' };
-}
-
-function getPlanLookupKeyFromInvoice(invoice: any): string | null {
-  if (!invoice) return null;
-  const lineKey = invoice?.lines?.data?.[0]?.metadata?.planLookupKey;
-  if (typeof lineKey === 'string' && lineKey) return lineKey;
-  const parentKey = invoice?.parent?.subscription_details?.metadata?.planLookupKey;
-  if (typeof parentKey === 'string' && parentKey) return parentKey;
-  return null;
+  if (planId === 'cafe') return 'Cafe';
+  if (planId === 'bistro') return 'Bistro';
+  if (planId === 'trattoria') return 'Trattoria';
+  if (planId === 'grand-maison') return 'Grand Maison';
+  return 'Cafe';
 }
 
 /** Normaliza tipos de evento (Stripe API 2025 invoice_payment.* → invoice.*) */
@@ -454,7 +430,6 @@ Deno.serve(async (req: Request) => {
 
   let subscriptionId: string | null = null;
   let sessionMetadata: Record<string, string> = {};
-  let resolvedPlanFromInvoice: { plan_id: string; plan_name: string } | null = null;
   let isInvoiceEvent = false;
   /** Solo en eventos invoice.*: objeto invoice para resolver period end (lines[0].period.end). */
   let invoiceForPeriod: any = null;
@@ -542,23 +517,30 @@ Deno.serve(async (req: Request) => {
     const statusIsActiveOrTrialing = status === 'active' || status === 'trialing';
     const periodNotExpired = !expiresAt || new Date(expiresAt) > new Date();
     const active = statusIsActiveOrTrialing && periodNotExpired;
-    const lookupKey = subscription.items?.data?.[0]?.price?.lookup_key ?? null;
-    let plan: AllowedPlanId = 'free';
-    if (lookupKey && typeof lookupKey === 'string') {
-      plan = normalizePlanId(null, lookupKey);
-    } else {
-      const { data: userRow } = await supabaseAdmin
+
+    const subItemsLen = subscription.items?.data?.length ?? 0;
+    if (subItemsLen === 0) {
+      console.log('[SUB_UPDATED] no line items, ack', { subIdSuffix });
+      return json(200, { received: true });
+    }
+    const subParsed = parseStripeSubscriptionForCellarium(subscription);
+    if (subParsed.legacyStripeOnly) {
+      console.log('[SUB_UPDATED][LEGACY_STRIPE_SKIP]', { subIdSuffix });
+      return json(200, { received: true, legacy_skip: true });
+    }
+    let plan: AllowedPlanId = subParsed.planId;
+    if (!subParsed.hasNewPlanPrice) {
+      const { data: prevRow } = await supabaseAdmin
         .from('users')
         .select('subscription_plan')
         .eq('stripe_customer_id', customerId)
         .maybeSingle();
-      const prev = userRow?.subscription_plan;
-      if (prev === 'free' || prev === 'basic' || prev === 'additional-branch') {
-        plan = prev as AllowedPlanId;
-      }
-      console.log('[SUB_UPDATED] no lookup_key, keeping previous plan', { lookupKey, previousPlan: prev });
+      plan = normalizeDbPlanId(prevRow?.subscription_plan as string | undefined);
+      console.log('[SUB_UPDATED] no new plan price, keeping previous canonical plan', { previousPlan: plan });
     }
-    const subscriptionPlan = active ? plan : 'free';
+    const subscriptionPlan = active ? plan : 'cafe';
+    const addonsForUser = active ? subParsed.addonBranchesQty : 0;
+
     const { data: userRow, error: findErr } = await supabaseAdmin
       .from('users')
       .select('id, owner_id')
@@ -592,6 +574,7 @@ Deno.serve(async (req: Request) => {
       stripe_customer_id: customerId || null,
       metadata: {
         ...cancelMeta,
+        addonBranchesQty: addonsForUser,
         lastEventType: event.type,
         lastEventId: event.id,
         lastEventAt: nowSub,
@@ -605,15 +588,15 @@ Deno.serve(async (req: Request) => {
       plan: subscriptionPlan,
       expiresAt,
       provider: 'stripe',
-      addonsCount: null,
+      addonsCount: addonsForUser,
       stripeCustomerId: customerId,
       stripeSubscriptionId: subId,
       subscriptionActive: active,
-      subscriptionCancelAtPeriodEnd: subscriptionPlan === 'free' ? false : cancelScheduled,
+      subscriptionCancelAtPeriodEnd: subscriptionPlan === 'cafe' ? false : cancelScheduled,
       userPatchOverride: null,
       subscriptionsUpsertRow: subRow,
       reconcileBranchLocks: true,
-      reconcileOnlyWhenPlanFree: true,
+      reconcileOnlyWhenPlanFree: false,
       parallelUserUpdateAndSubscriptionsUpsert: true,
       diagSkipReconcile: envTrue('DIAG_SKIP_RECONCILE_BRANCH_LOCKS'),
     });
@@ -729,9 +712,6 @@ Deno.serve(async (req: Request) => {
   const stripeCustomerId = typeof subscription.customer === 'string'
     ? subscription.customer
     : (subscription.customer as { id?: string })?.id ?? '';
-  const plan_name = subMeta.plan_name ?? sessionMetadata.plan_name ?? sessionMetadata.planLookupKey ?? '';
-  const plan_id = subscription.items?.data?.[0]?.price?.id ?? (obj?.items as { data?: Array<{ price?: { id?: string } }> } | undefined)?.data?.[0]?.price?.id ?? '';
-
   console.log('📦 Stripe metadata received', {
     eventType: event.type,
     subscriptionId,
@@ -768,7 +748,6 @@ Deno.serve(async (req: Request) => {
   const periodEndIso = endUnix != null ? new Date(endUnix * 1000).toISOString() : null;
   const safeEnd = periodEndIso ?? currentPeriodEnd ?? currentPeriodStart ?? canceledAt ?? now;
 
-  // Prueba manual: reenviar invoice.payment_succeeded en Stripe → verificar en logs chosenUnix y que subscriptions.current_period_end sea fecha futura; get_branch_limit_for_owner(owner_id) debe devolver 3 para Business.
   console.log('[stripe-webhook] subscriptions period_end resolution', {
     eventType: event.type,
     subscriptionId,
@@ -777,22 +756,53 @@ Deno.serve(async (req: Request) => {
     invoice_line0_period_end: invoiceForPeriod?.lines?.data?.[0]?.period?.end ?? null,
   });
 
-  const planLookupKey = (plan_name || sessionMetadata.planLookupKey || '').trim();
-  const priceObj = subscription.items?.data?.[0]?.price as { lookup_key?: string } | undefined;
-  const lookupKeyFromSubscription = priceObj?.lookup_key ?? null;
-  const mappedPlan = lookupKeyFromSubscription
-    ? mapPlanFromLookupKey(lookupKeyFromSubscription)
-    : (resolvedPlanFromInvoice ?? mapPlanFromLookupKey(planLookupKey || null));
-  const finalPlanId = normalizePlanId(mappedPlan?.plan_id, lookupKeyFromSubscription ?? planLookupKey);
+  const mainItemsLen = (subscription as any)?.items?.data?.length ?? 0;
+  if (mainItemsLen === 0) {
+    console.log('[WEBHOOK] subscription has no items, skip db sync', { subscriptionId });
+    return json(200, { received: true, skip: 'no_items' });
+  }
+
+  const parsedMain = parseStripeSubscriptionForCellarium(subscription);
+  if (parsedMain.legacyStripeOnly) {
+    console.log('[WEBHOOK][LEGACY_STRIPE_SKIP]', { subscriptionId });
+    return json(200, { received: true, legacy_skip: true });
+  }
+
+  const rowStatus = mapStatus(subscription.status ?? 'active');
+  const statusIsActiveOrTrialing = rowStatus === 'active' || rowStatus === 'trialing';
+  const periodNotExpired = !currentPeriodEnd || new Date(currentPeriodEnd) > new Date();
+  const subscriptionActive = statusIsActiveOrTrialing && periodNotExpired;
+  const cancelScheduled = computeCancelScheduled(subscription);
+  const subIdSuffixSync = subscriptionId?.slice?.(-6) ?? '***';
+  console.log('[WEBHOOK_SYNC] cancelScheduled', {
+    subIdSuffix: subIdSuffixSync,
+    cancel_at_period_end: subscription?.cancel_at_period_end ?? null,
+    hasCancelAt: typeof (subscription as any)?.cancel_at === 'number',
+    hasCanceledAt: typeof (subscription as any)?.canceled_at === 'number',
+    status: subscription?.status ?? null,
+    cancelScheduled,
+  });
+
+  let finalPlanId: AllowedPlanId = parsedMain.planId;
+  if (!parsedMain.hasNewPlanPrice) {
+    const { data: userPlanRow } = await supabaseAdmin
+      .from('users')
+      .select('subscription_plan')
+      .eq('stripe_customer_id', stripeCustomerId)
+      .maybeSingle();
+    finalPlanId = normalizeDbPlanId(userPlanRow?.subscription_plan as string | undefined);
+  }
   const finalPlanName = getFinalPlanName(finalPlanId);
-  console.log('✅ FINAL PLAN', { planLookupKey, lookupKeyFromSubscription, mappedPlan, finalPlanId, finalPlanName });
+  const addonQtyForSync = subscriptionActive ? parsedMain.addonBranchesQty : 0;
+  console.log('✅ FINAL PLAN (canonical)', { finalPlanId, finalPlanName, addonQtyForSync });
+
   const cancelMeta = computeCancelMeta(subscription);
   const row = {
     owner_id,
     user_id,
     plan_id: finalPlanId,
     plan_name: finalPlanName,
-    status: mapStatus(subscription.status ?? 'active'),
+    status: rowStatus,
     current_period_start: safeStart,
     ...(periodEndIso != null ? { current_period_end: periodEndIso } : {}),
     cancel_at_period_end: subscription.cancel_at_period_end ?? false,
@@ -802,6 +812,7 @@ Deno.serve(async (req: Request) => {
     metadata: {
       ...subMeta,
       ...cancelMeta,
+      addonBranchesQty: addonQtyForSync,
       lastEventType: event.type,
       lastEventId: event.id,
       lastEventAt: now,
@@ -830,24 +841,12 @@ Deno.serve(async (req: Request) => {
     return json(200, { received: true, diag: 'skip_db_upsert' });
   }
 
-  const statusIsActiveOrTrialing = row.status === 'active' || row.status === 'trialing';
-  const periodNotExpired = !currentPeriodEnd || new Date(currentPeriodEnd) > new Date();
-  const subscriptionActive = statusIsActiveOrTrialing && periodNotExpired;
-  const cancelScheduled = computeCancelScheduled(subscription);
-  const subIdSuffixSync = subscriptionId?.slice?.(-6) ?? '***';
-  console.log('[WEBHOOK_SYNC] cancelScheduled', {
-    subIdSuffix: subIdSuffixSync,
-    cancel_at_period_end: subscription?.cancel_at_period_end ?? null,
-    hasCancelAt: typeof (subscription as any)?.cancel_at === 'number',
-    hasCanceledAt: typeof (subscription as any)?.canceled_at === 'number',
-    status: subscription?.status ?? null,
-    cancelScheduled,
-  });
   const userExpiresAtUnix = toUnix((subscription as any)?.cancel_at) ?? endUnix;
   const userUpdatePayload: Record<string, unknown> = {
     stripe_subscription_id: subscriptionId,
     subscription_active: subscriptionActive,
     subscription_cancel_at_period_end: cancelScheduled,
+    subscription_branch_addons_count: addonQtyForSync,
   };
   if (userExpiresAtUnix != null) {
     userUpdatePayload.subscription_expires_at = new Date(userExpiresAtUnix * 1000).toISOString();
@@ -865,31 +864,25 @@ Deno.serve(async (req: Request) => {
   if (!isInvoiceEvent) {
     userUpdatePayload.subscription_plan = finalPlanId;
   } else {
-    // Invoice fallback: allow ONLY upgrades (never degrade) when subscription is active/trialing.
-    // This rescues cases where customer.subscription.updated is missing (e.g. Pro → Business).
+    // Invoice fallback: solo upgrades entre planes de pago (nunca degradar) si falta customer.subscription.updated.
     let invoicePlanToApply: AllowedPlanId | null = null;
-    if (lookupKeyFromSubscription && typeof lookupKeyFromSubscription === 'string') {
-      const mappedFromLookup = mapPlanFromLookupKey(lookupKeyFromSubscription);
-      const newPlan = normalizePlanId(mappedFromLookup.plan_id, lookupKeyFromSubscription);
-      const subscriptionActiveOrTrialing = subscriptionActive;
-
-      if ((newPlan === 'basic' || newPlan === 'additional-branch') && subscriptionActiveOrTrialing) {
-        const { data: userRow } = await supabaseAdmin
-          .from('users')
-          .select('subscription_plan')
-          .eq('stripe_customer_id', stripeCustomerId)
-          .maybeSingle();
-
-        const dbPlan = (userRow?.subscription_plan ?? 'free') as AllowedPlanId;
-
-        // Allow upgrade if newPlan is higher rank than dbPlan (free→basic, free→additional-branch, basic→additional-branch)
-        if (planRank(newPlan) > planRank(dbPlan)) {
-          invoicePlanToApply = newPlan;
-          console.log('[INVOICE_PLAN_UPGRADE]', { dbPlan, newPlan, lookupKeyFromSubscription });
-        } else {
-          // Never degrade or overwrite same plan from invoice.*
-          console.log('[INVOICE_PLAN_NOOP]', { dbPlan, newPlan, lookupKeyFromSubscription });
-        }
+    if (
+      parsedMain.hasNewPlanPrice &&
+      (parsedMain.planId === 'bistro' || parsedMain.planId === 'trattoria' || parsedMain.planId === 'grand-maison') &&
+      subscriptionActive
+    ) {
+      const newPlan = parsedMain.planId;
+      const { data: userRowInv } = await supabaseAdmin
+        .from('users')
+        .select('subscription_plan')
+        .eq('stripe_customer_id', stripeCustomerId)
+        .maybeSingle();
+      const dbPlan = normalizeDbPlanId(userRowInv?.subscription_plan as string | undefined);
+      if (planRank(newPlan) > planRank(dbPlan)) {
+        invoicePlanToApply = newPlan;
+        console.log('[INVOICE_PLAN_UPGRADE]', { dbPlan, newPlan });
+      } else {
+        console.log('[INVOICE_PLAN_NOOP]', { dbPlan, newPlan });
       }
     }
 
@@ -905,7 +898,7 @@ Deno.serve(async (req: Request) => {
     plan: finalPlanId,
     expiresAt: null,
     provider: 'stripe',
-    addonsCount: null,
+    addonsCount: addonQtyForSync,
     stripeCustomerId,
     stripeSubscriptionId: subscriptionId,
     subscriptionActive,

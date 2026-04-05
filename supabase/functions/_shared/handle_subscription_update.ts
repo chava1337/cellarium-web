@@ -1,14 +1,14 @@
 /**
  * Centraliza escrituras de suscripción en public.users + public.subscriptions + reconcile_branch_locks.
  * Stripe (webhook) y Apple IAP (validate-apple-receipt).
- * Planes internos: free | basic | additional-branch (sin cambiar IDs).
+ * Planes canónicos: cafe | bistro | trattoria | grand-maison
  */
 
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 
 export type BillingProvider = 'stripe' | 'apple';
 
-export type AllowedPlanId = 'free' | 'basic' | 'additional-branch';
+export type AllowedPlanId = 'cafe' | 'bistro' | 'trattoria' | 'grand-maison';
 
 export interface HandleSubscriptionUpdateParams {
   supabaseAdmin: SupabaseClient;
@@ -31,7 +31,7 @@ export interface HandleSubscriptionUpdateParams {
   subscriptionsUpsertRow: Record<string, unknown> | null;
   reconcileBranchLocks: boolean;
   diagSkipReconcile?: boolean;
-  /** true: reconciliar solo si plan === free (handler SUB_UPDATED temprano) */
+  /** true: reconciliar solo si plan === cafe (handler SUB_UPDATED temprano) */
   reconcileOnlyWhenPlanFree?: boolean;
   /**
    * SUB_UPDATED: actualiza users y subscriptions en paralelo (solo Stripe).
@@ -84,10 +84,12 @@ function buildPatchFromPlanParams(p: HandleSubscriptionUpdateParams): Record<str
 
   if (p.provider === 'apple') {
     patch.stripe_subscription_id = null;
-    patch.subscription_branch_addons_count = 0;
+    if (p.addonsCount !== null && p.addonsCount !== undefined) {
+      patch.subscription_branch_addons_count = p.addonsCount;
+    }
   } else {
     patch.stripe_subscription_id = p.stripeSubscriptionId;
-    if (p.plan === 'free') {
+    if (p.plan === 'cafe') {
       patch.subscription_branch_addons_count = 0;
     } else if (p.addonsCount !== null && p.addonsCount !== undefined) {
       patch.subscription_branch_addons_count = p.addonsCount;
@@ -172,7 +174,7 @@ export async function handleSubscriptionUpdate(
 
   const shouldReconcile = (): boolean => {
     if (!p.reconcileBranchLocks) return false;
-    if (p.reconcileOnlyWhenPlanFree) return p.plan === 'free';
+    if (p.reconcileOnlyWhenPlanFree) return p.plan === 'cafe';
     return true;
   };
 
@@ -345,7 +347,7 @@ export async function handleStripeSubscriptionDeleted(
       subscription_active: false,
       stripe_subscription_id: null,
       subscription_expires_at: null,
-      subscription_plan: 'free',
+      subscription_plan: 'cafe',
       subscription_cancel_at_period_end: false,
       subscription_branch_addons_count: 0,
       billing_provider: 'none',
@@ -404,7 +406,7 @@ export async function handleAppleSubscriptionLapsed(
     .from('users')
     .update({
       subscription_active: false,
-      subscription_plan: 'free',
+      subscription_plan: 'cafe',
       subscription_expires_at: null,
       subscription_cancel_at_period_end: false,
       subscription_branch_addons_count: 0,

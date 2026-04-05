@@ -9,23 +9,29 @@ export const STRIPE_CONFIG = {
   currency: 'MXN' as const,
   // Planes y precios (en centavos)
   plans: {
-    free: {
-      id: 'free',
-      name: 'Gratis',
-      price: 0, // $0.00
+    cafe: {
+      id: 'cafe',
+      name: 'Cafe',
+      price: 0,
       priceFormatted: '$0.00',
     },
-    basic: {
-      id: 'basic',
-      name: 'Básico',
-      price: 129000, // $1,290.00 MXN en centavos (Pro)
-      priceFormatted: '$1290.00',
+    bistro: {
+      id: 'bistro',
+      name: 'Bistro',
+      price: 149900,
+      priceFormatted: '$1499.00',
     },
-    'additional-branch': {
-      id: 'additional-branch',
-      name: 'Sucursal Adicional',
-      price: 49900, // $499.00 MXN en centavos (add-on por sucursal)
-      priceFormatted: '$499.00',
+    trattoria: {
+      id: 'trattoria',
+      name: 'Trattoria',
+      price: 249900,
+      priceFormatted: '$2499.00',
+    },
+    'grand-maison': {
+      id: 'grand-maison',
+      name: 'Grand Maison',
+      price: 449900,
+      priceFormatted: '$4499.00',
     },
   },
 } as const;

@@ -1,30 +1,29 @@
 /**
- * Plan efectivo para gating y UI: considera subscription_active y subscription_expires_at.
- * Sin esto, un user con subscription_plan='additional-branch' pero active=false o expirado
- * se trataría como Business hasta que algo refresque el perfil.
+ * Plan efectivo para gating y UI: subscription_active, subscription_expires_at y plan canónico en BD.
  */
 
-import type { User } from '../types';
+import type { User, CanonicalPlanId } from '../types';
 import { supabase } from '../lib/supabase';
 
-export type EffectivePlanId = 'free' | 'basic' | 'additional-branch';
+export type EffectivePlanId = CanonicalPlanId;
+
+const CANONICAL = new Set<string>(['cafe', 'bistro', 'trattoria', 'grand-maison']);
+
+function normalizeStoredPlan(raw: unknown): EffectivePlanId {
+  const p = String(raw ?? 'cafe').toLowerCase().trim();
+  if (CANONICAL.has(p)) return p as EffectivePlanId;
+  return 'cafe';
+}
 
 function mapRpcPlanToEffective(rpcPlan: string | null | undefined): EffectivePlanId {
-  if (!rpcPlan) return 'free';
-  const p = String(rpcPlan).toLowerCase();
-  if (p === 'pro') return 'basic';
-  if (p === 'business') return 'additional-branch';
-  if (p === 'free' || p === 'basic' || p === 'additional-branch') return p;
-  return 'free';
+  return normalizeStoredPlan(rpcPlan);
 }
 
 /**
- * Plan efectivo del OWNER (para gerente/supervisor). Preferir RPC get_plan_id_effective;
- * si no está disponible, consultar public.users por owner_id y usar getEffectivePlan del row.
+ * Plan efectivo del OWNER (gerente/supervisor). RPC get_plan_id_effective; fallback users.
  */
 export async function getOwnerEffectivePlan(user: User | null): Promise<EffectivePlanId> {
   let ownerId = user?.owner_id ?? null;
-  // Fallback para staff legacy: resolver owner por branch_id cuando owner_id no viene hidratado.
   if (!ownerId && user?.role && user.role !== 'owner' && user?.branch_id) {
     try {
       const { data: branchRow, error: branchError } = await supabase
@@ -37,7 +36,7 @@ export async function getOwnerEffectivePlan(user: User | null): Promise<Effectiv
       }
     } catch (_) {}
   }
-  if (!ownerId) return 'free';
+  if (!ownerId) return 'cafe';
 
   try {
     const { data, error } = await supabase.rpc('get_plan_id_effective', { p_owner: ownerId });
@@ -54,42 +53,34 @@ export async function getOwnerEffectivePlan(user: User | null): Promise<Effectiv
       return getEffectivePlan(ownerRow as User);
     }
   } catch (_) {}
-  return 'free';
+  return 'cafe';
 }
 
 /**
- * Plan efectivo para el usuario.
- * - Sin user => free
- * - subscription_active !== true => free
- * - subscription_expires_at en el pasado => free
- * - Si no => user.subscription_plan ?? 'free'
+ * - Sin user => cafe
+ * - subscription_active !== true => cafe
+ * - subscription_expires_at en el pasado => cafe
+ * - Si no => subscription_plan canónico o cafe
  */
 export function getEffectivePlan(user: User | null): EffectivePlanId {
-  if (!user) return 'free';
-  if (user.subscription_active !== true) return 'free';
+  if (!user) return 'cafe';
+  if (user.subscription_active !== true) return 'cafe';
   if (user.subscription_expires_at != null) {
     const expiresAt = new Date(user.subscription_expires_at);
-    if (!isNaN(expiresAt.getTime()) && expiresAt <= new Date()) return 'free';
+    if (!isNaN(expiresAt.getTime()) && expiresAt <= new Date()) return 'cafe';
   }
-  // Compatibilidad con valores legacy almacenados en BD:
-  // - UI: pro/business
-  // - Plan efectivo interno: basic/additional-branch
-  const rawPlan = (user.subscription_plan ?? 'free') as unknown;
-  const p = String(rawPlan).toLowerCase();
-  if (p === 'free') return 'free';
-  if (p === 'basic' || p === 'pro') return 'basic';
-  if (p === 'additional-branch' || p === 'business') return 'additional-branch';
-  return 'free';
+  return normalizeStoredPlan(user.subscription_plan);
 }
 
-export function isBusiness(user: User | null): boolean {
-  return getEffectivePlan(user) === 'additional-branch';
+export function isCafe(user: User | null): boolean {
+  return getEffectivePlan(user) === 'cafe';
 }
 
-export function isPro(user: User | null): boolean {
-  return getEffectivePlan(user) === 'basic';
-}
-
+/** @deprecated usar isCafe */
 export function isFree(user: User | null): boolean {
-  return getEffectivePlan(user) === 'free';
+  return isCafe(user);
+}
+
+export function isGrandMaison(user: User | null): boolean {
+  return getEffectivePlan(user) === 'grand-maison';
 }

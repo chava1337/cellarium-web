@@ -87,8 +87,8 @@ export const canGenerateGuestQr = (
 
   if (role === 'owner') {
     const plan = getEffectivePlan(user);
-    if (plan === 'free') return true;
-    if (plan === 'basic' || plan === 'additional-branch') return true;
+    if (plan === 'cafe') return true;
+    if (plan === 'bistro' || plan === 'trattoria' || plan === 'grand-maison') return true;
     return false;
   }
 

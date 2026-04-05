@@ -1,13 +1,28 @@
 /**
- * IDs de producto en App Store Connect (auto-renewable subscriptions).
- * Deben coincidir con supabase/functions/_shared/apple_iap.ts y validate-apple-receipt.
+ * IDs App Store Connect (auto-renewable). Alineado con supabase/functions/_shared/apple_iap.ts
  */
 export const APPLE_IAP_PRODUCT_IDS = {
-  pro: 'cellarium_pro_monthly',
-  business: 'cellarium_business',
+  bistro: 'cellarium_bistro_monthly',
+  trattoria: 'cellarium_trattoria_monthly',
+  grandMaison: 'cellarium_grand_maison_monthly',
+  branch1: 'cellarium_branch_addon_monthly',
+  branch3: 'cellarium_branch_3_monthly',
 } as const;
 
-export const APPLE_IAP_SKUS_ALL = [APPLE_IAP_PRODUCT_IDS.pro, APPLE_IAP_PRODUCT_IDS.business] as const;
+export const APPLE_IAP_SKUS_PLANS = [
+  APPLE_IAP_PRODUCT_IDS.bistro,
+  APPLE_IAP_PRODUCT_IDS.trattoria,
+  APPLE_IAP_PRODUCT_IDS.grandMaison,
+] as const;
 
-/** URL de gestión de suscripciones de Apple (cuenta del usuario). */
+export const APPLE_IAP_SKUS_ADDONS = [
+  APPLE_IAP_PRODUCT_IDS.branch1,
+  APPLE_IAP_PRODUCT_IDS.branch3,
+] as const;
+
+export const APPLE_IAP_SKUS_ALL = [
+  ...APPLE_IAP_SKUS_PLANS,
+  ...APPLE_IAP_SKUS_ADDONS,
+] as const;
+
 export const APPLE_SUBSCRIPTIONS_MANAGE_URL = 'https://apps.apple.com/account/subscriptions';

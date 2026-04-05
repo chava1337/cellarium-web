@@ -31,15 +31,17 @@ export async function createSubscription(
     logger.debug('[SubscriptionService] Creando suscripción:', data);
 
     const planNames: Record<SubscriptionPlan, string> = {
-      free: 'Gratis',
-      basic: 'Básico',
-      'additional-branch': 'Sucursal Adicional',
+      cafe: 'Cafe',
+      bistro: 'Bistro',
+      trattoria: 'Trattoria',
+      'grand-maison': 'Grand Maison',
     };
 
     const planPrices: Record<SubscriptionPlan, number> = {
-      free: 0,
-      basic: 129000, // $1,290.00 MXN en centavos (Pro; alineado con UI / Stripe test)
-      'additional-branch': 49900, // $499.00 MXN en centavos (add-on por sucursal)
+      cafe: 0,
+      bistro: 149900,
+      trattoria: 249900,
+      'grand-maison': 449900,
     };
 
     // Calcular fechas del período
@@ -48,14 +50,14 @@ export async function createSubscription(
     periodEnd.setMonth(periodEnd.getMonth() + 1); // 1 mes
 
     // Si es plan gratuito, crear directamente sin Stripe
-    if (data.planId === 'free') {
+    if (data.planId === 'cafe') {
       const { data: subscription, error } = await supabase
         .from('subscriptions')
         .insert({
           user_id: data.userId,
           owner_id: data.ownerId,
-          plan_id: 'free',
-          plan_name: planNames.free,
+          plan_id: 'cafe',
+          plan_name: planNames.cafe,
           status: 'active',
           current_period_start: now.toISOString(),
           current_period_end: periodEnd.toISOString(),
@@ -74,7 +76,7 @@ export async function createSubscription(
         .from('users')
         .update({
           subscription_id: subscription.id,
-          subscription_plan: 'free',
+          subscription_plan: 'cafe',
           subscription_active: true,
           subscription_expires_at: periodEnd.toISOString(),
         })
@@ -268,9 +270,10 @@ export async function updateSubscription(
     const updateData: any = {};
     if (data.planId) {
       const planNames: Record<SubscriptionPlan, string> = {
-        free: 'Gratis',
-        basic: 'Básico',
-        'additional-branch': 'Sucursal Adicional',
+        cafe: 'Cafe',
+        bistro: 'Bistro',
+        trattoria: 'Trattoria',
+        'grand-maison': 'Grand Maison',
       };
       updateData.plan_id = data.planId;
       updateData.plan_name = planNames[data.planId];

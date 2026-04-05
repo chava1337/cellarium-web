@@ -11,6 +11,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { hasActiveStripeBackedSubscription } from '../_shared/billing_coexistence.ts';
 import { handleAppleSubscriptionLapsed, handleSubscriptionUpdate } from '../_shared/handle_subscription_update.ts';
+import type { AllowedPlanId } from '../_shared/handle_subscription_update.ts';
 import { mapAppleProductId } from '../_shared/apple_iap.ts';
 
 const corsHeaders = {
@@ -60,16 +61,106 @@ async function postVerifyReceipt(url: string, receiptData: string, password: str
   return (await res.json()) as VerifyReceiptResponse;
 }
 
-function pickBestSubscriptionInfo(body: VerifyReceiptResponse): AppleReceiptInfo | null {
-  const list = [...(body.latest_receipt_info ?? []), ...(body.receipt?.in_app ?? [])];
-  const candidates = list.filter((x) => x.product_id && mapAppleProductId(x.product_id));
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => {
-    const ea = parseInt(String(a.expires_date_ms ?? '0'), 10);
-    const eb = parseInt(String(b.expires_date_ms ?? '0'), 10);
-    return eb - ea;
-  });
-  return candidates[0] ?? null;
+function collectReceiptInfos(body: VerifyReceiptResponse): AppleReceiptInfo[] {
+  return [...(body.latest_receipt_info ?? []), ...(body.receipt?.in_app ?? [])].filter(
+    (x) => x.product_id && String(x.product_id).length > 0
+  );
+}
+
+function msToNum(ms: string | undefined): number {
+  const n = parseInt(String(ms ?? '0'), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Por product_id, la fila no expirada con expiración más lejana (add-on y base pueden coexistir). */
+function pickActiveLatestPerProduct(infos: AppleReceiptInfo[], nowMs: number): AppleReceiptInfo[] {
+  const best = new Map<string, AppleReceiptInfo>();
+  for (const x of infos) {
+    const exp = msToNum(x.expires_date_ms);
+    if (exp <= nowMs) continue;
+    const pid = String(x.product_id);
+    const prev = best.get(pid);
+    if (!prev || exp > msToNum(prev.expires_date_ms)) best.set(pid, x);
+  }
+  return [...best.values()];
+}
+
+type ResolveResult =
+  | {
+      base: {
+        productId: string;
+        originalTransactionId: string;
+        expiresIso: string;
+        purchaseIso: string;
+        planId: AllowedPlanId;
+        planName: string;
+      };
+      addonsCount: 0 | 1 | 3;
+      addonProductId: string | null;
+      legacyAlsoPresent: boolean;
+    }
+  | { error: 'NO_MATCHING_SUBSCRIPTION' | 'LEGACY_ONLY' | 'ADDON_WITHOUT_BASE' };
+
+function resolveAppleSubscriptionFromReceipt(body: VerifyReceiptResponse, now: Date): ResolveResult {
+  const nowMs = now.getTime();
+  const rows = pickActiveLatestPerProduct(collectReceiptInfos(body), nowMs);
+
+  let legacyAlsoPresent = false;
+  let bestBase: { info: AppleReceiptInfo; planId: AllowedPlanId; planName: string } | null = null;
+  let bestAddon: { info: AppleReceiptInfo; slots: 1 | 3 } | null = null;
+
+  for (const info of rows) {
+    const pid = String(info.product_id);
+    const m = mapAppleProductId(pid);
+    if (m == null) continue;
+    if (m.kind === 'legacy') {
+      legacyAlsoPresent = true;
+      continue;
+    }
+    if (m.kind === 'base_plan') {
+      const exp = msToNum(info.expires_date_ms);
+      const prevExp = bestBase ? msToNum(bestBase.info.expires_date_ms) : 0;
+      if (!bestBase || exp > prevExp) {
+        bestBase = { info, planId: m.planId as AllowedPlanId, planName: m.planName };
+      }
+      continue;
+    }
+    if (m.kind === 'branch_addon') {
+      const exp = msToNum(info.expires_date_ms);
+      const prevExp = bestAddon ? msToNum(bestAddon.info.expires_date_ms) : 0;
+      if (!bestAddon || exp > prevExp) {
+        bestAddon = { info, slots: m.branchAddonSlots };
+      }
+    }
+  }
+
+  if (!bestBase && bestAddon) {
+    return { error: 'ADDON_WITHOUT_BASE' };
+  }
+  if (!bestBase) {
+    if (legacyAlsoPresent) return { error: 'LEGACY_ONLY' };
+    return { error: 'NO_MATCHING_SUBSCRIPTION' };
+  }
+
+  const expiresIso = msToIso(bestBase.info.expires_date_ms);
+  const purchaseIso = msToIso(bestBase.info.purchase_date_ms) ?? new Date().toISOString();
+  if (!expiresIso) return { error: 'NO_MATCHING_SUBSCRIPTION' };
+
+  const addonsCount = (bestAddon ? bestAddon.slots : 0) as 0 | 1 | 3;
+
+  return {
+    base: {
+      productId: String(bestBase.info.product_id),
+      originalTransactionId: String(bestBase.info.original_transaction_id),
+      expiresIso,
+      purchaseIso,
+      planId: bestBase.planId,
+      planName: bestBase.planName,
+    },
+    addonsCount,
+    addonProductId: bestAddon ? String(bestAddon.info.product_id) : null,
+    legacyAlsoPresent,
+  };
 }
 
 function msToIso(ms: string | undefined): string | null {
@@ -187,24 +278,34 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const info = pickBestSubscriptionInfo(verified);
-    if (!info?.product_id || !info.original_transaction_id) {
+    const resolved = resolveAppleSubscriptionFromReceipt(verified, new Date());
+    if ('error' in resolved) {
+      if (resolved.error === 'LEGACY_ONLY') {
+        return json(400, {
+          error:
+            'Suscripción Apple legacy no está disponible en el flujo actual. Usa un plan nuevo (Bistro, Trattoria o Grand Maison).',
+          code: 'LEGACY_APPLE_PRODUCT',
+        });
+      }
+      if (resolved.error === 'ADDON_WITHOUT_BASE') {
+        return json(400, {
+          error: 'Se requiere un plan base activo para el add-on de sucursales.',
+          code: 'ADDON_WITHOUT_BASE',
+        });
+      }
       return json(400, {
         error: 'No se encontró una suscripción Cellarium en el recibo',
         code: 'NO_MATCHING_SUBSCRIPTION',
       });
     }
 
-    const mapped = mapAppleProductId(info.product_id);
-    if (!mapped) {
-      return json(400, { error: 'Producto no soportado', code: 'UNKNOWN_PRODUCT', product_id: info.product_id });
+    const { base, addonsCount, addonProductId, legacyAlsoPresent } = resolved;
+    if (legacyAlsoPresent) {
+      console.warn('[validate-apple-receipt] recibo contiene producto legacy además del plan nuevo (legacy ignorado)');
     }
 
-    const expiresIso = msToIso(info.expires_date_ms);
-    const purchaseIso = msToIso(info.purchase_date_ms) ?? new Date().toISOString();
-    if (!expiresIso) {
-      return json(400, { error: 'Fecha de expiración inválida', code: 'INVALID_EXPIRY' });
-    }
+    const expiresIso = base.expiresIso;
+    const purchaseIso = base.purchaseIso;
 
     if (new Date(expiresIso) <= new Date()) {
       const lapse = await handleAppleSubscriptionLapsed({
@@ -226,14 +327,14 @@ Deno.serve(async (req: Request) => {
     }
 
     const nowIso = new Date().toISOString();
-    const originalTx = String(info.original_transaction_id);
-    const productId = String(info.product_id);
+    const originalTx = base.originalTransactionId;
+    const productId = base.productId;
 
     const subRow = {
       user_id: userData.id,
       owner_id: ownerId,
-      plan_id: mapped.planId,
-      plan_name: mapped.planName,
+      plan_id: base.planId,
+      plan_name: base.planName,
       status: 'active',
       current_period_start: purchaseIso,
       current_period_end: expiresIso,
@@ -246,7 +347,8 @@ Deno.serve(async (req: Request) => {
         provider: 'apple',
         apple_product_id: productId,
         apple_original_transaction_id: originalTx,
-        addonBranchesQty: 0,
+        apple_branch_addon_product_id: addonProductId,
+        addonBranchesQty: addonsCount,
       },
       updated_at: nowIso,
     };
@@ -255,10 +357,10 @@ Deno.serve(async (req: Request) => {
       supabaseAdmin,
       ownerId,
       userId: userData.id,
-      plan: mapped.planId,
+      plan: base.planId,
       expiresAt: expiresIso,
       provider: 'apple',
-      addonsCount: 0,
+      addonsCount,
       stripeCustomerId: null,
       stripeSubscriptionId: null,
       subscriptionActive: true,
@@ -282,10 +384,11 @@ Deno.serve(async (req: Request) => {
     return json(200, {
       ok: true,
       synced: 'active',
-      plan_id: mapped.planId,
-      plan_name: mapped.planName,
+      plan_id: base.planId,
+      plan_name: base.planName,
       expires_at: expiresIso,
       apple_original_transaction_id: originalTx,
+      subscription_branch_addons_count: addonsCount,
     });
   } catch (e) {
     console.error('[validate-apple-receipt]', e);

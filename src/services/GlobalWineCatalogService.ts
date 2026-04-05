@@ -6,6 +6,152 @@
 import { supabase } from '../lib/supabase';
 import { logger } from '../utils/logger';
 
+/** Solo logs de diagnóstico en __DEV__ (vino reportado como invisible en browse). */
+const DEBUG_GLOBAL_CATALOG_WINE_ID = 'd0b9e697-1ae3-4311-8287-1d6efc715360';
+
+function globalCatalogAudit(step: string, payload: Record<string, unknown>) {
+  if (!__DEV__) return;
+  console.log(`[GlobalCatalogAudit] ${step}`, payload);
+}
+
+type BrowseColorTab = 'red' | 'white' | 'rose' | 'sparkling' | 'dessert' | 'fortified';
+
+function escapeIlikeTerm(value: string): string {
+  return value.replace(/[%(),]/g, ' ').trim();
+}
+
+/** Valor literal para filtros PostgREST `eq` (comillas si hace falta). */
+function postgrestEqAtom(value: string): string {
+  if (/^[a-z0-9_-]+$/i.test(value)) return value;
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+const BROWSE_COLOR_TAB_ALIASES: Record<string, BrowseColorTab> = {
+  red: 'red',
+  tinto: 'red',
+  white: 'white',
+  blanco: 'white',
+  rose: 'rose',
+  rosé: 'rose',
+  rosado: 'rose',
+  sparkling: 'sparkling',
+  espumoso: 'sparkling',
+  dessert: 'dessert',
+  postre: 'dessert',
+  fortified: 'fortified',
+  fortificado: 'fortified',
+};
+
+const BROWSE_COLOR_SQL_TERMS: Record<BrowseColorTab, { en: string[]; es: string[] }> = {
+  red: { en: ['red'], es: ['tinto'] },
+  white: { en: ['white'], es: ['blanco'] },
+  rose: { en: ['rose', 'rosé'], es: ['rosado'] },
+  sparkling: { en: ['sparkling'], es: ['espumoso'] },
+  dessert: { en: ['dessert'], es: ['postre'] },
+  fortified: { en: ['fortified'], es: ['fortificado'] },
+};
+
+/** Filtro PostgREST `.or(...)` con `eq` exacto sobre `wines_canonical_browse.color_en` / `color_es`. */
+function buildBrowseColorOrFilter(colors: readonly unknown[]): string | null {
+  const tabs = new Set<BrowseColorTab>();
+  for (const c of colors) {
+    if (typeof c !== 'string') continue;
+    const key = BROWSE_COLOR_TAB_ALIASES[c.trim().toLowerCase()];
+    if (key) tabs.add(key);
+  }
+  if (tabs.size === 0) return null;
+  const parts: string[] = [];
+  for (const tab of tabs) {
+    const { en, es } = BROWSE_COLOR_SQL_TERMS[tab];
+    for (const term of en) {
+      parts.push(`color_en.eq.${postgrestEqAtom(term)}`);
+    }
+    for (const term of es) {
+      parts.push(`color_es.eq.${postgrestEqAtom(term)}`);
+    }
+  }
+  return parts.join(',');
+}
+
+/**
+ * Si `color` llegó como texto JSON (columna jsonb mal tipada o serialización), parsear.
+ */
+function parseMaybeJsonColorField(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw;
+  const t = raw.trim();
+  if (t.startsWith('{') && t.endsWith('}')) {
+    try {
+      return JSON.parse(t);
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
+/**
+ * Concatena todos los valores string legibles del campo color/type (cualquier clave del objeto, p. ej. en + es).
+ * Evita depender solo de `(en || es)` cuando el filtro de pestaña usa códigos en inglés (`red`) y el vino solo trae `tinto` en ES.
+ */
+export function wineColorSearchHaystack(colorField: unknown): string {
+  const raw = parseMaybeJsonColorField(colorField);
+  const parts: string[] = [];
+  if (raw == null || raw === '') return '';
+  if (typeof raw === 'string') {
+    parts.push(raw);
+  } else if (Array.isArray(raw)) {
+    for (const x of raw) {
+      if (typeof x === 'string') parts.push(x);
+    }
+  } else if (typeof raw === 'object') {
+    const o = raw as Record<string, unknown>;
+    for (const v of Object.values(o)) {
+      if (typeof v === 'string') parts.push(v);
+    }
+  }
+  return parts.join(' ').toLowerCase();
+}
+
+/**
+ * Filtro de pestañas Tintos/Blancos/… (keys: red | white | rose | sparkling | dessert | fortified).
+ * Incluye sinónimos ES/EN para alinear con datos bilingües en `wines_canonical.color`.
+ */
+export function wineMatchesColorTab(colorField: unknown, tabKey: string): boolean {
+  const hay = wineColorSearchHaystack(colorField);
+  if (!hay) return false;
+  const f = tabKey.toLowerCase();
+  if (f === 'red') {
+    return (
+      hay.includes('red') ||
+      hay.includes('tinto') ||
+      hay.includes('tinta') ||
+      hay.includes('rojo') ||
+      hay.includes('rouge')
+    );
+  }
+  if (f === 'white') {
+    return hay.includes('white') || hay.includes('blanco') || hay.includes('blanc');
+  }
+  if (f === 'rose') {
+    return hay.includes('rose') || hay.includes('rosé') || hay.includes('rosado');
+  }
+  if (f === 'sparkling') {
+    return (
+      hay.includes('sparkling') ||
+      hay.includes('espumoso') ||
+      hay.includes('champagne') ||
+      hay.includes('cava')
+    );
+  }
+  if (f === 'dessert') {
+    return hay.includes('dessert') || hay.includes('postre') || hay.includes('dulce');
+  }
+  if (f === 'fortified') {
+    return hay.includes('fortified') || hay.includes('fortificado') || hay.includes('generoso');
+  }
+  return hay.includes(f);
+}
+
 // Construir URL pública de imagen de vino
 const SUPABASE_PROJECT_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 
@@ -300,46 +446,12 @@ export async function fetchGlobalWines({
       );
       logger.success('[fetchGlobalWines] URLs procesadas');
       
-      // Filtrar por color/tipo si se especificó
-      // Todos los tipos (red, white, rose, sparkling, dessert, fortified) están en la columna "color"
+      // Filtrar por color/tipo si se especificó (sinónimos ES/EN + todas las claves del objeto i18n)
       if (colors.length > 0) {
-        processedWines = processedWines.filter(wine => {
-          if (!wine.color) return false;
-          
-          // Función helper para extraer el valor del color
-          const getColorValue = (colorField: any): string => {
-            if (!colorField) return '';
-            
-            // Si es string, devolverlo directamente
-            if (typeof colorField === 'string') {
-              return colorField.toLowerCase();
-            }
-            
-            // Si es objeto bilingüe, buscar en 'en' o 'es'
-            if (typeof colorField === 'object' && colorField !== null) {
-              const en = (colorField as any).en;
-              const es = (colorField as any).es;
-              return (en || es || '').toLowerCase();
-            }
-            
-            // Si es array, tomar el primer elemento
-            if (Array.isArray(colorField) && colorField.length > 0) {
-              return String(colorField[0]).toLowerCase();
-            }
-            
-            return '';
-          };
-          
-          const wineColor = getColorValue(wine.color);
-          
-          // Verificar si el color/tipo del vino coincide con alguno de los filtros buscados
-          // Todos los tipos (red, white, rose, sparkling, dessert, fortified) se buscan en color
-          return colors.some(filterValue => {
-            const searchValue = filterValue.toLowerCase();
-            return wineColor.includes(searchValue) || searchValue.includes(wineColor);
-          });
-        });
-        
+        processedWines = processedWines.filter(
+          (wine) => wine.color != null && colors.some((tab) => wineMatchesColorTab(wine.color, tab))
+        );
+
         logger.debug('[fetchGlobalWines] Filtrado por color:', processedWines.length, 'vinos después del filtro');
       }
       
@@ -404,8 +516,8 @@ export async function listWinesKeyset({
     // ✅ PRE-FASE 3: Removido count: 'exact' para mejor performance (keyset no necesita total exacto)
     // Construir query base con orden por ID (más eficiente que label JSONB)
     let query = supabase
-      .from('wines_canonical')
-      .select('id, winery, label, image_canonical_url, country, region, color, abv')
+      .from('wines_canonical_browse')
+      .select('id, winery, label, image_canonical_url, country, region, color, abv, color_en, color_es')
       .order('id', { ascending: true })
       .limit(limit + 1); // +1 para detectar si hay más páginas
 
@@ -415,9 +527,17 @@ export async function listWinesKeyset({
     }
 
     // Aplicar búsqueda de texto si existe
-    if (q) {
-      query = query.or(`label.ilike.%${q}%,winery.ilike.%${q}%`);
+    const safeQ = escapeIlikeTerm(q);
+    if (safeQ) {
+      query = query.or(`label.ilike.%${safeQ}%,winery.ilike.%${safeQ}%`);
       logger.debug('[listWinesKeyset] Búsqueda:', q);
+    }
+
+    if (colors.length > 0) {
+      const colorOr = buildBrowseColorOrFilter(colors);
+      if (colorOr) {
+        query = query.or(colorOr);
+      }
     }
 
     const result = await query;
@@ -462,36 +582,22 @@ export async function listWinesKeyset({
       logger.success('[listWinesKeyset] URLs procesadas');
     }
 
-    // Filtrar por color/tipo si se especificó (igual que fetchGlobalWines)
-    if (colors.length > 0 && wines.length > 0) {
-      wines = wines.filter((wine) => {
-        if (!wine.color) return false;
-
-        const getColorValue = (colorField: any): string => {
-          if (!colorField) return '';
-          if (typeof colorField === 'string') {
-            return colorField.toLowerCase();
-          }
-          if (typeof colorField === 'object' && colorField !== null) {
-            const en = (colorField as any).en;
-            const es = (colorField as any).es;
-            return (en || es || '').toLowerCase();
-          }
-          if (Array.isArray(colorField) && colorField.length > 0) {
-            return String(colorField[0]).toLowerCase();
-          }
-          return '';
-        };
-
-        const wineColor = getColorValue(wine.color);
-        return colors.some((filterValue) => {
-          const searchValue = filterValue.toLowerCase();
-          return wineColor.includes(searchValue) || searchValue.includes(wineColor);
-        });
+    if (wines.some((w) => w.id === DEBUG_GLOBAL_CATALOG_WINE_ID) && colors.length === 0) {
+      globalCatalogAudit('listWinesKeyset:batch_includes_target_no_color_filter', {
+        q,
+        colors,
+        batchSize: wines.length,
+        targetColorRaw: wines.find((w) => w.id === DEBUG_GLOBAL_CATALOG_WINE_ID)?.color ?? null,
       });
-
-      logger.debug('[listWinesKeyset] Filtrado por color:', wines.length, 'vinos después del filtro');
     }
+
+    wines = wines.map((row) => {
+      const { color_en: _en, color_es: _es, ...wine } = row as GlobalWine & {
+        color_en?: string;
+        color_es?: string;
+      };
+      return wine;
+    });
 
     // ✅ PRE-FASE 3: hasMore basado en nextCursor (más eficiente que count exact)
     const hasMore = nextCursor !== null;

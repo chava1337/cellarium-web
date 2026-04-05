@@ -1,6 +1,6 @@
 // Edge Function: update-subscription
 // Actualiza el add-on mensual de sucursales en Stripe y sincroniza con public.users (UI: sucursales adicionales)
-// Solo owners en plan Business pueden ejecutar esta función
+// Owners con suscripci?n Stripe de pago (bistro/trattoria/grand-maison) pueden ajustar add-on de sucursales.
 // Usa REST API directa (sin Stripe SDK) para evitar node polyfills
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
@@ -84,14 +84,14 @@ Deno.serve(async (req: Request) => {
     const ownerId = (userData.owner_id ?? userData.id) as string;
     if (userData.role !== 'owner' || userData.id !== ownerId) {
       return json(403, {
-        error: 'Solo el owner puede actualizar la suscripción',
+        error: 'Solo el owner puede actualizar la suscripci?n',
         code: 'FORBIDDEN',
       });
     }
 
     if (userData.signup_method === 'password' && userData.owner_email_verified !== true) {
       return json(403, {
-        error: 'Debes verificar tu correo antes de actualizar la suscripción.',
+        error: 'Debes verificar tu correo antes de actualizar la suscripci?n.',
         code: 'EMAIL_VERIFICATION_REQUIRED',
       });
     }
@@ -102,17 +102,12 @@ Deno.serve(async (req: Request) => {
     ) {
       return json(409, {
         error:
-          'Las sucursales adicionales con Stripe no aplican a la suscripción de Apple. Gestiona el plan desde iOS.',
+          'Las sucursales adicionales con Stripe no aplican a la suscripci?n de Apple. Gestiona el plan desde iOS.',
         code: 'APPLE_SUBSCRIPTION_ACTIVE',
       });
     }
 
-    if (userData.subscription_plan !== 'additional-branch') {
-      return json(403, {
-        error: 'Las sucursales adicionales solo están disponibles en el plan Business',
-        code: 'PLAN_NOT_ALLOWED',
-      });
-    }
+    // Cualquier owner con suscripci?n Stripe vinculada puede ajustar quantity del add-on (incl. cafe + add-ons si aplica).
 
     // stripe_subscription_id: tabla subscriptions (o users si tiene la columna)
     const { data: subRow } = await supabaseAdmin
@@ -126,7 +121,7 @@ Deno.serve(async (req: Request) => {
 
     if (!userData.stripe_customer_id || !stripeSubscriptionId) {
       return json(409, {
-        error: 'Falta vincular la suscripción con Stripe. Gestiona tu suscripción desde el portal.',
+        error: 'Falta vincular la suscripci?n con Stripe. Gestiona tu suscripci?n desde el portal.',
         code: 'MISSING_STRIPE_LINK',
       });
     }
@@ -135,21 +130,21 @@ Deno.serve(async (req: Request) => {
     try {
       body = await req.json();
     } catch {
-      return json(400, { error: 'Body JSON inválido', code: 'INVALID_INPUT' });
+      return json(400, { error: 'Body JSON inv?lido', code: 'INVALID_INPUT' });
     }
 
     const addonBranchesQty = body?.addonBranchesQty;
     if (typeof addonBranchesQty !== 'number' || addonBranchesQty < 0 || addonBranchesQty > 50) {
       return json(400, {
-        error: 'addonBranchesQty debe ser un número entre 0 y 50',
+        error: 'addonBranchesQty debe ser un n?mero entre 0 y 50',
         code: 'INVALID_INPUT',
       });
     }
 
     const safeQty = Math.min(Math.max(Math.floor(addonBranchesQty), 0), 50);
 
-    /** Business: sucursales base incluidas (alineado con get_branch_limit / app). */
-    const BUSINESS_BASE_BRANCHES = 3;
+    /** Modelo can?nico: 1 sucursal base + add-ons (quantity en Stripe). */
+    const BASE_INCLUDED_BRANCHES = 1;
     const { count: activeBranchCount, error: branchCountError } = await supabaseAdmin
       .from('branches')
       .select('*', { count: 'exact', head: true })
@@ -163,12 +158,12 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const newAllowedBranches = BUSINESS_BASE_BRANCHES + safeQty;
+    const newAllowedBranches = BASE_INCLUDED_BRANCHES + safeQty;
     const active = activeBranchCount ?? 0;
     if (active > newAllowedBranches) {
       return json(400, {
         error:
-          'No puedes reducir sucursales adicionales porque tienes más sucursales activas de las permitidas.',
+          'No puedes reducir sucursales adicionales porque tienes m?s sucursales activas de las permitidas.',
         code: 'BRANCH_REDUCTION_NOT_ALLOWED',
         details: { activeBranches: active, allowed: newAllowedBranches },
       });
@@ -177,7 +172,7 @@ Deno.serve(async (req: Request) => {
     const stripeSecretKey = Deno.env.get('STRIPE_SECRET_KEY');
     if (!stripeSecretKey) {
       console.error('[update-subscription] STRIPE_SECRET_KEY no configurada');
-      return json(500, { error: 'Error de configuración', code: 'INTERNAL' });
+      return json(500, { error: 'Error de configuraci?n', code: 'INTERNAL' });
     }
 
     const priceResult = await stripeRequest(
@@ -216,7 +211,7 @@ Deno.serve(async (req: Request) => {
       return json(
         status >= 400 && status < 500 ? status : 502,
         {
-          error: 'Error al obtener suscripción de Stripe',
+          error: 'Error al obtener suscripci?n de Stripe',
           message: subResult.error?.message,
           code: 'STRIPE_ERROR',
         }
@@ -276,7 +271,7 @@ Deno.serve(async (req: Request) => {
         return json(
           status >= 400 && status < 500 ? status : 502,
           {
-            error: 'Error al actualizar suscripción en Stripe',
+            error: 'Error al actualizar suscripci?n en Stripe',
             message: updateResult.error?.message,
             code: 'STRIPE_ERROR',
           }

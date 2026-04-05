@@ -27,7 +27,13 @@ export async function ensureIapConnection(): Promise<void> {
 }
 
 function skuForPlan(plan: ApplePlanUiId): string {
-  return plan === 'pro' ? APPLE_IAP_PRODUCT_IDS.pro : APPLE_IAP_PRODUCT_IDS.business;
+  if (plan === 'bistro') return APPLE_IAP_PRODUCT_IDS.bistro;
+  if (plan === 'trattoria') return APPLE_IAP_PRODUCT_IDS.trattoria;
+  return APPLE_IAP_PRODUCT_IDS.grandMaison;
+}
+
+function skuForBranchAddon(slots: 1 | 3): string {
+  return slots === 1 ? APPLE_IAP_PRODUCT_IDS.branch1 : APPLE_IAP_PRODUCT_IDS.branch3;
 }
 
 function normalizePurchaseResult(
@@ -37,10 +43,6 @@ function normalizePurchaseResult(
   return Array.isArray(result) ? result[0] ?? null : result;
 }
 
-/**
- * Espera una compra que coincida con el SKU (StoreKit puede entregar la transacción por listener
- * cuando requestPurchase devuelve null). Registrar listeners ANTES de requestPurchase.
- */
 function waitForPurchaseFromListener(expectedSku: string, signal: AbortSignal): Promise<Purchase> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -92,12 +94,7 @@ function waitForPurchaseFromListener(expectedSku: string, signal: AbortSignal): 
   });
 }
 
-/**
- * Compra: requestPurchase (subs) → (caller) validate-apple-receipt → finishTransaction SOLO si el backend confirma.
- * No llamar finishTransaction si el backend falla (timeout/5xx): la transacción queda pendiente y el usuario puede reintentar.
- */
-export async function purchaseAppleSubscription(plan: ApplePlanUiId): Promise<{ purchase: Purchase }> {
-  const sku = skuForPlan(plan);
+async function purchaseWithSku(sku: string): Promise<{ purchase: Purchase }> {
   await ensureIapConnection();
   await fetchProducts({ skus: [...APPLE_IAP_SKUS_ALL], type: 'subs' });
 
@@ -131,13 +128,22 @@ export async function purchaseAppleSubscription(plan: ApplePlanUiId): Promise<{ 
   }
 }
 
+export async function purchaseAppleSubscription(plan: ApplePlanUiId): Promise<{ purchase: Purchase }> {
+  const sku = skuForPlan(plan);
+  return purchaseWithSku(sku);
+}
+
+export async function purchaseAppleBranchAddon(slots: 1 | 3): Promise<{ purchase: Purchase }> {
+  const sku = skuForBranchAddon(slots);
+  return purchaseWithSku(sku);
+}
+
 export async function getReceiptBase64(forceRefresh = false): Promise<string | null> {
   await ensureIapConnection();
   const receipt = forceRefresh ? await requestReceiptRefreshIOS() : await getReceiptIOS();
   return receipt?.length ? receipt : null;
 }
 
-/** Restaura transacciones en StoreKit para que el recibo refleje compras previas (idempotente en repetición). */
 export async function restoreApplePurchasesForReceipt(): Promise<void> {
   await ensureIapConnection();
   await getAvailablePurchases({ onlyIncludeActiveItemsIOS: false });
@@ -147,10 +153,6 @@ export async function finishAppleTransactionIfNeeded(purchase: Purchase): Promis
   await iapFinishTransaction({ purchase, isConsumable: false });
 }
 
-/**
- * Tras validate-apple-receipt exitoso (compra o restauración): finaliza transacciones Cellarium en cola.
- * Evita dejar transacciones pendientes en StoreKit tras sincronizar con el servidor.
- */
 export async function finishApplePurchasesAfterBackendSync(): Promise<void> {
   await ensureIapConnection();
   const purchases = await getAvailablePurchases({ onlyIncludeActiveItemsIOS: false });

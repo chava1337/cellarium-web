@@ -18,7 +18,14 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
-import { listWinesKeyset, fetchWineDetail, GlobalWine, getBilingualValue, getBilingualArray, getBilingualCountryDisplay } from '../services/GlobalWineCatalogService';
+import {
+  listWinesKeyset,
+  fetchWineDetail,
+  GlobalWine,
+  getBilingualValue,
+  getBilingualArray,
+  wineColorSearchHaystack,
+} from '../services/GlobalWineCatalogService';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranch } from '../contexts/BranchContext';
@@ -61,6 +68,7 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  const [addedWineIds, setAddedWineIds] = useState<Set<string>>(new Set());
  // Ref para evitar múltiples llamadas a onEndReached
  const onEndReachedCalledDuringMomentum = useRef(false);
+ const DEBUG_GLOBAL_CATALOG_WINE_ID = 'd0b9e697-1ae3-4311-8287-1d6efc715360';
  const fadeAnim = useRef(new Animated.Value(1)).current;
  // Request guards para evitar race conditions
  const firstPageReqIdRef = useRef(0);
@@ -228,6 +236,26 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  unsubscribeBlur();
  };
  }, [navigation, user, currentBranch, loadAddedWines]);
+
+ useEffect(() => {
+   if (!__DEV__ || !showSearchModal) return;
+   console.log('[GlobalCatalogAudit] search_modal_open', {
+     filterColor: filterColor ?? 'all',
+     debouncedSearchQuery,
+     searchQuery,
+   });
+ }, [showSearchModal, filterColor, debouncedSearchQuery, searchQuery]);
+
+ useEffect(() => {
+   if (!__DEV__) return;
+   const hit = wines.find((w) => w.id === DEBUG_GLOBAL_CATALOG_WINE_ID);
+   console.log('[GlobalCatalogAudit] flatlist_data_snapshot', {
+     len: wines.length,
+     filterColor: filterColor ?? 'all',
+     hasTargetWine: !!hit,
+   });
+ }, [wines, filterColor]);
+
  const loadFirstPage = useCallback(async () => {
  logger.log('[loadFirstPage] Cargando primera página');
  // Requéestaááá guard: invalidar requéestaás anteriores y crear nuevo token
@@ -266,6 +294,17 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  if (reqId !== firstPageReqIdRef.current || !isMountedRef.current) {
  logger.debug('[loadFirstPage] Request obsoleto o componente desmontado, ignorando resultado');
  return;
+ }
+ if (__DEV__) {
+   const target = wines.find((w) => w.id === DEBUG_GLOBAL_CATALOG_WINE_ID);
+   console.log('[GlobalCatalogAudit] loadFirstPage:response_applied', {
+     count: wines.length,
+     filterColor: filterColor ?? 'all',
+     q: debouncedSearchQuery || '',
+     hasTargetWine: !!target,
+     targetColorRaw: target?.color ?? null,
+     targetColorHaystack: target ? wineColorSearchHaystack(target.color) : null,
+   });
  }
  setWines(wines);
  setCursorId(result.nextCursor ?? null);
@@ -642,7 +681,7 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  )}
  <View style={styles.cardInfoRow}>
  {(() => {
- const country = getBilingualCountryDisplay(item.country);
+ const country = getBilingualValue(item.country, language);
  const region = getBilingualValue(item.region, language);
  if (country && region) {
  return (
@@ -731,6 +770,7 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  
  const wineryText = selectedWine ? sanitizeText(getBilingualValue(selectedWine.winery, language)) : null;
  const labelText = selectedWine ? sanitizeText(getBilingualValue(selectedWine.label, language)) : null;
+ const countryPillText = selectedWine ? sanitizeText(getBilingualValue(selectedWine.country, language)) : '';
  const headerTitle = wineryText && labelText ? `${wineryText} ${labelText}` : (labelText || wineryText || '');
  
  return (
@@ -798,11 +838,11 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  
  {/* Pills row: País, Región, Color, ABV */}
  <View style={styles.pillsRow}>
- {getBilingualCountryDisplay(selectedWine.country) && (
+ {countryPillText ? (
  <View style={styles.pill}>
- <Text style={styles.pillText}>{sanitizeText(getBilingualCountryDisplay(selectedWine.country))}</Text>
+ <Text style={styles.pillText}>{countryPillText}</Text>
  </View>
- )}
+ ) : null}
  {getBilingualValue(selectedWine.region, language) && (
  <View style={styles.pill}>
  <Text style={styles.pillText}>{sanitizeText(getBilingualValue(selectedWine.region, language))}</Text>
@@ -1023,7 +1063,7 @@ onRequestClose={() => setShowSearchModal(false)}
  <View style={styles.searchModalBackdrop}>
  <View style={styles.searchModalContent}>
  <View style={styles.searchModalHeader}>
- <Text style={styles.searchModalTitle}>{t('global_catalog.search') || 'Buscar'}</Text>
+ <Text style={styles.searchModalTitle}>{t('global_catalog.search')}</Text>
  <TouchableOpacity
  onPress={() => setShowSearchModal(false)}
  style={styles.searchModalClose}
@@ -1055,12 +1095,18 @@ onRequestClose={() => setShowSearchModal(false)}
  <TouchableOpacity
  style={styles.searchModalSearchBtn}
  onPress={() => {
+ if (__DEV__) {
+ console.log('[GlobalCatalogAudit] search_submit', {
+ searchQueryTrimmed: searchQuery.trim(),
+ filterColor: filterColor ?? 'all',
+ });
+ }
  loadFirstPage();
  setShowSearchModal(false);
  }}
  >
  <Text style={styles.searchModalSearchBtnText}>
- {t('global_catalog.search') || 'Buscar'}
+ {t('global_catalog.search')}
  </Text>
  </TouchableOpacity>
  </View>

@@ -14,18 +14,49 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp, useFocusEffect } from '@react-navigation/native';
-import { CellariumHeader } from '../components/cellarium';
-import { RootStackParamList } from '../types';
+import {
+  CellariumHeader,
+  CellariumModal,
+  CellariumPrimaryButton,
+} from '../components/cellarium';
+import { RootStackParamList, type CanonicalPlanId } from '../types';
+
+function stripeLookupKeyToCanonical(lookupKey: string): CanonicalPlanId | undefined {
+  switch (lookupKey) {
+    case 'bistro_monthly':
+      return 'bistro';
+    case 'trattoria_monthly':
+      return 'trattoria';
+    case 'grand_maison_monthly':
+      return 'grand-maison';
+    default:
+      return undefined;
+  }
+}
+
+function planTierRank(planId: string): number {
+  switch (planId) {
+    case 'cafe':
+      return 0;
+    case 'bistro':
+      return 1;
+    case 'trattoria':
+      return 2;
+    case 'grand_maison':
+      return 3;
+    default:
+      return -1;
+  }
+}
 import { useAuth } from '../contexts/AuthContext';
 import { useBranch } from '../contexts/BranchContext';
 import { useAdminGuard } from '../hooks/useAdminGuard';
 import { supabase } from '../lib/supabase';
 import * as WebBrowser from 'expo-web-browser';
-import { LinearGradient } from 'expo-linear-gradient';
-import { CELLARIUM, CELLARIUM_THEME, CELLARIUM_LAYOUT, CELLARIUM_TEXT, CELLARIUM_GRADIENT } from '../theme/cellariumTheme';
+import { CELLARIUM, CELLARIUM_THEME, CELLARIUM_LAYOUT, CELLARIUM_TEXT } from '../theme/cellariumTheme';
 import { useLanguage } from '../contexts/LanguageContext';
 import { log } from '../utils/logger';
-import { getEffectivePlan, isBusiness } from '../utils/effectivePlan';
+import { getEffectivePlan } from '../utils/effectivePlan';
 import { isSensitiveAllowed } from '../utils/sensitiveActionGating';
 import CellariumLoader from '../components/CellariumLoader';
 import { captureCriticalError, sentryFlowBreadcrumb } from '../utils/sentryContext';
@@ -36,6 +67,7 @@ import {
   finishAppleTransactionIfNeeded,
   getReceiptBase64,
   purchaseAppleSubscription,
+  purchaseAppleBranchAddon,
   restoreApplePurchasesForReceipt,
 } from '../services/appleIapSubscription';
 import { validateAppleReceiptBackend } from '../services/validateAppleReceipt';
@@ -69,6 +101,7 @@ type LoadingActionSubscription =
   | 'subscribe'
   | 'open-portal'
   | 'save-addons'
+  | 'upgrade'
   | 'apple-purchase'
   | 'apple-restore'
   | 'apple-sync'
@@ -233,27 +266,21 @@ interface Plan {
   lookupKey?: string; // Para planes principales (pro_monthly, business_monthly)
 }
 
-const PRICE_PRO_MXN = 1290;
-const PRICE_BUSINESS_MXN = 1790;
-/** Sucursales incluidas en plan Business (solo copy / UI; alineado con catálogo de planes). */
-const BUSINESS_BRANCHES_INCLUDED = 3;
-/** Bullets informativos (Pro → Business). */
-const PRO_UPGRADE_BULLET_KEYS = [
-  'subscription.pro_upgrade_bullet_0',
-  'subscription.pro_upgrade_bullet_1',
-  'subscription.pro_upgrade_bullet_2',
-  'subscription.pro_upgrade_bullet_3',
-] as const;
+const PRICE_BISTRO_MXN = 1499;
+const PRICE_TRATTORIA_MXN = 2499;
+const PRICE_GRAND_MAISON_MXN = 4499;
+/** Sucursales base incluidas (modelo canónico). */
+const BASE_BRANCHES_INCLUDED = 1;
+/** Precio add-on sucursal (MXN). Fallback si get-addon-price falla. */
+const PRICE_ADDON_BRANCH_MXN = 520;
 
-/** iOS: sin add-ons Apple; copy alineado con App Store. */
-const PRO_UPGRADE_BULLET_KEYS_IOS = [
-  'subscription.pro_upgrade_bullet_0',
-  'subscription.pro_upgrade_bullet_1',
-  'subscription.pro_upgrade_bullet_2_ios',
-  'subscription.pro_upgrade_bullet_3_ios',
-] as const;
-/** Precio add-on sucursal adicional (MXN). Fallback cuando get-addon-price no está disponible. */
-const PRICE_ADDON_BRANCH_MXN = 499;
+/** Precio mensual del plan base en centavos (MXN); mismo valor que en tarjetas de planes / Stripe list price UI. */
+function stripeBasePlanPriceCents(effective: ReturnType<typeof getEffectivePlan>): number {
+  if (effective === 'bistro') return PRICE_BISTRO_MXN * 100;
+  if (effective === 'trattoria') return PRICE_TRATTORIA_MXN * 100;
+  if (effective === 'grand-maison') return PRICE_GRAND_MAISON_MXN * 100;
+  return 0;
+}
 
 const BACKOFF_DELAYS_MS = [800, 1200, 2000, 3000, 4000, 0];
 const MAX_ATTEMPTS = 6;
@@ -274,7 +301,7 @@ function CurrentStatusCard({
   expirationRowLabel,
   expirationText,
   expirationOptionalLines,
-  isBusiness,
+  showAddonsRow,
   addonsCount,
   showExpiration,
   labels,
@@ -287,7 +314,7 @@ function CurrentStatusCard({
   expirationRowLabel: string;
   expirationText: string;
   expirationOptionalLines?: string[];
-  isBusiness: boolean;
+  showAddonsRow: boolean;
   addonsCount: number;
   showExpiration: boolean;
   labels: {
@@ -316,7 +343,7 @@ function CurrentStatusCard({
           <Text style={styles.statusValue}>{line}</Text>
         </View>
       ))}
-      {isBusiness && (
+      {showAddonsRow && (
         <View style={styles.statusRow}>
           <Text style={styles.statusLabel}>{labels.addonsBranches}</Text>
           <Text style={styles.statusValue}>{addonsCount}</Text>
@@ -333,6 +360,7 @@ function PlanCard({
   isCurrentPlan,
   onSelect,
   labels,
+  inSelectionBundle = false,
 }: {
   styles: StylesRecord;
   plan: Plan;
@@ -340,11 +368,17 @@ function PlanCard({
   isCurrentPlan: boolean;
   onSelect: (id: string) => void;
   labels: { includes: string; notIncludes: string; planCurrent: string; priceFree: string };
+  /** Ficha superior del bloque unificado (borde + CTA debajo). */
+  inSelectionBundle?: boolean;
 }) {
-  const isFree = plan.id === 'free';
+  const isFree = plan.id === 'cafe';
   return (
     <TouchableOpacity
-      style={[styles.planCard, isSelected && styles.planCardSelected]}
+      style={[
+        styles.planCardBase,
+        inSelectionBundle ? styles.planCardInBundle : styles.planCardStandalone,
+        !inSelectionBundle && isSelected && styles.planCardSelected,
+      ]}
       onPress={() => !isFree && onSelect(plan.id)}
       disabled={isFree}
     >
@@ -504,6 +538,56 @@ function AddonBranchesCard({
   );
 }
 
+function UpgradePlanSection({
+  styles,
+  plans,
+  onUpgrade,
+  isProcessing,
+  labels,
+}: {
+  styles: StylesRecord;
+  plans: Plan[];
+  onUpgrade: (planLookupKey: string) => void;
+  isProcessing: boolean;
+  labels: { sectionTitle: string; upgradeCta: string; recommended: string };
+}) {
+  if (plans.length === 0) return null;
+  return (
+    <View style={styles.upgradeSection}>
+      <Text style={styles.upgradeSectionTitle}>{labels.sectionTitle}</Text>
+      {plans.map((plan) => {
+        const showRecommended = plan.id === 'trattoria';
+        return (
+          <View key={plan.id} style={styles.upgradePlanCard}>
+            {showRecommended ? (
+              <View style={styles.upgradeRecommendedBadge}>
+                <Text style={styles.upgradeRecommendedBadgeText}>{labels.recommended}</Text>
+              </View>
+            ) : null}
+            <Text style={styles.upgradePlanName}>{plan.name}</Text>
+            {plan.features.slice(0, 2).map((f, i) => (
+              <View key={i} style={styles.upgradeBenefitRow}>
+                <Text style={styles.upgradeBenefitBullet}>•</Text>
+                <Text style={styles.upgradeBenefitText}>{f}</Text>
+              </View>
+            ))}
+            <Text style={styles.upgradePlanPrice}>
+              ${plan.price} {plan.currency} / {plan.period}
+            </Text>
+            <TouchableOpacity
+              style={[styles.upgradeCtaButton, isProcessing && styles.buttonDisabled]}
+              onPress={() => plan.lookupKey && onUpgrade(plan.lookupKey)}
+              disabled={isProcessing}
+            >
+              <Text style={styles.upgradeCtaButtonText}>{labels.upgradeCta}</Text>
+            </TouchableOpacity>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   const { status: guardStatus } = useAdminGuard({
     navigation,
@@ -540,8 +624,14 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   const [loadingAction, setLoadingAction] = useState<LoadingActionSubscription>(null);
   const isProcessing = loadingAction !== null;
   const activeBranchesCount = allBranches.length;
-  const minAllowedAddonQty = Math.max(0, activeBranchesCount - BUSINESS_BRANCHES_INCLUDED);
+  const minAllowedAddonQty = Math.max(0, activeBranchesCount - BASE_BRANCHES_INCLUDED);
   const [addonBranchesQty, setAddonBranchesQty] = useState<string>('0');
+  type SubsPremiumNotice =
+    | null
+    | { kind: 'upgrade_success'; receiptUrl: string | null }
+    | { kind: 'plan_synced' }
+    | { kind: 'addon_saved'; qty: number };
+  const [subsPremiumNotice, setSubsPremiumNotice] = useState<SubsPremiumNotice>(null);
   const [verifyCode, setVerifyCode] = useState('');
   const [sendingCode, setSendingCode] = useState(false);
   const [verifyingCode, setVerifyingCode] = useState(false);
@@ -560,11 +650,6 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const isIos = Platform.OS === 'ios';
   const lastAppleSyncAtRef = useRef(0);
-
-  const proUpgradeBulletKeys = useMemo(
-    () => (isIos ? PRO_UPGRADE_BULLET_KEYS_IOS : PRO_UPGRADE_BULLET_KEYS),
-    [isIos]
-  );
 
   useFocusEffect(
     useCallback(() => {
@@ -700,7 +785,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [latestSubscription?.metadata?.cancel_at_iso]);
 
   const refreshUserWithBackoffUntilUpdated = useCallback(
-    async (expectedPlan?: 'basic' | 'additional-branch'): Promise<boolean> => {
+    async (expectedPlan?: CanonicalPlanId): Promise<boolean> => {
       if (!refreshUser) return false;
       const initialPlan = userRef.current?.subscription_plan;
       for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -723,7 +808,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   /** Tras compra/restauración Apple: refresco inmediato del perfil (billing_provider) + backoff. */
   const refreshSubscriptionProfileImmediate = useCallback(
-    async (expectedPlan?: 'basic' | 'additional-branch') => {
+    async (expectedPlan?: CanonicalPlanId) => {
       try {
         await refreshUser?.();
       } catch {
@@ -786,11 +871,13 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     }, [refreshUser, refreshSubscriptionProfileImmediate])
   );
 
+  // Reflejar solo el add-on contratado en Stripe/BD (no mezclar con minAllowedAddonQty aquí:
+  // ese mínimo solo aplica al stepper y al guardar; forzar max(servidor, min) mostraba 1 y $520 con 0 add-ons).
   useEffect(() => {
     if (user?.subscription_branch_addons_count === undefined) return;
-    const next = Math.max(minAllowedAddonQty, user.subscription_branch_addons_count);
-    setAddonBranchesQty(prev => (prev !== String(next) ? String(next) : prev));
-  }, [user?.subscription_branch_addons_count, minAllowedAddonQty]);
+    const fromServer = Math.min(50, Math.max(0, Math.floor(Number(user.subscription_branch_addons_count))));
+    setAddonBranchesQty((prev) => (prev !== String(fromServer) ? String(fromServer) : prev));
+  }, [user?.subscription_branch_addons_count]);
 
   useEffect(() => {
     if (addonPriceCacheRef.current) {
@@ -805,7 +892,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       );
       if (cancelled) return;
       if (!error && data?.formatted != null) {
-        const unit = data.unit_amount ?? 49900;
+        const unit = data.unit_amount ?? 52000;
         addonPriceCacheRef.current = { formatted: data.formatted, unit_amount: unit };
         setAddonPriceFormatted(data.formatted);
       }
@@ -817,71 +904,76 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     const period = t('subscription.period_month');
     return [
       {
-        id: 'free',
-        name: t('subscription.plan_name.free'),
+        id: 'cafe',
+        name: t('subscription.plan_name.cafe'),
         price: 0,
         currency: 'MXN',
         period,
         features: [
-          t('subscription.plan.free.features.0'),
-          t('subscription.plan.free.features.1'),
-          t('subscription.plan.free.features.2'),
-          t('subscription.plan.free.features.3'),
-          t('subscription.plan.free.features.4'),
+          t('subscription.plan.cafe.features.0'),
+          t('subscription.plan.cafe.features.1'),
+          t('subscription.plan.cafe.features.2'),
+          t('subscription.plan.cafe.features.3'),
         ],
         limitations: { branches: 1, wines: 10, managers: 1 },
         blockedFeatures: [
-          t('subscription.plan.free.blocked.0'),
-          t('subscription.plan.free.blocked.1'),
-          t('subscription.plan.free.blocked.2'),
+          t('subscription.plan.cafe.blocked.0'),
+          t('subscription.plan.cafe.blocked.1'),
         ],
       },
       {
-        id: 'pro',
-        name: t('subscription.plan_name.pro'),
-        price: PRICE_PRO_MXN,
+        id: 'bistro',
+        name: t('subscription.plan_name.bistro'),
+        price: PRICE_BISTRO_MXN,
         currency: 'MXN',
         period,
-        lookupKey: 'pro_monthly',
+        lookupKey: 'bistro_monthly',
         features: [
-          t('subscription.plan.pro.features.0'),
-          t('subscription.plan.pro.features.1'),
-          t('subscription.plan.pro.features.2'),
-          t('subscription.plan.pro.features.3'),
-          t('subscription.plan.pro.features.4'),
+          t('subscription.plan.bistro.features.0'),
+          t('subscription.plan.bistro.features.1'),
+          t('subscription.plan.bistro.features.2'),
+          t('subscription.plan.bistro.features.3'),
         ],
-        limitations: { branches: 1, wines: 100, managers: -1 },
+        limitations: { branches: 1, wines: 50, managers: 3 },
         blockedFeatures: [],
       },
       {
-        id: 'business',
-        name: t('subscription.plan_name.business'),
-        price: PRICE_BUSINESS_MXN,
+        id: 'trattoria',
+        name: t('subscription.plan_name.trattoria'),
+        price: PRICE_TRATTORIA_MXN,
         currency: 'MXN',
         period,
-        lookupKey: 'business_monthly',
+        lookupKey: 'trattoria_monthly',
         features: [
-          t('subscription.plan.business.features.0'),
-          t('subscription.plan.business.features.1'),
-          t('subscription.plan.business.features.2'),
-          t('subscription.plan.business.features.3'),
-          t('subscription.plan.business.features.4'),
+          t('subscription.plan.trattoria.features.0'),
+          t('subscription.plan.trattoria.features.1'),
+          t('subscription.plan.trattoria.features.2'),
         ],
-        limitations: { branches: 3, wines: -1, managers: -1 },
+        limitations: { branches: 1, wines: 150, managers: -1 },
+        blockedFeatures: [],
+      },
+      {
+        id: 'grand_maison',
+        name: t('subscription.plan_name.grand_maison'),
+        price: PRICE_GRAND_MAISON_MXN,
+        currency: 'MXN',
+        period,
+        lookupKey: 'grand_maison_monthly',
+        features: [t('subscription.plan.grand_maison.features.0'), t('subscription.plan.grand_maison.features.1')],
+        limitations: { branches: 1, wines: -1, managers: -1 },
         blockedFeatures: [],
       },
     ];
   }, [t]);
 
-  // Plan efectivo: subscription_active + no expirado + subscription_plan (getEffectivePlan)
   const effectivePlan = getEffectivePlan(user ?? null);
-  const hasActiveSub = effectivePlan !== 'free';
+  const hasActiveSub = effectivePlan !== 'cafe';
   const isPremium = hasActiveSub;
-  const isBusinessPlan = (): boolean => isBusiness(user ?? null);
-
+  const showStripeAddonUi =
+    !isIos && user?.billing_provider !== 'apple' && hasActiveSub && !!user?.stripe_customer_id;
 
   const handleSelectPlan = useCallback((planId: string) => {
-    if (planId === 'free' || planId === 'pro' || planId === 'business') {
+    if (planId === 'cafe' || planId === 'bistro' || planId === 'trattoria' || planId === 'grand_maison') {
       setSelectedPlan(planId);
     }
   }, []);
@@ -897,7 +989,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     const plan = mainPlans.find(p => p.id === selectedPlan);
     if (!plan) return;
-    if (plan.id === 'free') {
+    if (plan.id === 'cafe') {
       Alert.alert(t('subscription.plan_free_title'), t('subscription.plan_free_already'));
       return;
     }
@@ -917,7 +1009,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       );
       return;
     }
-    if (isIos && (plan.id === 'pro' || plan.id === 'business')) {
+    if (isIos && plan.id !== 'cafe') {
       Alert.alert(
         t('subscription.apple_confirm_title'),
         t('subscription.apple_confirm_message'),
@@ -928,7 +1020,12 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
             onPress: async () => {
               try {
                 setLoadingAction('apple-purchase');
-                const applePlan = plan.id === 'pro' ? 'pro' : 'business';
+                const applePlan =
+                  plan.id === 'bistro'
+                    ? 'bistro'
+                    : plan.id === 'trattoria'
+                      ? 'trattoria'
+                      : 'grand_maison';
                 const { purchase } = await purchaseAppleSubscription(applePlan);
                 let receipt = await getReceiptBase64(false);
                 if (!receipt) receipt = await getReceiptBase64(true);
@@ -956,9 +1053,15 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                 if (synced === 'active' || ok) {
                   await finishAppleTransactionIfNeeded(purchase);
                   await finishApplePurchasesAfterBackendSync();
-                  const expectedPlan: 'basic' | 'additional-branch' =
-                    selectedPlan === 'pro' ? 'basic' : 'additional-branch';
-                  await refreshSubscriptionProfileImmediate(expectedPlan);
+                  const expected =
+                    selectedPlan === 'bistro'
+                      ? 'bistro'
+                      : selectedPlan === 'trattoria'
+                        ? 'trattoria'
+                        : selectedPlan === 'grand_maison'
+                          ? 'grand-maison'
+                          : undefined;
+                  await refreshSubscriptionProfileImmediate(expected);
                   Alert.alert(t('subscription.apple_success_title'), t('subscription.apple_success_message'));
                 } else if (synced === 'lapsed') {
                   await finishAppleTransactionIfNeeded(purchase);
@@ -1033,8 +1136,14 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
               if (!data?.url) {
                 throw new Error('No checkout URL received');
               }
-              const expectedPlan: 'basic' | 'additional-branch' =
-                selectedPlan === 'pro' ? 'basic' : 'additional-branch';
+              const expectedPlan: CanonicalPlanId | undefined =
+                selectedPlan === 'bistro'
+                  ? 'bistro'
+                  : selectedPlan === 'trattoria'
+                    ? 'trattoria'
+                    : selectedPlan === 'grand_maison'
+                      ? 'grand-maison'
+                      : undefined;
               const returnUrl = 'cellarium://auth-callback';
               if (__DEV__) console.log('[Checkout] opening', { url: data.url, returnUrl });
               const result = await WebBrowser.openAuthSessionAsync(data.url, returnUrl);
@@ -1129,6 +1238,68 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }, [user, refreshSubscriptionProfileImmediate, t]);
 
+  const handleAppleBranchAddon = useCallback(
+    async (slots: 1 | 3) => {
+      if (!isIos) return;
+      if (!user?.id) {
+        Alert.alert(t('msg.error'), t('subscription.error_no_session'));
+        return;
+      }
+      if (!isSensitiveAllowed(user)) {
+        Alert.alert(
+          'Verificación requerida',
+          'Verifica tu correo en el bloque de arriba para continuar.',
+          [{ text: 'Entendido', style: 'cancel' }]
+        );
+        return;
+      }
+      try {
+        setLoadingAction('apple-purchase');
+        const { purchase } = await purchaseAppleBranchAddon(slots);
+        let receipt = await getReceiptBase64(false);
+        if (!receipt) receipt = await getReceiptBase64(true);
+        if (!receipt) {
+          Alert.alert(t('msg.error'), t('subscription.error_generic'));
+          return;
+        }
+        const { data, error } = await validateAppleReceiptBackend(receipt, 'purchase');
+        if (error) {
+          const base = error.message ?? t('subscription.error_generic');
+          Alert.alert(t('msg.error'), `${base}\n\n${t('subscription.apple_backend_retry_hint')}`);
+          return;
+        }
+        const synced = data?.synced;
+        const ok = data?.ok === true;
+        if (synced === 'active' || ok) {
+          await finishAppleTransactionIfNeeded(purchase as never);
+          await finishApplePurchasesAfterBackendSync();
+          await refreshSubscriptionProfileImmediate();
+          Alert.alert(t('subscription.apple_success_title'), t('subscription.apple_success_message'));
+        } else if (synced === 'lapsed') {
+          await finishAppleTransactionIfNeeded(purchase as never);
+          await finishApplePurchasesAfterBackendSync();
+          await refreshSubscriptionProfileImmediate();
+          Alert.alert(t('subscription.apple_sync_lapsed_title'), t('subscription.apple_sync_lapsed_message'));
+        } else {
+          Alert.alert(t('msg.error'), t('subscription.apple_sync_unclear_message'));
+        }
+      } catch (error: unknown) {
+        captureCriticalError(error, {
+          feature: 'apple_iap_branch_addon',
+          screen: 'Subscriptions',
+          app_area: 'billing',
+        });
+        Alert.alert(
+          t('msg.error'),
+          error instanceof Error ? error.message : t('subscription.error_generic')
+        );
+      } finally {
+        setLoadingAction(null);
+      }
+    },
+    [user, t, refreshSubscriptionProfileImmediate, isIos]
+  );
+
   const handleManageSubscription = useCallback(async () => {
     if (!user?.id) {
       Alert.alert(t('msg.error'), t('subscription.error_no_session'));
@@ -1191,7 +1362,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       if (__DEV__ && resultUrl) console.log('[StripeAuthSession url]', resultUrl);
       const updated = await refreshUserWithBackoffUntilUpdated();
       if (updated) {
-        Alert.alert(t('subscription.plan_updated_title'), t('subscription.plan_updated_message'));
+        setSubsPremiumNotice({ kind: 'plan_synced' });
       }
     } catch (error: any) {
       if (__DEV__) console.error('Error en portal:', error);
@@ -1205,6 +1376,108 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       setLoadingAction(null);
     }
   }, [user, refreshUserWithBackoffUntilUpdated, t, openAppleSubscriptionsManage]);
+
+  const handleUpgrade = useCallback(
+    async (planLookupKey: string) => {
+      if (!user?.id) {
+        Alert.alert(t('msg.error'), t('subscription.error_no_session'));
+        return;
+      }
+      if (!isSensitiveAllowed(user)) {
+        Alert.alert(
+          'Verificación requerida',
+          'Verifica tu correo en el bloque de arriba para continuar.',
+          [{ text: 'Entendido', style: 'cancel' }]
+        );
+        return;
+      }
+      const targetPlan = mainPlans.find((p) => p.lookupKey === planLookupKey);
+      if (!targetPlan?.lookupKey) {
+        Alert.alert(t('msg.error'), t('subscription.plan_invalid_checkout'));
+        return;
+      }
+      const addonBranchesQty = Math.min(50, Math.max(0, user.subscription_branch_addons_count ?? 0));
+      try {
+        setLoadingAction('upgrade');
+        const { data, error } = await invokeAuthedFunction<{
+          url: string;
+          sessionId?: string;
+          upgraded?: boolean;
+          invoiceUrl?: string | null;
+          amountDue?: number | null;
+        }>('create-checkout-session', { planLookupKey, addonBranchesQty });
+        if (error) {
+          setLoadingAction(null);
+          if (error.code === 'ALREADY_SUBSCRIBED') {
+            Alert.alert(
+              t('subscription.already_subscribed_title'),
+              t('subscription.already_subscribed_message'),
+              [
+                { text: t('btn.cancel'), style: 'cancel' },
+                { text: t('subscription.alert_open_portal'), onPress: () => void handleManageSubscription() },
+              ]
+            );
+            return;
+          }
+          if (error.code === 'APPLE_SUBSCRIPTION_ACTIVE') {
+            Alert.alert(t('msg.error'), error.message ?? '');
+            return;
+          }
+          if (error.code === 'EMAIL_VERIFICATION_REQUIRED') {
+            Alert.alert(
+              'Verificación requerida',
+              'Verifica tu correo en el bloque de arriba para continuar.',
+              [{ text: 'Entendido', style: 'cancel' }]
+            );
+            return;
+          }
+          Alert.alert(t('msg.error'), t('subscription.error_generic'));
+          return;
+        }
+        if (!data) {
+          throw new Error('No checkout response');
+        }
+        const expectedPlan = stripeLookupKeyToCanonical(planLookupKey);
+
+        if (data.upgraded === true) {
+          if (__DEV__) {
+            console.log('[Upgrade] server-side complete', {
+              invoiceUrl: data.invoiceUrl ?? null,
+              amountDue: data.amountDue ?? null,
+              addonBranchesQty,
+            });
+          }
+          await refreshUserWithBackoffUntilUpdated(expectedPlan);
+          const inv = data.invoiceUrl;
+          setSubsPremiumNotice({
+            kind: 'upgrade_success',
+            receiptUrl: typeof inv === 'string' && inv.length > 0 ? inv : null,
+          });
+          return;
+        }
+
+        if (!data?.url) {
+          throw new Error('No checkout URL received');
+        }
+        const returnUrl = 'cellarium://auth-callback';
+        if (__DEV__) console.log('[Upgrade checkout]', { url: data.url, returnUrl, addonBranchesQty });
+        const result = await WebBrowser.openAuthSessionAsync(data.url, returnUrl);
+        if (__DEV__) console.log('[StripeAuthSession result]', result);
+        await refreshUserWithBackoffUntilUpdated(expectedPlan);
+      } catch (error: unknown) {
+        if (__DEV__) console.error('Error en upgrade:', error);
+        captureCriticalError(error, {
+          feature: 'stripe_checkout_upgrade',
+          screen: 'Subscriptions',
+          app_area: 'billing',
+        });
+        Alert.alert(t('msg.error'), t('subscription.error_generic'));
+      } finally {
+        setLoadingAction(null);
+      }
+    },
+    [user, t, mainPlans, refreshUserWithBackoffUntilUpdated, handleManageSubscription]
+  );
 
   const formatMxn = useCallback((cents: number) => {
     const locale = language === 'en' ? 'en-US' : 'es-MX';
@@ -1260,8 +1533,8 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       Alert.alert(t('msg.error'), t('subscription.error_no_session'));
       return;
     }
-    if (!isBusinessPlan()) {
-      Alert.alert(t('msg.error'), t('subscription.addons_business_only'));
+    if (!showStripeAddonUi) {
+      Alert.alert(t('msg.error'), t('subscription.addons_stripe_only'));
       return;
     }
     const qty = parseInt(addonBranchesQty, 10);
@@ -1273,12 +1546,12 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       Alert.alert(t('msg.error'), t('subscription.branch_reduction_blocked'));
       return;
     }
-    const newAllowedBranches = BUSINESS_BRANCHES_INCLUDED + qty;
+    const newAllowedBranches = BASE_BRANCHES_INCLUDED + qty;
     if (activeBranchesCount > newAllowedBranches) {
       Alert.alert(t('msg.error'), t('subscription.branch_reduction_blocked'));
       return;
     }
-    const unitCents = addonPriceCacheRef.current?.unit_amount ?? 49900;
+    const unitCents = addonPriceCacheRef.current?.unit_amount ?? 52000;
     const extraMonthlyCents = qty * unitCents;
     const lines: string[] = [
       `${t('subscription.addon_confirm_body')} ${qty}.`,
@@ -1331,11 +1604,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                 return;
               }
               await refreshUser?.();
-              Alert.alert(
-                `✅ ${t('subscription.update_success_title')}`,
-                `${t('subscription.update_success_message')} ${qty}.`,
-                [{ text: t('subscription.alert_ok') }]
-              );
+              setSubsPremiumNotice({ kind: 'addon_saved', qty });
             } catch (err: unknown) {
               log.error('update-subscription error', (err as Error)?.message);
               Alert.alert(t('msg.error'), t('subscription.update_failed_message'));
@@ -1360,7 +1629,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     const plan = mainPlans.find(p => p.id === selectedPlan);
     if (!plan) return;
-    if (plan.id === 'free') {
+    if (plan.id === 'cafe') {
       Alert.alert(t('subscription.plan_free_title'), t('subscription.plan_free_already'));
       return;
     }
@@ -1375,11 +1644,14 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
             try {
               const expiresAt = new Date();
               expiresAt.setMonth(expiresAt.getMonth() + 1);
-              const planMap: Record<string, 'basic' | 'additional-branch'> = {
-                'pro': 'basic',
-                'business': 'additional-branch',
-              };
-              const subscriptionPlan = planMap[plan.id] || plan.id;
+              const subscriptionPlan: CanonicalPlanId =
+                plan.id === 'bistro'
+                  ? 'bistro'
+                  : plan.id === 'trattoria'
+                    ? 'trattoria'
+                    : plan.id === 'grand_maison'
+                      ? 'grand-maison'
+                      : 'cafe';
               const { error } = await supabase
                 .from('users')
                 .update({
@@ -1407,21 +1679,28 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     );
   };
 
-  const currentPlanId = useMemo((): 'free' | 'pro' | 'business' => {
-    if (effectivePlan === 'additional-branch') return 'business';
-    if (effectivePlan === 'basic') return 'pro';
-    return 'free';
+  const currentPlanId = useMemo((): string => {
+    if (effectivePlan === 'grand-maison') return 'grand_maison';
+    return effectivePlan;
   }, [effectivePlan]);
 
-  // Modo de pantalla según plan efectivo
-  const planMode = useMemo((): 'free' | 'pro' | 'business' => {
-    if (effectivePlan === 'additional-branch') return 'business';
-    if (effectivePlan === 'basic') return 'pro';
-    return 'free';
-  }, [effectivePlan]);
+  /** Planes de pago estrictamente superiores al actual (sin downgrades ni plan actual). */
+  const upgradeTargetPlans = useMemo(() => {
+    if (effectivePlan !== 'bistro' && effectivePlan !== 'trattoria') return [];
+    const cur = planTierRank(currentPlanId);
+    return mainPlans.filter((p) => p.lookupKey && planTierRank(p.id) > cur);
+  }, [mainPlans, currentPlanId, effectivePlan]);
 
-  if (__DEV__ && user?.id && effectivePlan === 'free' && (user.subscription_plan === 'basic' || user.subscription_plan === 'additional-branch')) {
-    log.debug('[SubscriptionsScreen] effective Free (plan in DB but inactive/expired)', {
+  const planMode = useMemo((): 'cafe' | 'paid' => (effectivePlan === 'cafe' ? 'cafe' : 'paid'), [effectivePlan]);
+
+  if (
+    __DEV__ &&
+    user?.id &&
+    effectivePlan === 'cafe' &&
+    user.subscription_plan != null &&
+    user.subscription_plan !== 'cafe'
+  ) {
+    log.debug('[SubscriptionsScreen] effective cafe (plan in DB but inactive/expired)', {
       userId: user.id,
       subscription_plan: user.subscription_plan,
       subscription_active: user.subscription_active ?? null,
@@ -1429,12 +1708,11 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     });
   }
 
-  // selectedPlan solo tiene sentido en Free; evitar estados raros cuando ya está en Pro/Business
   useEffect(() => {
-    if (planMode !== 'free') setSelectedPlan(null);
+    if (planMode !== 'cafe') setSelectedPlan(null);
   }, [planMode]);
 
-  const plansForFreeUsers = useMemo(() => mainPlans.filter(p => p.id !== 'free'), []);
+  const plansForFreeUsers = useMemo(() => mainPlans.filter((p) => p.id !== 'cafe'), []);
 
   const expirationRowLabel = useMemo(() => {
     if (cancelScheduled) return t('subscription.access_until');
@@ -1464,20 +1742,23 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     }),
     [t]
   );
-  const planLabelForPill = t(`subscription.plan_name.${currentPlanId}`);
+  const planLabelKey =
+    currentPlanId === 'grand_maison'
+      ? 'subscription.plan_name.grand_maison'
+      : (`subscription.plan_name.${currentPlanId}` as
+          | 'subscription.plan_name.cafe'
+          | 'subscription.plan_name.bistro'
+          | 'subscription.plan_name.trattoria');
+  const planLabelForPill = t(planLabelKey);
 
   const addonIntroBlock = useMemo(
-    () =>
-      `${t('subscription.addon_block_intro_1')}\n\n${t('subscription.addon_block_intro_2').replace(
-        '{price}',
-        addonPriceFormatted
-      )}`,
+    () => t('subscription.addon_intro_short').replace('{price}', addonPriceFormatted),
     [t, addonPriceFormatted]
   );
 
   const addonTotalCapacityLine = useMemo(() => {
     const additional = user?.subscription_branch_addons_count ?? 0;
-    const total = BUSINESS_BRANCHES_INCLUDED + additional;
+    const total = BASE_BRANCHES_INCLUDED + additional;
     if (additional === 0) {
       return t('subscription.addon_total_capacity_0').replace('{total}', String(total));
     }
@@ -1491,8 +1772,8 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const addonMonthlyBreakdown = useMemo(() => {
     const qty = parseInt(addonBranchesQty, 10) || 0;
-    const unitCents = addonPriceCacheRef.current?.unit_amount ?? 49900;
-    const baseCents = PRICE_BUSINESS_MXN * 100;
+    const unitCents = addonPriceCacheRef.current?.unit_amount ?? 52000;
+    const baseCents = stripeBasePlanPriceCents(effectivePlan);
     const addonsCents = qty * unitCents;
     const totalCents = baseCents + addonsCents;
     return {
@@ -1500,7 +1781,10 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       addons: formatMxn(addonsCents),
       total: formatMxn(totalCents),
     };
-  }, [addonBranchesQty, formatMxn]);
+  }, [addonBranchesQty, effectivePlan, formatMxn]);
+
+  const subsPremiumReceiptUrl =
+    subsPremiumNotice?.kind === 'upgrade_success' ? subsPremiumNotice.receiptUrl : null;
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
@@ -1571,13 +1855,13 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
           styles={styles}
           sectionTitle={t('subscription.current_plan_title')}
           planLabel={planLabelForPill}
-          showFreePlanTagline={planMode === 'free'}
+          showFreePlanTagline={planMode === 'cafe'}
           taglineFree={t('subscription.status_card_tagline_free')}
           expirationRowLabel={expirationRowLabel}
           expirationText={expirationText}
-          expirationOptionalLines={expirationOptionalLines}
-          showExpiration={!!expiresAt}
-          isBusiness={isBusinessPlan()}
+          expirationOptionalLines={planMode === 'paid' ? expirationOptionalLines : []}
+          showExpiration={planMode === 'paid' && !!expiresAt}
+          showAddonsRow={hasActiveSub}
           addonsCount={user?.subscription_branch_addons_count ?? 0}
           labels={{ addonsBranches: t('subscription.addons_branches') }}
         />
@@ -1603,10 +1887,22 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
         )}
 
-        {/* Business: sucursales adicionales (solo Android/Web con Stripe) + Administrar suscripción */}
-        {planMode === 'business' && (
+        {planMode === 'paid' && (
           <>
-            {!isIos && (
+            {showStripeAddonUi && upgradeTargetPlans.length > 0 ? (
+              <UpgradePlanSection
+                styles={styles}
+                plans={upgradeTargetPlans}
+                onUpgrade={(key) => void handleUpgrade(key)}
+                isProcessing={isProcessing}
+                labels={{
+                  sectionTitle: t('subscription.upgrade_section_title'),
+                  upgradeCta: t('subscription.cta_upgrade'),
+                  recommended: t('subscription.recommended_badge'),
+                }}
+              />
+            ) : null}
+            {showStripeAddonUi ? (
               <AddonBranchesCard
                 styles={styles}
                 addonTitle={t('subscription.addon_title')}
@@ -1617,7 +1913,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                 setAddonBranchesQty={setAddonBranchesQty}
                 minAllowedAddonQty={minAllowedAddonQty}
                 breakdownTitle={t('subscription.addon_monthly_summary_title')}
-                breakdownBusinessLabel={t('subscription.addon_breakdown_business_plan')}
+                breakdownBusinessLabel={t('subscription.addon_breakdown_base_plan')}
                 breakdownBusinessAmount={addonMonthlyBreakdown.business}
                 breakdownAddonsLabel={t('subscription.addon_breakdown_additional')}
                 breakdownAddonsAmount={addonMonthlyBreakdown.addons}
@@ -1628,123 +1924,88 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                 saveAddonsLabel={t('subscription.save_addons')}
                 updateDisabled={needsEmailVerification}
               />
-            )}
-            <TouchableOpacity
-              style={[styles.manageButton, (isProcessing || needsEmailVerification) && styles.buttonDisabled]}
-              onPress={handleManageSubscription}
-              disabled={isProcessing || needsEmailVerification}
-            >
-              {isProcessing ? (
-                <ActivityIndicator color={PALETTE.primary} size="small" />
-              ) : (
-                <Text style={styles.manageButtonText}>{t('subscription.manage')}</Text>
-              )}
-            </TouchableOpacity>
-          </>
-        )}
-
-        {/* Pro: upgrade informativo + comparador + CTA principal (Business) + cancelación secundaria */}
-        {planMode === 'pro' && (
-          <>
-            <View style={styles.proUpgradeCard}>
-              <LinearGradient
-                colors={[...CELLARIUM_GRADIENT]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.proUpgradeGradientBar}
-              />
-              <View style={styles.proUpgradeCardInner}>
-                <Text style={styles.proUpgradeTitle}>{t('subscription.pro_upgrade_title')}</Text>
-                <Text style={styles.proUpgradeBody}>{t('subscription.pro_upgrade_body')}</Text>
-                {proUpgradeBulletKeys.map((key) => (
-                  <View key={key} style={styles.proUpgradeBulletRow}>
-                    <Text style={styles.proUpgradeBulletMark}>•</Text>
-                    <Text style={styles.proUpgradeBulletText}>{t(key)}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.proCompareCard}>
-              <Text style={styles.proCompareTitle}>{t('subscription.pro_compare_title')}</Text>
-              <View style={styles.proCompareColumns}>
-                <View style={styles.proCompareCol}>
-                  <Text style={styles.proCompareColHeader}>{t('subscription.pro_compare_pro_label')}</Text>
-                  <Text style={styles.proCompareLine}>{t('subscription.pro_compare_pro_line_0')}</Text>
-                  <Text style={styles.proCompareLine}>{t('subscription.pro_compare_pro_line_1')}</Text>
-                </View>
-                <View style={styles.proCompareDivider} />
-                <View style={styles.proCompareCol}>
-                  <Text style={[styles.proCompareColHeader, styles.proCompareColHeaderBusiness]}>
-                    {t('subscription.pro_compare_business_label')}
-                  </Text>
-                  <Text style={styles.proCompareLine}>{t('subscription.pro_compare_business_line_0')}</Text>
-                  <Text style={styles.proCompareLine}>{t('subscription.pro_compare_business_line_1')}</Text>
-                  <Text style={styles.proCompareLine}>
-                    {t(isIos ? 'subscription.pro_compare_business_line_2_ios' : 'subscription.pro_compare_business_line_2')}
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={[
-                styles.ctaButtonPrimary,
-                styles.proPrimaryCta,
-                (isProcessing || needsEmailVerification) && styles.buttonDisabled,
-              ]}
-              onPress={handleManageSubscription}
-              disabled={isProcessing || needsEmailVerification}
-            >
-              {isProcessing ? (
-                <ActivityIndicator color={CELLARIUM.card} size="small" />
-              ) : (
-                <Text style={styles.ctaButtonPrimaryText}>{t('subscription.cta_upgrade_to_business')}</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.manageButton, styles.proSecondaryCta, (isProcessing || needsEmailVerification) && styles.buttonDisabled]}
-              onPress={handleManageSubscription}
-              disabled={isProcessing || needsEmailVerification}
-            >
-              {isProcessing ? (
-                <ActivityIndicator color={PALETTE.primary} size="small" />
-              ) : (
-                <Text style={styles.manageButtonText}>{t('subscription.manage')}</Text>
-              )}
-            </TouchableOpacity>
-          </>
-        )}
-
-        {/* Free: comparativa Pro/Business + CTAs para suscribirse */}
-        {planMode === 'free' && (
-          <>
-            {plansForFreeUsers.map((plan) => (
-              <PlanCard
-                key={plan.id}
-                styles={styles}
-                plan={plan}
-                isSelected={selectedPlan === plan.id}
-                isCurrentPlan={plan.id === currentPlanId}
-                onSelect={handleSelectPlan}
-                labels={planCardLabels}
-              />
-            ))}
-            {selectedPlan && selectedPlan !== 'free' && (
-              <View style={styles.ctaWrap}>
+            ) : null}
+            {isIos && user?.billing_provider === 'apple' && hasActiveSub ? (
+              <View style={styles.iosBranchAddonBlock}>
+                <Text style={styles.appleRestoreHint}>{t('subscription.ios_branch_addon_intro')}</Text>
                 <TouchableOpacity
-                  style={[styles.ctaButtonPrimary, (isProcessing || needsEmailVerification) && styles.buttonDisabled]}
-                  onPress={handleSubscribe}
+                  style={[styles.manageButton, (isProcessing || needsEmailVerification) && styles.buttonDisabled]}
+                  onPress={() => void handleAppleBranchAddon(1)}
                   disabled={isProcessing || needsEmailVerification}
                 >
-                  {isProcessing ? (
-                    <ActivityIndicator color={CELLARIUM.card} size="small" />
-                  ) : (
-                    <Text style={styles.ctaButtonPrimaryText}>{t('subscription.subscribe_cta')}</Text>
-                  )}
+                  <Text style={styles.manageButtonText}>{t('subscription.ios_branch_addon_1')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.manageButton, (isProcessing || needsEmailVerification) && styles.buttonDisabled]}
+                  onPress={() => void handleAppleBranchAddon(3)}
+                  disabled={isProcessing || needsEmailVerification}
+                >
+                  <Text style={styles.manageButtonText}>{t('subscription.ios_branch_addon_3')}</Text>
                 </TouchableOpacity>
               </View>
-            )}
+            ) : null}
+            <TouchableOpacity
+              style={[styles.manageButtonTertiary, (isProcessing || needsEmailVerification) && styles.buttonDisabled]}
+              onPress={handleManageSubscription}
+              disabled={isProcessing || needsEmailVerification}
+            >
+              {isProcessing && loadingAction === 'open-portal' ? (
+                <ActivityIndicator color={PALETTE.subtext} size="small" />
+              ) : (
+                <Text style={styles.manageButtonTertiaryText}>{t('subscription.manage')}</Text>
+              )}
+            </TouchableOpacity>
+          </>
+        )}
+
+        {planMode === 'cafe' && (
+          <>
+            {plansForFreeUsers.map((plan) => {
+              const isSelected = selectedPlan === plan.id;
+              const showInlineSubscribe = isSelected && selectedPlan !== 'cafe';
+              return (
+                <View key={plan.id} style={styles.planTierBlock}>
+                  {showInlineSubscribe ? (
+                    <View style={styles.planBundleSelected}>
+                      <PlanCard
+                        styles={styles}
+                        plan={plan}
+                        isSelected={isSelected}
+                        isCurrentPlan={plan.id === currentPlanId}
+                        onSelect={handleSelectPlan}
+                        labels={planCardLabels}
+                        inSelectionBundle
+                      />
+                      <View style={styles.planBundleCtaZone}>
+                        <TouchableOpacity
+                          style={[
+                            styles.ctaButtonPrimary,
+                            (isProcessing || needsEmailVerification) && styles.buttonDisabled,
+                          ]}
+                          onPress={handleSubscribe}
+                          disabled={isProcessing || needsEmailVerification}
+                        >
+                          {isProcessing ? (
+                            <ActivityIndicator color={CELLARIUM.card} size="small" />
+                          ) : (
+                            <Text style={styles.ctaButtonPrimaryText}>{t('subscription.subscribe_cta')}</Text>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : (
+                    <PlanCard
+                      styles={styles}
+                      plan={plan}
+                      isSelected={isSelected}
+                      isCurrentPlan={plan.id === currentPlanId}
+                      onSelect={handleSelectPlan}
+                      labels={planCardLabels}
+                    />
+                  )}
+                </View>
+              );
+            })}
           </>
         )}
         </>
@@ -1759,22 +2020,80 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
               ? t('subscription.loading_subscribe')
               : loadingAction === 'open-portal'
                 ? t('subscription.loading_portal')
-                : loadingAction === 'apple-purchase'
-                  ? t('subscription.apple_loading_purchase')
-                  : loadingAction === 'apple-restore'
-                    ? t('subscription.apple_loading_restore')
-                    : loadingAction === 'apple-sync'
-                      ? t('subscription.apple_loading_sync')
-                      : t('subscription.loading_save_additional_branches')
+                : loadingAction === 'upgrade'
+                  ? t('subscription.loading_upgrade')
+                  : loadingAction === 'save-addons'
+                    ? t('subscription.loading_save_additional_branches')
+                    : loadingAction === 'apple-purchase'
+                      ? t('subscription.apple_loading_purchase')
+                      : loadingAction === 'apple-restore'
+                        ? t('subscription.apple_loading_restore')
+                        : loadingAction === 'apple-sync'
+                          ? t('subscription.apple_loading_sync')
+                          : t('subscription.loading_save_additional_branches')
           }
           size={140}
         />
       )}
+
+      <CellariumModal
+        visible={subsPremiumNotice !== null}
+        onRequestClose={() => setSubsPremiumNotice(null)}
+        title={
+          subsPremiumNotice?.kind === 'plan_synced'
+            ? t('subscription.plan_updated_title')
+            : subsPremiumNotice?.kind === 'addon_saved'
+              ? t('subscription.addon_saved_modal_title')
+              : t('subscription.upgrade_success_title')
+        }
+        scrollable={false}
+        presentation="card"
+        footer={
+          <View>
+            <CellariumPrimaryButton
+              title={t('subscription.upgrade_done_cta')}
+              onPress={() => setSubsPremiumNotice(null)}
+            />
+            {subsPremiumReceiptUrl ? (
+              <TouchableOpacity
+                onPress={() => {
+                  const u = subsPremiumReceiptUrl;
+                  setSubsPremiumNotice(null);
+                  if (u) void Linking.openURL(u);
+                }}
+                hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
+                accessibilityRole="button"
+              >
+                <Text style={styles.subsPremiumModalReceiptLink}>{t('subscription.upgrade_receipt_optional')}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        }
+      >
+        <Text style={styles.subsPremiumModalBody}>
+          {subsPremiumNotice?.kind === 'plan_synced'
+            ? t('subscription.plan_updated_message')
+            : subsPremiumNotice?.kind === 'addon_saved'
+              ? t('subscription.addon_saved_modal_body').replace('{qty}', String(subsPremiumNotice.qty))
+              : t('subscription.upgrade_success_message')}
+        </Text>
+      </CellariumModal>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  subsPremiumModalBody: {
+    ...CELLARIUM_TEXT.body,
+    textAlign: 'center',
+  },
+  subsPremiumModalReceiptLink: {
+    ...CELLARIUM_TEXT.caption,
+    textAlign: 'center',
+    color: CELLARIUM.muted,
+    marginTop: 14,
+    textDecorationLine: 'underline',
+  },
   container: {
     flex: 1,
     backgroundColor: CELLARIUM_THEME.admin.bg,
@@ -2006,10 +2325,11 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   statusTagline: {
+    ...CELLARIUM_TEXT.body,
     fontSize: 14,
-    lineHeight: 20,
-    color: PALETTE.subtext,
-    marginBottom: 10,
+    lineHeight: 21,
+    color: CELLARIUM.muted,
+    marginBottom: 12,
   },
   statusTitle: {
     fontSize: 18,
@@ -2042,24 +2362,54 @@ const styles = StyleSheet.create({
     color: PALETTE.text,
     fontWeight: '600',
   },
-  planCard: {
-    backgroundColor: CELLARIUM.card,
-    borderRadius: CELLARIUM_LAYOUT.cardRadius,
-    paddingHorizontal: CELLARIUM_LAYOUT.screenPadding,
-    paddingVertical: 14,
+  planTierBlock: {
     marginBottom: CELLARIUM_LAYOUT.sectionGap,
+  },
+  planBundleSelected: {
+    borderWidth: 2,
+    borderColor: CELLARIUM.primary,
+    borderRadius: CELLARIUM_LAYOUT.cardRadius,
+    backgroundColor: CELLARIUM.card,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  planBundleCtaZone: {
+    paddingHorizontal: CELLARIUM_LAYOUT.headerHorizontalPadding,
+    paddingTop: 6,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+    borderTopColor: CELLARIUM.border,
+  },
+  planCardBase: {
+    backgroundColor: CELLARIUM.card,
+    paddingHorizontal: CELLARIUM_LAYOUT.headerHorizontalPadding,
+    paddingTop: 16,
+    paddingBottom: 14,
+  },
+  planCardStandalone: {
+    borderRadius: CELLARIUM_LAYOUT.cardRadius,
+    borderWidth: 1,
+    borderColor: CELLARIUM.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 3,
-    borderWidth: 2,
-    borderColor: 'transparent',
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  planCardInBundle: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
   },
   planCardSelected: {
+    borderWidth: 2,
     borderColor: CELLARIUM.primary,
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 3,
   },
   currentBadge: {
     position: 'absolute',
@@ -2076,20 +2426,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   planHeader: {
-    marginBottom: 10,
+    marginBottom: 12,
+    paddingRight: 72,
   },
   planName: {
     ...CELLARIUM_TEXT.sectionTitle,
-    fontSize: 20,
-    marginBottom: 4,
+    fontSize: 18,
+    marginBottom: 6,
     color: CELLARIUM.text,
+    letterSpacing: 0.15,
   },
   priceContainer: {
     flexDirection: 'row',
     alignItems: 'baseline',
   },
   priceAmount: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '700',
     color: CELLARIUM.primary,
   },
@@ -2100,35 +2452,38 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   featuresContainer: {
-    marginBottom: 8,
+    marginBottom: 4,
   },
   featuresTitle: {
-    ...CELLARIUM_TEXT.sectionTitle,
-    fontSize: 15,
-    marginBottom: 6,
-    color: CELLARIUM.text,
+    ...CELLARIUM_TEXT.label,
+    fontSize: 12,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+    color: CELLARIUM.muted,
   },
   featureItem: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
+    alignItems: 'flex-start',
+    marginBottom: 6,
   },
   featureIcon: {
     color: CELLARIUM.primary,
-    fontSize: 15,
-    marginRight: 8,
-    fontWeight: 'bold',
+    fontSize: 14,
+    marginRight: 10,
+    marginTop: 3,
+    fontWeight: '700',
   },
   featureText: {
     ...CELLARIUM_TEXT.body,
     fontSize: 14,
-    lineHeight: 20,
+    lineHeight: 21,
     color: CELLARIUM.text,
     flex: 1,
   },
   blockedContainer: {
-    marginTop: 10,
-    paddingTop: 10,
+    marginTop: 12,
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: CELLARIUM.border,
   },
@@ -2141,7 +2496,8 @@ const styles = StyleSheet.create({
   blockedIcon: {
     color: CELLARIUM.danger,
     fontSize: 14,
-    marginRight: 8,
+    marginRight: 10,
+    marginTop: 3,
   },
   blockedText: {
     ...CELLARIUM_TEXT.caption,
@@ -2149,15 +2505,11 @@ const styles = StyleSheet.create({
     color: CELLARIUM.muted,
     flex: 1,
   },
-  ctaWrap: {
-    marginTop: 8,
-    marginBottom: 12,
-  },
   ctaButtonPrimary: {
-    backgroundColor: PALETTE.primary,
-    borderRadius: SUBS_COMPACT_RADIUS,
-    paddingVertical: 16,
-    minHeight: CELLARIUM_LAYOUT.iconButtonSize,
+    backgroundColor: CELLARIUM.primary,
+    borderRadius: CELLARIUM_LAYOUT.buttonRadius,
+    paddingVertical: 14,
+    minHeight: CELLARIUM_LAYOUT.buttonHeight,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2194,8 +2546,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  appleRestoreBlock: {
+  manageButtonTertiary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    borderRadius: SUBS_COMPACT_RADIUS,
+    paddingVertical: 14,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
     marginBottom: 24,
+  },
+  manageButtonTertiaryText: {
+    color: PALETTE.subtext,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  appleRestoreBlock: {
+    marginBottom: 20,
+  },
+  iosBranchAddonBlock: {
+    marginBottom: 16,
+    paddingHorizontal: CELLARIUM_LAYOUT.headerHorizontalPadding,
+    gap: 10,
   },
   appleRestoreButton: {
     marginBottom: 8,
@@ -2225,12 +2599,92 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.6,
   },
+  upgradeSection: {
+    marginBottom: 20,
+  },
+  upgradeSectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: PALETTE.text,
+    marginBottom: 12,
+  },
+  upgradePlanCard: {
+    backgroundColor: CELLARIUM.card,
+    borderRadius: SUBS_COMPACT_RADIUS,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: CELLARIUM.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  upgradeRecommendedBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(107, 36, 51, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginBottom: 8,
+  },
+  upgradeRecommendedBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: PALETTE.primary,
+    letterSpacing: 0.5,
+  },
+  upgradePlanName: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: PALETTE.text,
+    marginBottom: 8,
+  },
+  upgradeBenefitRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 4,
+  },
+  upgradeBenefitBullet: {
+    fontSize: 14,
+    color: PALETTE.primary,
+    marginRight: 8,
+    width: 12,
+    lineHeight: 20,
+  },
+  upgradeBenefitText: {
+    flex: 1,
+    fontSize: 14,
+    color: PALETTE.subtext,
+    lineHeight: 20,
+  },
+  upgradePlanPrice: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: PALETTE.text,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  upgradeCtaButton: {
+    backgroundColor: PALETTE.primary,
+    borderRadius: SUBS_COMPACT_RADIUS,
+    paddingVertical: 14,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  upgradeCtaButtonText: {
+    color: CELLARIUM.card,
+    fontSize: 16,
+    fontWeight: '700',
+  },
   addonCard: {
     backgroundColor: CELLARIUM.card,
     borderRadius: CELLARIUM_LAYOUT.cardRadius,
-    paddingHorizontal: CELLARIUM_LAYOUT.screenPadding,
-    paddingVertical: 14,
-    marginBottom: CELLARIUM_LAYOUT.sectionGap,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -2347,18 +2801,20 @@ const styles = StyleSheet.create({
     color: CELLARIUM.text,
   },
   addonUpdateButton: {
-    backgroundColor: PALETTE.success,
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: PALETTE.success,
     borderRadius: SUBS_COMPACT_RADIUS,
-    paddingVertical: 16,
-    minHeight: CELLARIUM_LAYOUT.iconButtonSize,
+    paddingVertical: 14,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 8,
   },
   addonUpdateButtonText: {
-    color: CELLARIUM.card,
+    color: PALETTE.success,
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
 });
 

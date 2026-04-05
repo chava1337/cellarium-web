@@ -108,7 +108,7 @@ const AdminDashboardScreen: React.FC<Props> = ({ navigation, route }) => {
     if (user.owner_id) {
       getOwnerEffectivePlan(user).then(setOwnerPlanForGating);
     } else {
-      setOwnerPlanForGating('free');
+      setOwnerPlanForGating('cafe');
     }
   }, [user?.id, user?.role, user?.owner_id, profileReady]);
 
@@ -283,12 +283,12 @@ const AdminDashboardScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [menuItems, currentUserRole, isOwner, isManager, user?.id, user?.email, user?.role, profileReady, roleReadyForMenu]);
 
   // Precalcular features bloqueadas para optimizar render (solo items visibles).
-  // Owner: plan de su propia fila. Staff: plan del owner (ownerPlanForGating); si aún no cargó, tratamos como 'free'.
+  // Owner: plan de su propia fila. Staff: plan del owner (ownerPlanForGating); si aún no cargó, tratamos como 'cafe'.
   const blockedFeatureIds = useMemo(() => {
     const set = new Set<string>();
     const effectivePlan: EffectivePlanId = isOwner
       ? getEffectivePlan(user)
-      : (ownerPlanForGating ?? 'free');
+      : (ownerPlanForGating ?? 'cafe');
     for (const item of filteredMenuItems) {
       const featureId = mapMenuItemIdToFeatureId(item.id);
       if (featureId) {
