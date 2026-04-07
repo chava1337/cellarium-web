@@ -20,6 +20,7 @@ export class WineService {
           wines (
             id,
             name,
+            canonical_wine_id,
             grape_variety,
             region,
             country,
@@ -252,6 +253,7 @@ export class WineService {
           wines (
             id,
             name,
+            canonical_wine_id,
             grape_variety,
             region,
             country,

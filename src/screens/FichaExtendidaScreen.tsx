@@ -63,7 +63,7 @@ const FichaExtendidaScreen: React.FC<Props> = ({ navigation, route }) => {
       console.log('🔍 Verificando si el vino viene del catálogo global...', wineId);
       const { data: wineData, error: wineError } = await supabase
         .from('wines')
-        .select('name, tasting_notes, description')
+        .select('name, tasting_notes, description, canonical_wine_id')
         .eq('id', wineId)
         .single();
 
@@ -84,33 +84,23 @@ const FichaExtendidaScreen: React.FC<Props> = ({ navigation, route }) => {
       
       console.log('🌐 ¿Viene del catálogo global?', isFromGlobal);
       
-      if (isFromGlobal && wineData?.name) {
-        console.log('🔎 Buscando en wines_canonical por nombre:', wineData.name);
-        // Buscar en wines_canonical por label exacto
-        // ✅ CORREGIDO: Selección explícita usando solo columnas reales del esquema
-        // Usando: id, winery, label, abv, color, country, region, grapes, serving, image_canonical_url, is_shared, created_at, updated_at, taste_profile, flavors
-        const { data: canonicalData, error: canonicalError } = await supabase
+      if (isFromGlobal && (wineData?.canonical_wine_id || wineData?.name)) {
+        const canonId =
+          typeof wineData.canonical_wine_id === 'string' && wineData.canonical_wine_id.length > 0
+            ? wineData.canonical_wine_id
+            : null;
+        console.log(
+          '🔎 Buscando en wines_canonical:',
+          canonId ? `por id ${canonId}` : `por label (legacy) ${wineData.name}`
+        );
+        const canonicalQuery = supabase
           .from('wines_canonical')
-          .select(`
-            id,
-            winery,
-            label,
-            abv,
-            color,
-            country,
-            region,
-            grapes,
-            serving,
-            image_canonical_url,
-            is_shared,
-            created_at,
-            updated_at,
-            taste_profile,
-            flavors
-            -- ❌ EXCLUIDO: vector_embedding (solo para búsqueda semántica, ~1.5KB innecesario)
-          `)
-          .eq('label', wineData.name)
-          .maybeSingle();
+          .select(
+            'id, winery, label, abv, color, country, region, grapes, serving, image_canonical_url, is_shared, created_at, updated_at, taste_profile, flavors'
+          );
+        const { data: canonicalData, error: canonicalError } = canonId
+          ? await canonicalQuery.eq('id', canonId).maybeSingle()
+          : await canonicalQuery.eq('label', wineData.name as string).maybeSingle();
 
         console.log('📦 Resultado búsqueda canonical:', { 
           found: !!canonicalData, 

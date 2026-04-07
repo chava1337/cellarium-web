@@ -660,6 +660,36 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         // ============================================
         // OPTIMIZACIÓN: Batch query a wines_canonical
         // ============================================
+        const CHUNK_SIZE = 100;
+        /** Por UUID canónico (evita mezclar filas con el mismo nombre, p. ej. Opus One vs Overture). */
+        const byCanonId = new Map<string, Record<string, unknown>>();
+        const canonicalUuidList = Array.from(
+          new Set(
+            validWineStocks
+              .map((s) => s.wines?.canonical_wine_id)
+              .filter((id): id is string => typeof id === 'string' && id.length > 0)
+          )
+        );
+        if (canonicalUuidList.length > 0) {
+          const idChunks = chunkArray(canonicalUuidList, CHUNK_SIZE);
+          for (const chunk of idChunks) {
+            const { data: idRows, error: idErr } = await supabase
+              .from('wines_canonical')
+              .select('id, abv, taste_profile, label, winery, grapes, region, country, serving')
+              .in('id', chunk);
+            if (idErr) {
+              loadErrors.push(`Error batch wines_canonical por id: ${idErr.message || String(idErr)}`);
+              debugLog('⚠️ Error batch por id canónico:', idErr.message || idErr);
+            } else if (idRows) {
+              for (const row of idRows) {
+                if (row && typeof (row as { id?: string }).id === 'string') {
+                  byCanonId.set((row as { id: string }).id, row as Record<string, unknown>);
+                }
+              }
+            }
+          }
+        }
+
         const labelsToFind = Array.from(new Set(validWineStocks.map(stock => stock.wines.name).filter(Boolean)));
         const wineriesToFind = Array.from(new Set(validWineStocks.map(stock => stock.wines.winery).filter(w => w && w.trim() !== '')));
         const wineryFallbackToFind = Array.from(new Set(validWineStocks.map(stock => stock.wines.name).filter(Boolean)));
@@ -671,7 +701,6 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         // Usar Set para deduplicar en O(1) en lugar de O(n²) con .some()
         const canonicalRowsSet = new Set<string>();
         const allCanonicalRows: any[] = [];
-        const CHUNK_SIZE = 100;
         
         // Helper para crear key única de canonical row
         const getCanonicalKey = (row: any) => `${row.label || ''}__${row.winery || ''}`;
@@ -766,9 +795,11 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         for (const stock of validWineStocks) {
           const wineName = stock.wines.name;
           const wineWinery = stock.wines.winery || '';
-          
-          // Estrategia de lookup: label -> winery -> winery fallback (wineName)
-          const canonicalData = 
+          const cid = stock.wines.canonical_wine_id;
+
+          // Prioridad: id canónico guardado en wines → evita colisiones por nombre duplicado en catálogo global
+          const canonicalData =
+            (typeof cid === 'string' && cid.length > 0 ? byCanonId.get(cid) : null) ||
             indexByLabel.get(wineName) ||
             (wineWinery ? indexByWinery.get(wineWinery) : null) ||
             indexByWinery.get(wineName) ||

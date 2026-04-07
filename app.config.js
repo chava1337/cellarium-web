@@ -87,15 +87,19 @@ const config = {
       supportsTablet: true,
       orientation: "default",
       package: "com.cellarium.winecatalog",
+      // versionName en Gradle = expo.version. versionCode: entero monotónico por subida a Play (alinear con android/app/build.gradle).
+      versionCode: 2,
       // Foreground: adaptive icon (dejar margen ~20–30% para la máscara del sistema).
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon-v2.png",
         backgroundColor: "#000000",
       },
-      permissions: [
-        "android.permission.CAMERA",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.READ_EXTERNAL_STORAGE"
+      // Solo permisos que la app debe declarar explícitamente; el resto vienen de dependencias (p. ej. image-picker).
+      permissions: ["android.permission.CAMERA"],
+      // Quitar permisos fusionados por plantillas/librerías que no usamos o no deben ir a producción.
+      blockedPermissions: [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.RECORD_AUDIO",
       ],
       intentFilters: [
         {
@@ -120,9 +124,11 @@ const config = {
           category: ["BROWSABLE", "DEFAULT"],
           data: [
             { scheme: "cellarium" },
-            { scheme: "cellarium", host: "auth-callback", pathPrefix: "/" }
-          ]
-        }
+            { scheme: "cellarium", host: "auth-callback", pathPrefix: "/" },
+            // Dev client / OAuth: debe persistir en AndroidManifest tras prebuild.
+            { scheme: "exp+cellarium-wine-catalog" },
+          ],
+        },
       ]
     },
 

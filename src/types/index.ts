@@ -38,6 +38,8 @@ export interface Wine {
   food_pairings?: string[];
   tasting_notes?: string;
   serving_temperature?: string;
+  /** Origen en wines_canonical al agregar desde catálogo global (evita mezclar filas con el mismo nombre). */
+  canonical_wine_id?: string | null;
   type?: 'red' | 'white' | 'rose' | 'sparkling' | 'dessert' | 'fortified';
   // Disponibilidad y stock
   available_by_glass?: boolean;

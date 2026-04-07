@@ -25,6 +25,8 @@ import {
   getBilingualValue,
   getBilingualArray,
   wineColorSearchHaystack,
+  mapColorToType,
+  getTasteProfileKeyOrderForWineType,
 } from '../services/GlobalWineCatalogService';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -900,18 +902,23 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  </View>
  );
  })()}
- {/* Perfil de cata */}
+ {/* Perfil de cata (solo dimensiones aptas al tipo de vino, como en el catálogo del usuario) */}
  {selectedWine.taste_profile && (() => {
  const tasteProfile = typeof selectedWine.taste_profile === 'string'
    ? JSON.parse(selectedWine.taste_profile)
    : selectedWine.taste_profile;
- const bars = [
- { key: 'body', label: t('global_catalog.body') },
- { key: 'acidity', label: t('global_catalog.acidity') },
- { key: 'fizziness', label: t('global_catalog.fizziness') },
- { key: 'tannin', label: t('global_catalog.tannin') },
- { key: 'sweetness', label: t('global_catalog.sweetness') },
- ].filter(b => tasteProfile[b.key] != null);
+ const wineType = mapColorToType(selectedWine.color);
+ const keyOrder = getTasteProfileKeyOrderForWineType(wineType);
+ const labelByKey: Record<string, string> = {
+   body: t('global_catalog.body'),
+   acidity: t('global_catalog.acidity'),
+   fizziness: t('global_catalog.fizziness'),
+   tannin: t('global_catalog.tannin'),
+   sweetness: t('global_catalog.sweetness'),
+ };
+ const bars = keyOrder
+   .filter((key) => tasteProfile[key] != null)
+   .map((key) => ({ key, label: labelByKey[key] }));
  return bars.length > 0 ? (
  <View style={styles.sectionCardPro}>
  <Text style={styles.sectionTitlePro}>{t('global_catalog.tasting_profile')}</Text>

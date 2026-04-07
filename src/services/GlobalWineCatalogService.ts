@@ -1022,15 +1022,15 @@ export async function addWineToUserCatalog({
   // NOTA: Estos parámetros no se agregan a la firma para mantener compatibilidad.
   // En el futuro, se puede crear una función wrapper o usar contexto global.
 
-  // Evitar duplicado por (owner_id, name)
-  const { data: existing } = await supabase
+  // Misma fila canónica = mismo vino tenant (no deduplicar solo por nombre: Opus One vs Opus One Overture).
+  const { data: existingByCanonical } = await supabase
     .from('wines')
     .select('id')
     .eq('owner_id', tenantId)
-    .eq('name', wineNameToUse)
+    .eq('canonical_wine_id', canonicalWineId)
     .maybeSingle();
 
-  let wineId = existing?.id;
+  let wineId = existingByCanonical?.id;
 
   if (!wineId) {
     // NOTA: vintage ya no existe en wines_canonical
@@ -1104,6 +1104,7 @@ export async function addWineToUserCatalog({
       .from('wines')
       .insert({
         owner_id: tenantId,
+        canonical_wine_id: canonicalWineId,
         name: finalName,
         winery: finalWinery,
         vintage: numericVintage,
@@ -1240,7 +1241,9 @@ export async function addWineToUserCatalog({
  * Mapea color a tipo de vino
  * Maneja strings, objetos bilingües y arrays
  */
-const mapColorToType = (color?: string | { en?: string; es?: string } | string[] | { en?: string[]; es?: string[] }): 'red' | 'white' | 'rose' | 'sparkling' | 'dessert' | 'fortified' => {
+export const mapColorToType = (
+  color?: string | { en?: string; es?: string } | string[] | { en?: string[]; es?: string[] }
+): 'red' | 'white' | 'rose' | 'sparkling' | 'dessert' | 'fortified' => {
   if (!color) return 'red';
   
   let colorValue: string | null = null;
@@ -1281,9 +1284,21 @@ const mapColorToType = (color?: string | { en?: string; es?: string } | string[]
   return 'red';
 };
 
-
-
-
+/**
+ * Orden y conjunto de claves de `taste_profile` visibles según tipo de vino.
+ * Debe coincidir con `WineCatalogScreen` (espumoso: burbujeo; blanco/postre: sin taninos; tinto/rosado: sin burbujeo).
+ */
+export function getTasteProfileKeyOrderForWineType(
+  wineType: ReturnType<typeof mapColorToType>
+): Array<'body' | 'acidity' | 'fizziness' | 'tannin' | 'sweetness'> {
+  if (wineType === 'sparkling') {
+    return ['body', 'acidity', 'fizziness'];
+  }
+  if (wineType === 'white' || wineType === 'dessert' || wineType === 'fortified') {
+    return ['body', 'sweetness', 'acidity'];
+  }
+  return ['body', 'tannin', 'sweetness', 'acidity'];
+}
 
 
 
