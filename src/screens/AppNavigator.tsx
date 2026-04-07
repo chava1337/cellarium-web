@@ -14,7 +14,6 @@ import QrProcessorScreen from './QrProcessorScreen';
 import WineManagementScreen from './WineManagementScreen';
 import QrScannerScreen from './QrScannerScreen';
 import InventoryAnalyticsScreen from './InventoryAnalyticsScreen';
-import FichaExtendidaScreen from './FichaExtendidaScreen';
 import GlobalWineCatalogScreen from './GlobalWineCatalogScreen';
 import AddWineToCatalogScreen from './AddWineToCatalogScreen';
 import TastingExamsListScreen from './TastingExamsListScreen';
@@ -105,11 +104,6 @@ export default function AppNavigator() {
       <Stack.Screen 
         name="InventoryManagement" 
         component={InventoryAnalyticsScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen 
-        name="FichaExtendidaScreen" 
-        component={FichaExtendidaScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen 

@@ -1,5 +1,8 @@
 /**
  * IDs App Store Connect (auto-renewable). Alineado con supabase/functions/_shared/apple_iap.ts
+ *
+ * Solo estos IDs deben usarse en el cliente (compra y fetch).
+ * Legacy (cellarium_pro, cellarium_pro_monthly, cellarium_business): solo validación de recibos en backend — nunca en el front.
  */
 export const APPLE_IAP_PRODUCT_IDS = {
   bistro: 'cellarium_bistro_monthly',

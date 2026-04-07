@@ -10,7 +10,7 @@ import {
   requestPurchase,
   requestReceiptRefreshIOS,
 } from 'react-native-iap';
-import type { Purchase, PurchaseError } from 'react-native-iap';
+import type { Product, Purchase, PurchaseError } from 'react-native-iap';
 import { APPLE_IAP_PRODUCT_IDS, APPLE_IAP_SKUS_ALL } from '../constants/appleIap';
 import type { ApplePlanUiId } from './appleIapSubscription';
 
@@ -26,10 +26,20 @@ export async function ensureIapConnection(): Promise<void> {
   connected = true;
 }
 
+function productIdFromStoreProduct(p: Product): string {
+  const o = p as { id?: string; productId?: string };
+  return o.id ?? o.productId ?? '';
+}
+
 function skuForPlan(plan: ApplePlanUiId): string {
-  if (plan === 'bistro') return APPLE_IAP_PRODUCT_IDS.bistro;
-  if (plan === 'trattoria') return APPLE_IAP_PRODUCT_IDS.trattoria;
-  return APPLE_IAP_PRODUCT_IDS.grandMaison;
+  switch (plan) {
+    case 'bistro':
+      return APPLE_IAP_PRODUCT_IDS.bistro;
+    case 'trattoria':
+      return APPLE_IAP_PRODUCT_IDS.trattoria;
+    case 'grand_maison':
+      return APPLE_IAP_PRODUCT_IDS.grandMaison;
+  }
 }
 
 function skuForBranchAddon(slots: 1 | 3): string {
@@ -96,7 +106,29 @@ function waitForPurchaseFromListener(expectedSku: string, signal: AbortSignal): 
 
 async function purchaseWithSku(sku: string): Promise<{ purchase: Purchase }> {
   await ensureIapConnection();
-  await fetchProducts({ skus: [...APPLE_IAP_SKUS_ALL], type: 'subs' });
+  const skuList = [...APPLE_IAP_SKUS_ALL];
+  if (__DEV__) {
+    console.log('[IAP] Requested SKUs:', skuList);
+    console.log('[IAP] Purchasing SKU:', sku);
+  }
+  const fetched = await fetchProducts({ skus: skuList, type: 'subs' });
+  const fetchedIds = new Set(
+    (fetched as Product[]).map((p) => productIdFromStoreProduct(p)).filter(Boolean)
+  );
+  if (__DEV__) {
+    console.log('[IAP] Fetched product IDs from store:', [...fetchedIds]);
+    const missing = skuList.filter((s) => !fetchedIds.has(s));
+    if (missing.length) {
+      console.warn('[IAP] Requested but not returned by StoreKit (check App Store Connect):', missing);
+    }
+  }
+
+  if (!fetchedIds.has(sku)) {
+    throw new Error(
+      `[IAP] El producto "${sku}" no está disponible en App Store (no devuelto por StoreKit). ` +
+        'Revisa que el ID exista y esté en “Ready to Submit” / aprobado para esta app.'
+    );
+  }
 
   const ac = new AbortController();
   const listenerPromise = waitForPurchaseFromListener(sku, ac.signal);
@@ -130,11 +162,15 @@ async function purchaseWithSku(sku: string): Promise<{ purchase: Purchase }> {
 
 export async function purchaseAppleSubscription(plan: ApplePlanUiId): Promise<{ purchase: Purchase }> {
   const sku = skuForPlan(plan);
+  console.log('[IAP] Plan selected:', plan);
+  console.log('[IAP] SKU mapped:', sku);
   return purchaseWithSku(sku);
 }
 
 export async function purchaseAppleBranchAddon(slots: 1 | 3): Promise<{ purchase: Purchase }> {
   const sku = skuForBranchAddon(slots);
+  console.log('[IAP] Branch add-on slots:', slots);
+  console.log('[IAP] SKU mapped:', sku);
   return purchaseWithSku(sku);
 }
 

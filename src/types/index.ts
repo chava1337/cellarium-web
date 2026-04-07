@@ -161,7 +161,6 @@ export type RootStackParamList = {
   WineManagement: undefined;
   InventoryManagement: { branchId: string };
   QrScanner: undefined;
-  FichaExtendidaScreen: { wineId: string; lang?: string };
   TastingExamsList: undefined;
   CreateTastingExam: undefined;
   TakeTastingExam: { examId: string };

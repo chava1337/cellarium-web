@@ -132,14 +132,7 @@ const midRangeConfig = {
 
 ## 🔗 **Integración**
 
-### **Con WineAIService**
-```typescript
-const handleWarpedCapture = async (uri: string) => {
-  const { processWineLabel } = await import('../services/WineAIService');
-  const result = await processWineLabel(uri);
-  // Procesar resultado...
-};
-```
+Tras la captura (`onWarped`, `onOriginal`), el flujo de app debe procesar la URI según tu lógica (catálogo, subida, etc.). El antiguo `WineAIService` fue retirado del proyecto.
 
 ## 📚 **Documentación Completa**
 

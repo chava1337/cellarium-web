@@ -263,7 +263,7 @@ interface Plan {
     managers: number;
   };
   blockedFeatures: string[];
-  lookupKey?: string; // Para planes principales (pro_monthly, business_monthly)
+  lookupKey?: string; // Stripe: bistro_monthly | trattoria_monthly | grand_maison_monthly (no IAP)
 }
 
 const PRICE_BISTRO_MXN = 1499;

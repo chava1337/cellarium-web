@@ -1,6 +1,7 @@
 /**
  * App Store product id → tipo de producto (plan base, add-on sucursales, legacy fuera del flujo nuevo).
- * Legacy: cellarium_pro_monthly, cellarium_business — no se mapean a planes canónicos (respuesta explícita en validate-apple-receipt).
+ * Legacy: cellarium_pro_monthly, cellarium_business — solo recibos antiguos; el cliente móvil no debe enviarlos ni comprarlos.
+ * (validate-apple-receipt trata legacy explícitamente.)
  */
 
 export type AppleCanonicalPlanId = 'bistro' | 'trattoria' | 'grand-maison';
