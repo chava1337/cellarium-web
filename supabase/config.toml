@@ -13,3 +13,6 @@ verify_jwt = false
 
 [functions.validate-apple-receipt]
 verify_jwt = false
+
+[functions.validate-google-subscription]
+verify_jwt = false

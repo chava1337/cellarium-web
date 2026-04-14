@@ -1,12 +1,12 @@
 /**
  * Centraliza escrituras de suscripción en public.users + public.subscriptions + reconcile_branch_locks.
- * Stripe (webhook) y Apple IAP (validate-apple-receipt).
+ * Stripe (webhook), Apple IAP (validate-apple-receipt) y Google Play (validate-google-subscription).
  * Planes canónicos: cafe | bistro | trattoria | grand-maison
  */
 
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 
-export type BillingProvider = 'stripe' | 'apple';
+export type BillingProvider = 'stripe' | 'apple' | 'google';
 
 export type AllowedPlanId = 'cafe' | 'bistro' | 'trattoria' | 'grand-maison';
 
@@ -44,6 +44,10 @@ export interface HandleSubscriptionUpdateParams {
   afterSuccessfulUpsert?: (ctx: { upsertId: string | null }) => void;
   appleOriginalTransactionId?: string | null;
   appleProductId?: string | null;
+  /** Google Play: purchase token (clave de upsert en subscriptions). */
+  googlePurchaseToken?: string | null;
+  googleProductId?: string | null;
+  googleOrderId?: string | null;
 }
 
 function envTrue(name: string): boolean {
@@ -63,6 +67,13 @@ function mergeBillingFields(
       apple_product_id: null,
     };
   }
+  if (provider === 'google') {
+    return {
+      billing_provider: 'google',
+      apple_original_transaction_id: null,
+      apple_product_id: null,
+    };
+  }
   const o: Record<string, unknown> = { billing_provider: 'apple' };
   if (appleOriginalTransactionId !== undefined) o.apple_original_transaction_id = appleOriginalTransactionId;
   if (appleProductId !== undefined) o.apple_product_id = appleProductId;
@@ -71,6 +82,7 @@ function mergeBillingFields(
 
 function subscriptionsUpsertConflict(p: HandleSubscriptionUpdateParams): string {
   if (p.provider === 'apple') return 'apple_original_transaction_id';
+  if (p.provider === 'google') return 'google_purchase_token';
   return 'stripe_subscription_id';
 }
 
@@ -82,7 +94,7 @@ function buildPatchFromPlanParams(p: HandleSubscriptionUpdateParams): Record<str
     subscription_cancel_at_period_end: p.subscriptionCancelAtPeriodEnd,
   };
 
-  if (p.provider === 'apple') {
+  if (p.provider === 'apple' || p.provider === 'google') {
     patch.stripe_subscription_id = null;
     if (p.addonsCount !== null && p.addonsCount !== undefined) {
       patch.subscription_branch_addons_count = p.addonsCount;
@@ -110,7 +122,7 @@ function resolveUserPatch(p: HandleSubscriptionUpdateParams): Record<string, unk
 
 function usersUpdateQuery(p: HandleSubscriptionUpdateParams, userPatch: Record<string, unknown>) {
   const q = p.supabaseAdmin.from('users').update(userPatch);
-  if (p.provider === 'apple') {
+  if (p.provider === 'apple' || p.provider === 'google') {
     return q.eq('id', p.userId);
   }
   const cid = p.stripeCustomerId;
@@ -139,15 +151,24 @@ function assertSubscriptionsRowMatchesCaller(p: HandleSubscriptionUpdateParams):
   const uid = row['user_id'];
   if (oid !== undefined && oid !== p.ownerId) return 'subscriptionsUpsertRow.owner_id does not match ownerId';
   if (uid !== undefined && uid !== p.userId) return 'subscriptionsUpsertRow.user_id does not match userId';
-  if (p.provider === 'apple' && p.appleOriginalTransactionId) {
-    const aid = row['apple_original_transaction_id'];
-    if (aid !== undefined && String(aid) !== String(p.appleOriginalTransactionId)) {
-      return 'subscriptionsUpsertRow.apple_original_transaction_id mismatch';
+    if (p.provider === 'apple' && p.appleOriginalTransactionId) {
+      const aid = row['apple_original_transaction_id'];
+      if (aid !== undefined && String(aid) !== String(p.appleOriginalTransactionId)) {
+        return 'subscriptionsUpsertRow.apple_original_transaction_id mismatch';
+      }
+      if (oid === undefined || uid === undefined) {
+        return 'subscriptionsUpsertRow must include owner_id and user_id for Apple';
+      }
     }
-    if (oid === undefined || uid === undefined) {
-      return 'subscriptionsUpsertRow must include owner_id and user_id for Apple';
+    if (p.provider === 'google' && p.googlePurchaseToken) {
+      const tok = row['google_purchase_token'];
+      if (tok !== undefined && String(tok) !== String(p.googlePurchaseToken)) {
+        return 'subscriptionsUpsertRow.google_purchase_token mismatch';
+      }
+      if (oid === undefined || uid === undefined) {
+        return 'subscriptionsUpsertRow must include owner_id and user_id for Google';
+      }
     }
-  }
   return null;
 }
 
@@ -162,6 +183,9 @@ export async function handleSubscriptionUpdate(
   }
   if (p.provider === 'apple' && !p.appleOriginalTransactionId) {
     return { error: 'appleOriginalTransactionId is required' };
+  }
+  if (p.provider === 'google' && !p.googlePurchaseToken) {
+    return { error: 'googlePurchaseToken is required' };
   }
 
   const rowAssert = assertSubscriptionsRowMatchesCaller(p);
@@ -305,6 +329,15 @@ export async function handleStripeSubscriptionDeleted(
     .gt('current_period_end', nowIso)
     .maybeSingle();
 
+  const { data: googleStillActive } = await p.supabaseAdmin
+    .from('subscriptions')
+    .select('id')
+    .eq('owner_id', p.ownerId)
+    .not('google_purchase_token', 'is', null)
+    .in('status', ['active', 'trialing'])
+    .gt('current_period_end', nowIso)
+    .maybeSingle();
+
   const updateSubRow =
     p.stripeSubscriptionId.length > 0
       ? p.supabaseAdmin
@@ -317,8 +350,8 @@ export async function handleStripeSubscriptionDeleted(
           .eq('stripe_subscription_id', p.stripeSubscriptionId)
       : Promise.resolve({ error: null as { message?: string } | null });
 
-  if (appleStillActive?.id) {
-    // Apple sigue activo: no degradar a free ni borrar Apple; solo desvincular el Stripe sub cancelado.
+  if (appleStillActive?.id || googleStillActive?.id) {
+    // Apple o Google sigue activo: no degradar a free; solo desvincular el Stripe sub cancelado.
     const updateUsersDetachStripe = p.supabaseAdmin
       .from('users')
       .update({
@@ -419,6 +452,77 @@ export async function handleAppleSubscriptionLapsed(
 
   if (userErr) {
     console.error('[handleAppleSubscriptionLapsed] users update', userErr.message);
+    return { error: userErr.message };
+  }
+
+  await runReconcile(p.supabaseAdmin, p.ownerId, p.diagSkipReconcile);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return {};
+}
+
+export interface HandleGoogleSubscriptionLapsedParams {
+  supabaseAdmin: SupabaseClient;
+  ownerId: string;
+  userId: string;
+  purchaseToken: string;
+  diagSkipReconcile?: boolean;
+}
+
+/**
+ * Compra Google expirada / revocada: baja fila por token y users a cafe si no queda Stripe/Apple activo.
+ * No llamar si hasActiveStripeBackedSubscription (el caller debe comprobarlo).
+ */
+export async function handleGoogleSubscriptionLapsed(
+  p: HandleGoogleSubscriptionLapsedParams
+): Promise<{ error?: string }> {
+  const nowIso = new Date().toISOString();
+
+  const { error: subErr } = await p.supabaseAdmin
+    .from('subscriptions')
+    .update({
+      status: 'expired',
+      current_period_end: nowIso,
+      updated_at: nowIso,
+    })
+    .eq('owner_id', p.ownerId)
+    .eq('google_purchase_token', p.purchaseToken);
+
+  if (subErr) {
+    console.error('[handleGoogleSubscriptionLapsed] subscriptions update', subErr.message);
+    return { error: subErr.message };
+  }
+
+  const { data: otherActive } = await p.supabaseAdmin
+    .from('subscriptions')
+    .select('id')
+    .eq('owner_id', p.ownerId)
+    .in('status', ['active', 'trialing'])
+    .gt('current_period_end', nowIso)
+    .limit(1)
+    .maybeSingle();
+
+  if (otherActive?.id) {
+    await runReconcile(p.supabaseAdmin, p.ownerId, p.diagSkipReconcile);
+    return {};
+  }
+
+  const { error: userErr } = await p.supabaseAdmin
+    .from('users')
+    .update({
+      subscription_active: false,
+      subscription_plan: 'cafe',
+      subscription_expires_at: null,
+      subscription_cancel_at_period_end: false,
+      subscription_branch_addons_count: 0,
+      billing_provider: 'none',
+      apple_original_transaction_id: null,
+      apple_product_id: null,
+      stripe_subscription_id: null,
+    })
+    .eq('id', p.userId);
+
+  if (userErr) {
+    console.error('[handleGoogleSubscriptionLapsed] users update', userErr.message);
     return { error: userErr.message };
   }
 

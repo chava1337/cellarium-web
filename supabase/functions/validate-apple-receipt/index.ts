@@ -9,7 +9,7 @@
 // Seguridad: owner_id / user_id solo desde JWT + public.users; el body solo acepta receiptData (nunca IDs de tenant).
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-import { hasActiveStripeBackedSubscription } from '../_shared/billing_coexistence.ts';
+import { hasActiveGoogleSubscription, hasActiveStripeBackedSubscription } from '../_shared/billing_coexistence.ts';
 import { handleAppleSubscriptionLapsed, handleSubscriptionUpdate } from '../_shared/handle_subscription_update.ts';
 import type { AllowedPlanId } from '../_shared/handle_subscription_update.ts';
 import { mapAppleProductId } from '../_shared/apple_iap.ts';
@@ -241,6 +241,13 @@ Deno.serve(async (req: Request) => {
       return json(409, {
         error: 'Ya tienes una suscripción activa con Stripe. Gestiona el plan desde la web o cancela antes de usar Apple.',
         code: 'STRIPE_SUBSCRIPTION_ACTIVE',
+      });
+    }
+
+    if (await hasActiveGoogleSubscription(supabaseAdmin, ownerId)) {
+      return json(409, {
+        error: 'Ya tienes una suscripción activa con Google Play. No se puede activar Apple en paralelo.',
+        code: 'GOOGLE_SUBSCRIPTION_ACTIVE',
       });
     }
 

@@ -71,6 +71,10 @@ import {
   restoreApplePurchasesForReceipt,
 } from '../services/appleIapSubscription';
 import { validateAppleReceiptBackend } from '../services/validateAppleReceipt';
+import { validateGooglePurchaseBackend, getCellariumAndroidPackageName } from '../services/validateGooglePurchase';
+import { finishGoogleTransactionIfNeeded } from '../services/googlePlayBilling';
+import { useGooglePlayBilling } from '../hooks/useGooglePlayBilling';
+import { isAndroidBillingApp, shouldUseStripeSubscriptionUi, stripeEdgeClientMeta } from '../utils/billingPlatform';
 
 // Paleta: CELLARIUM como base; admin legacy solo sombra / warning donde no hay equivalente único.
 const PALETTE = {
@@ -105,6 +109,8 @@ type LoadingActionSubscription =
   | 'apple-purchase'
   | 'apple-restore'
   | 'apple-sync'
+  | 'google-purchase'
+  | 'google-restore'
   | null;
 
 type SubscriptionsScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Subscriptions'>;
@@ -649,7 +655,10 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [user]);
 
   const isIos = Platform.OS === 'ios';
+  const isAndroid = isAndroidBillingApp();
+  const useStripeSubscriptionUi = shouldUseStripeSubscriptionUi();
   const lastAppleSyncAtRef = useRef(0);
+  const { buySubscription, restorePurchases: restoreGooglePlayPurchases } = useGooglePlayBilling();
 
   useFocusEffect(
     useCallback(() => {
@@ -880,6 +889,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [user?.subscription_branch_addons_count]);
 
   useEffect(() => {
+    if (Platform.OS === 'android') return;
     if (addonPriceCacheRef.current) {
       setAddonPriceFormatted(addonPriceCacheRef.current.formatted);
       return;
@@ -970,7 +980,11 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   const hasActiveSub = effectivePlan !== 'cafe';
   const isPremium = hasActiveSub;
   const showStripeAddonUi =
-    !isIos && user?.billing_provider !== 'apple' && hasActiveSub && !!user?.stripe_customer_id;
+    useStripeSubscriptionUi &&
+    !isIos &&
+    user?.billing_provider !== 'apple' &&
+    hasActiveSub &&
+    !!user?.stripe_customer_id;
 
   const handleSelectPlan = useCallback((planId: string) => {
     if (planId === 'cafe' || planId === 'bistro' || planId === 'trattoria' || planId === 'grand_maison') {
@@ -1007,6 +1021,81 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         'Verifica tu correo en el bloque de arriba para poder suscribirte.',
         [{ text: 'Entendido', style: 'cancel' }]
       );
+      return;
+    }
+    if (isAndroid && plan.id !== 'cafe') {
+      setLoadingAction('google-purchase');
+      try {
+        const { purchase } = await buySubscription(plan.id);
+        const token = purchase.purchaseToken?.trim();
+        const productId = purchase.productId?.trim();
+        if (!token || !productId) {
+          Alert.alert(t('msg.error'), t('subscription.error_generic'));
+          return;
+        }
+        const { data, error } = await validateGooglePurchaseBackend({
+          purchaseToken: token,
+          productId,
+          packageName: getCellariumAndroidPackageName(),
+        });
+        if (error) {
+          const code = error.code;
+          if (code === 'STRIPE_SUBSCRIPTION_ACTIVE' || code === 'APPLE_SUBSCRIPTION_ACTIVE') {
+            Alert.alert(t('msg.error'), error.message ?? '');
+          } else if (code === 'PLAY_PURCHASE_PENDING') {
+            Alert.alert(t('msg.error'), error.message ?? t('subscription.google_pending_message'));
+          } else if (code === 'PLAY_API_ERROR' || error.status === 502) {
+            Alert.alert(t('msg.error'), error.message ?? t('subscription.error_generic'));
+          } else {
+            Alert.alert(t('msg.error'), error.message ?? t('subscription.error_generic'));
+          }
+          return;
+        }
+        const pendingCode = data?.code as string | undefined;
+        if (pendingCode === 'PLAY_PURCHASE_PENDING') {
+          Alert.alert(t('msg.error'), t('subscription.google_pending_message'));
+          return;
+        }
+        if (data?.synced === 'lapsed' || data?.reason === 'subscription_inactive_or_expired') {
+          await finishGoogleTransactionIfNeeded(purchase);
+          await refreshSubscriptionProfileImmediate();
+          Alert.alert(
+            t('subscription.apple_sync_lapsed_title'),
+            t('subscription.apple_sync_lapsed_message')
+          );
+          return;
+        }
+        if (data?.synced === 'active' || data?.ok === true) {
+          await finishGoogleTransactionIfNeeded(purchase);
+          const expectedPlan: CanonicalPlanId | undefined =
+            plan.id === 'bistro'
+              ? 'bistro'
+              : plan.id === 'trattoria'
+                ? 'trattoria'
+                : plan.id === 'grand_maison'
+                  ? 'grand-maison'
+                  : undefined;
+          await refreshSubscriptionProfileImmediate(expectedPlan);
+          Alert.alert(t('subscription.google_success_title'), t('subscription.google_success_message'));
+        } else {
+          Alert.alert(t('msg.error'), t('subscription.error_generic'));
+        }
+      } catch (error: unknown) {
+        if (error instanceof Error && error.message === 'Compra cancelada') {
+          return;
+        }
+        captureCriticalError(error, {
+          feature: 'google_iap_purchase',
+          screen: 'Subscriptions',
+          app_area: 'billing',
+        });
+        Alert.alert(
+          t('msg.error'),
+          error instanceof Error ? error.message : t('subscription.error_generic')
+        );
+      } finally {
+        setLoadingAction(null);
+      }
       return;
     }
     if (isIos && plan.id !== 'cafe') {
@@ -1110,7 +1199,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
               setLoadingAction('subscribe');
               const { data, error } = await invokeAuthedFunction<{ url: string; sessionId: string }>(
                 'create-checkout-session',
-                { planLookupKey: plan.lookupKey }
+                { planLookupKey: plan.lookupKey, ...stripeEdgeClientMeta() }
               );
       if (error) {
         setLoadingAction(null);
@@ -1238,6 +1327,45 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }, [user, refreshSubscriptionProfileImmediate, t]);
 
+  const handleRestoreGooglePurchases = useCallback(async () => {
+    if (!isAndroid) return;
+    if (!user?.id) {
+      Alert.alert(t('msg.error'), t('subscription.error_no_session'));
+      return;
+    }
+    if (!isSensitiveAllowed(user)) {
+      Alert.alert(
+        'Verificación requerida',
+        'Verifica tu correo en el bloque de arriba para continuar.',
+        [{ text: 'Entendido', style: 'cancel' }]
+      );
+      return;
+    }
+    try {
+      setLoadingAction('google-restore');
+      const { synced, message } = await restoreGooglePlayPurchases();
+      await refreshUser?.();
+      await refreshSubscriptionProfileImmediate();
+      if (synced) {
+        Alert.alert(t('subscription.google_success_title'), t('subscription.google_success_message'));
+      } else {
+        Alert.alert(
+          t('subscription.android_play_coming_title'),
+          message ?? t('subscription.google_restore_nothing_message')
+        );
+      }
+    } catch (error: unknown) {
+      captureCriticalError(error, {
+        feature: 'google_restore',
+        screen: 'Subscriptions',
+        app_area: 'billing',
+      });
+      Alert.alert(t('msg.error'), t('subscription.error_generic'));
+    } finally {
+      setLoadingAction(null);
+    }
+  }, [isAndroid, user, refreshSubscriptionProfileImmediate, t, restoreGooglePlayPurchases, refreshUser]);
+
   const handleAppleBranchAddon = useCallback(
     async (slots: 1 | 3) => {
       if (!isIos) return;
@@ -1310,6 +1438,26 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       openAppleSubscriptionsManage();
       return;
     }
+    if (isAndroid) {
+      if (user?.billing_provider === 'stripe' || user?.stripe_customer_id) {
+        Alert.alert(
+          t('subscription.android_manage_stripe_title'),
+          t('subscription.android_manage_stripe_message')
+        );
+        return;
+      }
+      if (user?.billing_provider === 'google') {
+        const pkg = getCellariumAndroidPackageName();
+        const url = `https://play.google.com/store/account/subscriptions?package=${encodeURIComponent(pkg)}`;
+        void Linking.openURL(url);
+        return;
+      }
+      Alert.alert(
+        t('subscription.android_play_coming_title'),
+        t('subscription.android_no_subscription_manage_message')
+      );
+      return;
+    }
     if (!isSensitiveAllowed(user)) {
       Alert.alert(
         'Verificación requerida',
@@ -1323,7 +1471,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       sentryFlowBreadcrumb('stripe_portal_start', {});
       const { data, error } = await invokeAuthedFunction<{ url: string }>(
         'create-portal-session',
-        {}
+        { ...stripeEdgeClientMeta() }
       );
       if (error) {
         setLoadingAction(null);
@@ -1375,12 +1523,19 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     } finally {
       setLoadingAction(null);
     }
-  }, [user, refreshUserWithBackoffUntilUpdated, t, openAppleSubscriptionsManage]);
+  }, [user, refreshUserWithBackoffUntilUpdated, t, openAppleSubscriptionsManage, isAndroid]);
 
   const handleUpgrade = useCallback(
     async (planLookupKey: string) => {
       if (!user?.id) {
         Alert.alert(t('msg.error'), t('subscription.error_no_session'));
+        return;
+      }
+      if (isAndroidBillingApp()) {
+        Alert.alert(
+          t('subscription.android_upgrade_blocked_title'),
+          t('subscription.android_upgrade_blocked_message')
+        );
         return;
       }
       if (!isSensitiveAllowed(user)) {
@@ -1405,7 +1560,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
           upgraded?: boolean;
           invoiceUrl?: string | null;
           amountDue?: number | null;
-        }>('create-checkout-session', { planLookupKey, addonBranchesQty });
+        }>('create-checkout-session', { planLookupKey, addonBranchesQty, ...stripeEdgeClientMeta() });
         if (error) {
           setLoadingAction(null);
           if (error.code === 'ALREADY_SUBSCRIBED') {
@@ -1533,6 +1688,10 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       Alert.alert(t('msg.error'), t('subscription.error_no_session'));
       return;
     }
+    if (isAndroid) {
+      Alert.alert(t('msg.error'), t('subscription.android_addons_blocked_message'));
+      return;
+    }
     if (!showStripeAddonUi) {
       Alert.alert(t('msg.error'), t('subscription.addons_stripe_only'));
       return;
@@ -1584,7 +1743,10 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
             }
             try {
               setLoadingAction('save-addons');
-              const { error } = await invokeAuthedFunction('update-subscription', { addonBranchesQty: qty });
+              const { error } = await invokeAuthedFunction('update-subscription', {
+                addonBranchesQty: qty,
+                ...stripeEdgeClientMeta(),
+              });
               if (error) {
                 setLoadingAction(null);
                 log.error('update-subscription failed', error.status, error.code);
@@ -1851,6 +2013,11 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
             </TouchableOpacity>
           </View>
         )}
+        {isAndroid && (
+          <View style={[styles.card, styles.androidBillingBanner]}>
+            <Text style={styles.androidBillingBannerText}>{t('subscription.android_billing_info_banner')}</Text>
+          </View>
+        )}
         <CurrentStatusCard
           styles={styles}
           sectionTitle={t('subscription.current_plan_title')}
@@ -1884,6 +2051,27 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
               )}
             </TouchableOpacity>
             <Text style={styles.appleRestoreHint}>{t('subscription.apple_restore_ios_hint')}</Text>
+          </View>
+        )}
+
+        {isAndroid && (
+          <View style={styles.appleRestoreBlock}>
+            <TouchableOpacity
+              style={[
+                styles.manageButton,
+                styles.appleRestoreButton,
+                (isProcessing || needsEmailVerification) && styles.buttonDisabled,
+              ]}
+              onPress={handleRestoreGooglePurchases}
+              disabled={isProcessing || needsEmailVerification}
+            >
+              {isProcessing ? (
+                <ActivityIndicator color={PALETTE.primary} size="small" />
+              ) : (
+                <Text style={styles.manageButtonText}>{t('subscription.google_restore')}</Text>
+              )}
+            </TouchableOpacity>
+            <Text style={styles.appleRestoreHint}>{t('subscription.google_restore_hint')}</Text>
           </View>
         )}
 
@@ -2134,6 +2322,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: PALETTE.text,
+  },
+  androidBillingBanner: {
+    backgroundColor: PALETTE.pillBg,
+    borderLeftWidth: 4,
+    borderLeftColor: PALETTE.primary,
+  },
+  androidBillingBannerText: {
+    fontSize: 14,
+    color: PALETTE.text,
+    lineHeight: 20,
   },
   verifyBlock: {
     backgroundColor: PALETTE.cardBg,

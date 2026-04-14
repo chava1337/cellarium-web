@@ -72,10 +72,10 @@ export const useDeviceInfo = (): DeviceInfo => {
 export const configureOrientation = async (deviceType: 'tablet' | 'phone') => {
   try {
     if (deviceType === 'tablet') {
-      // Para tablets, permitir ambas orientaciones pero preferir landscape
-      await ScreenOrientation.unlockAsync();
+      // Tablet / iPad: solo horizontal (ambas variantes landscape; sin retrato)
+      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
     } else {
-      // Para smartphones, preferir portrait
+      // Smartphones: retrato fijo
       await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
     }
   } catch (error) {

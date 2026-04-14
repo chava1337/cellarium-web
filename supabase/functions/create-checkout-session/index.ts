@@ -12,7 +12,7 @@
 // Upgrade (misma suscripción Stripe): billing_provider === 'stripe', subscription_active → POST /subscriptions/{id}
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-import { hasActiveAppleSubscription } from '../_shared/billing_coexistence.ts';
+import { hasActiveAppleSubscription, hasActiveGoogleSubscription } from '../_shared/billing_coexistence.ts';
 
 console.log('🚀 create-checkout-session: Function iniciada');
 
@@ -36,6 +36,8 @@ interface CreateCheckoutSessionRequest {
   planLookupKey: string;
   /** Cantidad de sucursales add-on a mantener en upgrade (0–50). Opcional: si falta, se usa `users.subscription_branch_addons_count`. */
   addonBranchesQty?: number;
+  /** Telemetría / defensa: `android` rechaza checkout (Google Play). */
+  clientPlatform?: string;
 }
 
 const BRANCH_ADDON_STRIPE_LOOKUP = 'branch_addon_monthly';
@@ -344,6 +346,17 @@ Deno.serve(async (req: Request) => {
       });
     }
     const { planLookupKey } = body;
+    const clientPlatform = typeof body.clientPlatform === 'string' ? body.clientPlatform.toLowerCase().trim() : '';
+
+    if (clientPlatform === 'android') {
+      return new Response(
+        JSON.stringify({
+          code: 'ANDROID_USE_PLAY_BILLING',
+          message: 'En Android las suscripciones se gestionan con Google Play Billing, no con Stripe.',
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403 }
+      );
+    }
 
     console.log(`📋 Plan solicitado: ${planLookupKey}`);
 
@@ -371,6 +384,17 @@ Deno.serve(async (req: Request) => {
           code: 'APPLE_SUBSCRIPTION_ACTIVE',
           message:
             'Tu suscripción está activa vía Apple. Gestiona el plan desde la app en iOS (Ajustes > Suscripción).',
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409 }
+      );
+    }
+
+    if (billingProvider === 'google' || (await hasActiveGoogleSubscription(supabaseAdmin, ownerId))) {
+      return new Response(
+        JSON.stringify({
+          code: 'GOOGLE_SUBSCRIPTION_ACTIVE',
+          message:
+            'Tu suscripción está activa vía Google Play. Gestiona el plan en Google Play Store o en la app Android.',
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409 }
       );

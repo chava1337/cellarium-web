@@ -31,7 +31,7 @@ const config = {
     name: "Cellarium",
     slug: "cellarium-wine-catalog",
     // Versión de marketing (CFBundleShortVersionString). Con appVersionSource: remote en eas.json, iOS puede tomar la de App Store Connect; mantener alineado aquí y en package.json.
-    version: "1.0.3",
+    version: "1.0.4",
     orientation: "default",
     userInterfaceStyle: "light",
     // App Store, Play listing, iOS: PNG 1024×1024 recomendado.
@@ -70,7 +70,7 @@ const config = {
       orientation: "default",
       bundleIdentifier: "com.cellarium.winecatalog",
       // CFBundleVersion: debe ser > al último build subido a TestFlight/App Store.
-      buildNumber: "4",
+      buildNumber: "5",
       associatedDomains: [
         "applinks:cellarium.net",
         "applinks:www.cellarium.net"
@@ -88,11 +88,12 @@ const config = {
       orientation: "default",
       package: "com.cellarium.winecatalog",
       // versionName en Gradle = expo.version. versionCode: entero monotónico por subida a Play (alinear con android/app/build.gradle).
-      versionCode: 2,
+      // Debe ser SIEMPRE mayor que el último subido a Play (Play rechaza duplicados).
+      versionCode: 4,
       // Foreground: adaptive icon (dejar margen ~20–30% para la máscara del sistema).
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon-v2.png",
-        backgroundColor: "#000000",
+        backgroundColor: "#ffffff",
       },
       // Solo permisos que la app debe declarar explícitamente; el resto vienen de dependencias (p. ej. image-picker).
       permissions: ["android.permission.CAMERA"],

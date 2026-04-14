@@ -22,8 +22,9 @@ interface AuthProviderProps {
 
 const USERS_SELECT_COLUMNS = 'id, email, name, role, status, branch_id, owner_id, created_at, updated_at, subscription_plan, subscription_active, subscription_expires_at, subscription_cancel_at_period_end, subscription_branches_count, subscription_branch_addons_count, subscription_id, stripe_customer_id, signup_method, owner_email_verified, billing_provider';
 
-/** Select mínimo para bootstrap rápido; incluye campos de suscripción para que la UI muestre el plan correcto al arranque. */
-const USERS_BOOTSTRAP_SELECT = 'id,email,name,role,status,owner_id,branch_id,created_at,updated_at,subscription_plan,subscription_active,subscription_expires_at,subscription_cancel_at_period_end,signup_method,owner_email_verified,billing_provider';
+/** Select mínimo para bootstrap rápido; alineado con campos que la UI de suscripción necesita desde el primer paint. */
+const USERS_BOOTSTRAP_SELECT =
+  'id,email,name,role,status,owner_id,branch_id,created_at,updated_at,subscription_plan,subscription_active,subscription_expires_at,subscription_cancel_at_period_end,subscription_branch_addons_count,subscription_id,stripe_customer_id,signup_method,owner_email_verified,billing_provider';
 
 const HYDRATE_BACKOFF_MS = [300, 600, 1200, 2500, 4000];
 
@@ -236,6 +237,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             subscription_active: data.subscription_active ?? prev.subscription_active,
             subscription_expires_at: data.subscription_expires_at ?? prev.subscription_expires_at,
             subscription_cancel_at_period_end: data.subscription_cancel_at_period_end ?? prev.subscription_cancel_at_period_end,
+            subscription_branch_addons_count:
+              data.subscription_branch_addons_count ?? prev.subscription_branch_addons_count,
+            subscription_id: data.subscription_id ?? prev.subscription_id,
+            stripe_customer_id: data.stripe_customer_id ?? prev.stripe_customer_id,
+            billing_provider: data.billing_provider ?? prev.billing_provider,
             signup_method: data.signup_method ?? prev.signup_method,
             owner_email_verified: data.owner_email_verified ?? prev.owner_email_verified,
           };
@@ -727,6 +733,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           subscription_branch_addons_count: userData.subscription_branch_addons_count ?? prev?.subscription_branch_addons_count,
           subscription_id: userData.subscription_id ?? prev?.subscription_id,
           stripe_customer_id: userData.stripe_customer_id ?? prev?.stripe_customer_id,
+          billing_provider: userData.billing_provider ?? prev?.billing_provider,
           signup_method: userData.signup_method ?? prev?.signup_method,
           owner_email_verified: userData.owner_email_verified ?? prev?.owner_email_verified,
         };

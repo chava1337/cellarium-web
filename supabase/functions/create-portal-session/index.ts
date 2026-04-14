@@ -4,7 +4,7 @@
 const PORTAL_VERSION = 'portal@2026-02-07_v9';
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-import { hasActiveAppleSubscription } from '../_shared/billing_coexistence.ts';
+import { hasActiveAppleSubscription, hasActiveGoogleSubscription } from '../_shared/billing_coexistence.ts';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -32,6 +32,28 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    const rawBody = await req.text();
+    let portalClientPlatform = '';
+    try {
+      if (rawBody.trim()) {
+        const pb = JSON.parse(rawBody) as { clientPlatform?: string };
+        if (typeof pb.clientPlatform === 'string') {
+          portalClientPlatform = pb.clientPlatform.toLowerCase().trim();
+        }
+      }
+    } catch {
+      return jsonResponse({ code: 'INVALID_JSON', message: 'Invalid JSON body' }, 400);
+    }
+    if (portalClientPlatform === 'android') {
+      return jsonResponse(
+        {
+          code: 'ANDROID_USE_PLAY_BILLING',
+          message: 'En Android las suscripciones se gestionan con Google Play, no con el portal Stripe.',
+        },
+        403
+      );
+    }
+
     const authHeader = req.headers.get('authorization') ?? req.headers.get('Authorization');
     if (!authHeader || !/^\s*Bearer\s+/i.test(authHeader)) {
       return jsonResponse(
@@ -114,6 +136,20 @@ Deno.serve(async (req: Request) => {
           code: 'APPLE_SUBSCRIPTION_ACTIVE',
           message:
             'Tu suscripción está gestionada vía Apple. Usa Ajustes > Suscripción en iOS para cambios o cancelación.',
+        },
+        409
+      );
+    }
+
+    if (
+      billingProvider === 'google' ||
+      (await hasActiveGoogleSubscription(supabaseAdmin, ownerId))
+    ) {
+      return jsonResponse(
+        {
+          code: 'GOOGLE_SUBSCRIPTION_ACTIVE',
+          message:
+            'Tu suscripción está gestionada vía Google Play. Ábrela en la app Android o en play.google.com.',
         },
         409
       );

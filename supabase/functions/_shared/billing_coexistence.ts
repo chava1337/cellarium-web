@@ -1,5 +1,5 @@
 /**
- * Reglas de coexistencia Stripe ↔ Apple (backend).
+ * Reglas de coexistencia Stripe ↔ Apple ↔ Google (backend).
  * Todas las consultas usan owner_id del servidor (nunca del body del cliente).
  */
 
@@ -37,6 +37,22 @@ export async function hasActiveStripeBackedSubscription(
     .in('status', ['active', 'trialing'])
     .gt('current_period_end', nowIso())
     .not('stripe_subscription_id', 'is', null)
+    .maybeSingle();
+  return !!data?.id;
+}
+
+/** Suscripción activa con purchase token Google (fila en public.subscriptions). */
+export async function hasActiveGoogleSubscription(
+  supabaseAdmin: SupabaseClient,
+  ownerId: string
+): Promise<boolean> {
+  const { data } = await supabaseAdmin
+    .from('subscriptions')
+    .select('id')
+    .eq('owner_id', ownerId)
+    .in('status', ['active', 'trialing'])
+    .gt('current_period_end', nowIso())
+    .not('google_purchase_token', 'is', null)
     .maybeSingle();
   return !!data?.id;
 }

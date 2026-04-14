@@ -4,7 +4,7 @@
 // Usa REST API directa (sin Stripe SDK) para evitar node polyfills
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-import { hasActiveAppleSubscription } from '../_shared/billing_coexistence.ts';
+import { hasActiveAppleSubscription, hasActiveGoogleSubscription } from '../_shared/billing_coexistence.ts';
 import { stripeRequest } from '../_shared/stripe_rest.ts';
 
 const corsHeaders = {
@@ -104,6 +104,17 @@ Deno.serve(async (req: Request) => {
         error:
           'Las sucursales adicionales con Stripe no aplican a la suscripci?n de Apple. Gestiona el plan desde iOS.',
         code: 'APPLE_SUBSCRIPTION_ACTIVE',
+      });
+    }
+
+    if (
+      userData.billing_provider === 'google' ||
+      (await hasActiveGoogleSubscription(supabaseAdmin, ownerId))
+    ) {
+      return json(409, {
+        error:
+          'Las sucursales adicionales con Stripe no aplican a la suscripci?n de Google Play.',
+        code: 'GOOGLE_SUBSCRIPTION_ACTIVE',
       });
     }
 

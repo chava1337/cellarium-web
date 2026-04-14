@@ -137,8 +137,8 @@ export interface User {
   signup_method?: string | null;
   /** For owners: true when email verified (Google or after verify-owner-email). */
   owner_email_verified?: boolean;
-  /** Origen de facturación (backend); Apple IAP solo en iOS. */
-  billing_provider?: 'none' | 'stripe' | 'apple' | null;
+  /** Origen de facturación (backend). `google` cuando exista migración CHECK en Supabase. */
+  billing_provider?: 'none' | 'stripe' | 'apple' | 'google' | null;
   created_at: string;
   updated_at: string;
 }

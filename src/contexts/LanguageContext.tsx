@@ -366,6 +366,29 @@ const translations: Record<Language, Record<string, string>> = {
 
     // Subscription screen (SubscriptionsScreen)
     'subscription.screen_title': 'Suscripciones',
+    'subscription.android_play_coming_title': 'Google Play',
+    'subscription.android_play_coming_message':
+      'La suscripción en Android usa Google Play Billing. Elige un plan abajo o restaura una compra existente.',
+    'subscription.android_no_subscription_manage_message':
+      'Para suscribirte elige un plan más abajo. Si ya pagaste en Google Play, usa Restaurar compras.',
+    'subscription.google_success_title': 'Suscripción sincronizada',
+    'subscription.google_success_message': 'Tu plan se activó con Google Play.',
+    'subscription.google_pending_message':
+      'La compra sigue pendiente en Google Play. Reintenta cuando se confirme el pago.',
+    'subscription.google_restore': 'Restaurar compras (Google Play)',
+    'subscription.google_restore_hint': 'Usa esto si ya pagaste en esta cuenta de Google y no ves tu plan.',
+    'subscription.google_restore_nothing_message':
+      'No encontramos una suscripción activa de Cellarium para sincronizar.',
+    'subscription.android_manage_stripe_title': 'Suscripción vía web',
+    'subscription.android_manage_stripe_message':
+      'Tu plan está asociado a facturación web (Stripe). Para cambiar o cancelar, inicia sesión en Cellarium desde un navegador en cellarium.net.',
+    'subscription.android_upgrade_blocked_title': 'No disponible en la app',
+    'subscription.android_upgrade_blocked_message':
+      'Mejorar plan con Stripe no está disponible en Android. Usa la web o el cambio de plan en Google Play desde esta app.',
+    'subscription.android_addons_blocked_message':
+      'Las sucursales adicionales con facturación Stripe no están disponibles en Android. Gestiona tu plan en la web.',
+    'subscription.android_billing_info_banner':
+      'En Android las suscripciones se pagan con Google Play Billing. Esta app no abre Stripe.',
     'subscription.status_current': 'Estado actual',
     'subscription.current_plan_title': 'Plan actual',
     'subscription.status_card_tagline_free': 'Ideal para comenzar con una sucursal.',
@@ -1097,6 +1120,29 @@ const translations: Record<Language, Record<string, string>> = {
 
     // Subscription screen (SubscriptionsScreen)
     'subscription.screen_title': 'Subscriptions',
+    'subscription.android_play_coming_title': 'Google Play',
+    'subscription.android_play_coming_message':
+      'Android subscriptions use Google Play Billing. Pick a plan below or restore an existing purchase.',
+    'subscription.android_no_subscription_manage_message':
+      'To subscribe, choose a plan below. If you already paid on Google Play, use Restore purchases.',
+    'subscription.google_success_title': 'Subscription synced',
+    'subscription.google_success_message': 'Your plan is active with Google Play.',
+    'subscription.google_pending_message':
+      'This purchase is still pending in Google Play. Try again once payment clears.',
+    'subscription.google_restore': 'Restore purchases (Google Play)',
+    'subscription.google_restore_hint': 'Use this if you already paid on this Google account and do not see your plan.',
+    'subscription.google_restore_nothing_message':
+      'We could not find an active Cellarium subscription to sync.',
+    'subscription.android_manage_stripe_title': 'Web subscription',
+    'subscription.android_manage_stripe_message':
+      'Your plan is billed on the web (Stripe). To change or cancel, sign in to Cellarium in a browser at cellarium.net.',
+    'subscription.android_upgrade_blocked_title': 'Not available in the app',
+    'subscription.android_upgrade_blocked_message':
+      'Upgrading with Stripe is not available on Android. Use the website or change your plan via Google Play from this app.',
+    'subscription.android_addons_blocked_message':
+      'Extra branches with Stripe billing are not available on Android. Manage your plan on the web.',
+    'subscription.android_billing_info_banner':
+      'On Android, subscriptions are paid with Google Play Billing. This app does not open Stripe checkout.',
     'subscription.status_current': 'Current status',
     'subscription.current_plan_title': 'Current plan',
     'subscription.status_card_tagline_free': 'Ideal to get started with one branch.',
