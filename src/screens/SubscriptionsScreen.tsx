@@ -2017,11 +2017,6 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
             </TouchableOpacity>
           </View>
         )}
-        {isAndroid && (
-          <View style={[styles.card, styles.androidBillingBanner]}>
-            <Text style={styles.androidBillingBannerText}>{t('subscription.android_billing_info_banner')}</Text>
-          </View>
-        )}
         <CurrentStatusCard
           styles={styles}
           sectionTitle={t('subscription.current_plan_title')}
@@ -2058,29 +2053,31 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
         )}
 
-        {isAndroid && (
-          <View style={styles.appleRestoreBlock}>
-            <TouchableOpacity
-              style={[
-                styles.manageButton,
-                styles.appleRestoreButton,
-                (isProcessing || needsEmailVerification) && styles.buttonDisabled,
-              ]}
-              onPress={handleRestoreGooglePurchases}
-              disabled={isProcessing || needsEmailVerification}
-            >
-              {isProcessing ? (
-                <ActivityIndicator color={PALETTE.primary} size="small" />
-              ) : (
-                <Text style={styles.manageButtonText}>{t('subscription.google_restore')}</Text>
-              )}
-            </TouchableOpacity>
-            <Text style={styles.appleRestoreHint}>{t('subscription.google_restore_hint')}</Text>
-          </View>
-        )}
-
         {planMode === 'paid' && (
           <>
+            {(isIos || isAndroid) && (
+              <View style={[styles.card, styles.storeGuidanceCard]}>
+                <Text style={styles.storeGuidanceTitle}>{t('subscription.store_plan_guidance_title')}</Text>
+                <Text style={styles.storeGuidanceBody}>
+                  {isIos ? t('subscription.store_plan_guidance_body_ios') : t('subscription.store_plan_guidance_body_android')}
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.manageButton,
+                    styles.appleRestoreButton,
+                    (isProcessing || needsEmailVerification) && styles.buttonDisabled,
+                  ]}
+                  onPress={handleManageSubscription}
+                  disabled={isProcessing || needsEmailVerification}
+                >
+                  {isProcessing && loadingAction === 'open-portal' ? (
+                    <ActivityIndicator color={PALETTE.primary} size="small" />
+                  ) : (
+                    <Text style={styles.manageButtonText}>{t('subscription.store_plan_cta')}</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
             {showStripeAddonUi && upgradeTargetPlans.length > 0 ? (
               <UpgradePlanSection
                 styles={styles}
@@ -2136,17 +2133,19 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                 </TouchableOpacity>
               </View>
             ) : null}
-            <TouchableOpacity
-              style={[styles.manageButtonTertiary, (isProcessing || needsEmailVerification) && styles.buttonDisabled]}
-              onPress={handleManageSubscription}
-              disabled={isProcessing || needsEmailVerification}
-            >
-              {isProcessing && loadingAction === 'open-portal' ? (
-                <ActivityIndicator color={PALETTE.subtext} size="small" />
-              ) : (
-                <Text style={styles.manageButtonTertiaryText}>{t('subscription.manage')}</Text>
-              )}
-            </TouchableOpacity>
+            {Platform.OS === 'web' ? (
+              <TouchableOpacity
+                style={[styles.manageButtonTertiary, (isProcessing || needsEmailVerification) && styles.buttonDisabled]}
+                onPress={handleManageSubscription}
+                disabled={isProcessing || needsEmailVerification}
+              >
+                {isProcessing && loadingAction === 'open-portal' ? (
+                  <ActivityIndicator color={PALETTE.subtext} size="small" />
+                ) : (
+                  <Text style={styles.manageButtonTertiaryText}>{t('subscription.manage')}</Text>
+                )}
+              </TouchableOpacity>
+            ) : null}
           </>
         )}
 
@@ -2327,15 +2326,21 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: PALETTE.text,
   },
-  androidBillingBanner: {
-    backgroundColor: PALETTE.pillBg,
+  storeGuidanceCard: {
     borderLeftWidth: 4,
     borderLeftColor: PALETTE.primary,
   },
-  androidBillingBannerText: {
-    fontSize: 14,
+  storeGuidanceTitle: {
+    fontSize: 17,
+    fontWeight: '700',
     color: PALETTE.text,
-    lineHeight: 20,
+    marginBottom: 10,
+  },
+  storeGuidanceBody: {
+    fontSize: 14,
+    color: PALETTE.subtext,
+    lineHeight: 21,
+    marginBottom: 16,
   },
   verifyBlock: {
     backgroundColor: PALETTE.cardBg,

@@ -368,9 +368,9 @@ const translations: Record<Language, Record<string, string>> = {
     'subscription.screen_title': 'Suscripciones',
     'subscription.android_play_coming_title': 'Google Play',
     'subscription.android_play_coming_message':
-      'La suscripción en Android usa Google Play Billing. Elige un plan abajo o restaura una compra existente.',
+      'La suscripción en Android usa Google Play. Elige un plan abajo o revisa tus suscripciones en Google Play si ya pagaste.',
     'subscription.android_no_subscription_manage_message':
-      'Para suscribirte elige un plan más abajo. Si ya pagaste en Google Play, usa Restaurar compras.',
+      'Para suscribirte elige un plan más abajo. Si ya pagaste en Google Play y no ves tu plan, revisa tus suscripciones en la tienda Google Play.',
     'subscription.google_success_title': 'Suscripción sincronizada',
     'subscription.google_success_message': 'Tu plan se activó con Google Play.',
     'subscription.google_pending_message':
@@ -389,6 +389,12 @@ const translations: Record<Language, Record<string, string>> = {
       'Las sucursales adicionales con facturación Stripe no están disponibles en Android. Gestiona tu plan en la web.',
     'subscription.android_billing_info_banner':
       'En Android las suscripciones se pagan con Google Play Billing. Esta app no abre Stripe.',
+    'subscription.store_plan_guidance_title': 'Cambiar o administrar tu plan',
+    'subscription.store_plan_guidance_body_ios':
+      'Para mejorar de plan, cancelar o renovar, Apple gestiona el cobro en el App Store. Al continuar te llevamos a la administración de suscripciones de tu cuenta Apple.',
+    'subscription.store_plan_guidance_body_android':
+      'Para mejorar de plan, cancelar o renovar depende de dónde pagaste: en Google Play si la suscripción es de esta app, o en la web Cellarium si tu plan es de facturación web. Al continuar abriremos la opción que corresponda.',
+    'subscription.store_plan_cta': 'Continuar',
     'subscription.status_current': 'Estado actual',
     'subscription.current_plan_title': 'Plan actual',
     'subscription.status_card_tagline_free': 'Ideal para comenzar con una sucursal.',
@@ -1122,9 +1128,9 @@ const translations: Record<Language, Record<string, string>> = {
     'subscription.screen_title': 'Subscriptions',
     'subscription.android_play_coming_title': 'Google Play',
     'subscription.android_play_coming_message':
-      'Android subscriptions use Google Play Billing. Pick a plan below or restore an existing purchase.',
+      'Android subscriptions use Google Play. Pick a plan below, or check your subscriptions in Google Play if you already paid.',
     'subscription.android_no_subscription_manage_message':
-      'To subscribe, choose a plan below. If you already paid on Google Play, use Restore purchases.',
+      'To subscribe, choose a plan below. If you already paid on Google Play and do not see your plan, check your subscriptions in the Google Play Store.',
     'subscription.google_success_title': 'Subscription synced',
     'subscription.google_success_message': 'Your plan is active with Google Play.',
     'subscription.google_pending_message':
@@ -1143,6 +1149,12 @@ const translations: Record<Language, Record<string, string>> = {
       'Extra branches with Stripe billing are not available on Android. Manage your plan on the web.',
     'subscription.android_billing_info_banner':
       'On Android, subscriptions are paid with Google Play Billing. This app does not open Stripe checkout.',
+    'subscription.store_plan_guidance_title': 'Change or manage your plan',
+    'subscription.store_plan_guidance_body_ios':
+      'To upgrade, cancel, or renew, Apple handles billing in the App Store. Continue to open subscription management for your Apple ID.',
+    'subscription.store_plan_guidance_body_android':
+      'To upgrade, cancel, or renew depends on where you pay: Google Play for in-app subscriptions, or the Cellarium website if your plan is billed on the web. Continue and we will open the option that applies.',
+    'subscription.store_plan_cta': 'Continue',
     'subscription.status_current': 'Current status',
     'subscription.current_plan_title': 'Current plan',
     'subscription.status_card_tagline_free': 'Ideal to get started with one branch.',
