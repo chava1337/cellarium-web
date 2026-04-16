@@ -1,11 +1,8 @@
-// Plugins requeridos por Expo (SDK 54); Stripe como tuple con merchantIdentifier (iOS)
-const STRIPE_PLUGIN = [
-  "@stripe/stripe-react-native",
-  {
-    merchantIdentifier: "merchant.com.cellarium.app",
-    enableGooglePay: true,
-  },
-];
+// Plugins requeridos por Expo (SDK 54).
+// Nota: Stripe nativo no se configura en mobile porque el proyecto usa:
+// - iOS: Apple IAP
+// - Android: Google Play Billing
+// - Web: Stripe Checkout/Portal (sin plugin nativo)
 /** iOS: static frameworks — alinea resolución CocoaPods (RCT-Folly / react-native-iap en EAS). */
 const BUILD_PROPERTIES_PLUGIN = [
   "expo-build-properties",
@@ -30,8 +27,8 @@ const config = {
   expo: {
     name: "Cellarium",
     slug: "cellarium-wine-catalog",
-    // Versión de marketing (CFBundleShortVersionString). Con appVersionSource: remote en eas.json, iOS puede tomar la de App Store Connect; mantener alineado aquí y en package.json.
-    version: "1.0.4",
+    // Versión de marketing. Con appVersionSource: local en eas.json, EAS usa esta versión y android.versionCode del repo.
+    version: "1.0.7",
     orientation: "default",
     userInterfaceStyle: "light",
     // App Store, Play listing, iOS: PNG 1024×1024 recomendado.
@@ -66,11 +63,10 @@ const config = {
     ios: {
       supportsTablet: true,
       usesAppleSignIn: true,
-      merchantIdentifier: "merchant.com.cellarium.app",
       orientation: "default",
       bundleIdentifier: "com.cellarium.winecatalog",
       // CFBundleVersion: debe ser > al último build subido a TestFlight/App Store.
-      buildNumber: "5",
+      buildNumber: "7",
       associatedDomains: [
         "applinks:cellarium.net",
         "applinks:www.cellarium.net"
@@ -89,7 +85,7 @@ const config = {
       package: "com.cellarium.winecatalog",
       // versionName en Gradle = expo.version. versionCode: entero monotónico por subida a Play (alinear con android/app/build.gradle).
       // Debe ser SIEMPRE mayor que el último subido a Play (Play rechaza duplicados).
-      versionCode: 4,
+      versionCode: 6,
       // Foreground: adaptive icon (dejar margen ~20–30% para la máscara del sistema).
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon-v2.png",
@@ -146,17 +142,11 @@ const config = {
   }
 };
 
-// Merge plugins sin duplicados: Stripe como tuple; sin string simple "@stripe/stripe-react-native"
+// Merge plugins sin duplicados
 const existingPlugins = config.expo.plugins ?? [];
-const withoutStripe = existingPlugins.filter(
-  (p) =>
-    p !== "@stripe/stripe-react-native" &&
-    !(Array.isArray(p) && p[0] === "@stripe/stripe-react-native")
-);
 const pluginName = (p) => (Array.isArray(p) ? p[0] : p);
-const hasPlugin = (name) => withoutStripe.some((p) => pluginName(p) === name);
-const withRequired = [...withoutStripe];
-if (!hasPlugin("@stripe/stripe-react-native")) withRequired.push(STRIPE_PLUGIN);
+const hasPlugin = (name) => existingPlugins.some((p) => pluginName(p) === name);
+const withRequired = [...existingPlugins];
 for (const name of OTHER_PLUGINS) {
   if (!hasPlugin(name)) withRequired.push(name);
 }
