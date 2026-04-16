@@ -18,6 +18,7 @@ import {
   CellariumHeader,
   CellariumModal,
   CellariumPrimaryButton,
+  IosHeaderBackSlot,
 } from '../components/cellarium';
 import { RootStackParamList, type CanonicalPlanId } from '../types';
 
@@ -1950,7 +1951,10 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
-      <CellariumHeader title={t('subscription.screen_title')} />
+      <CellariumHeader
+        title={t('subscription.screen_title')}
+        leftSlot={<IosHeaderBackSlot navigation={navigation} fallbackRoute="AdminDashboard" />}
+      />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {(!profileReady || user?.status === 'loading') && (

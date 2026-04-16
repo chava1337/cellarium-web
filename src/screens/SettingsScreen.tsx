@@ -21,7 +21,7 @@ import { PendingApprovalMessage } from '../components/PendingApprovalMessage';
 import { useLanguage } from '../contexts/LanguageContext';
 import { supabase } from '../lib/supabase';
 import { CELLARIUM, CELLARIUM_LAYOUT } from '../theme/cellariumTheme';
-import { CellariumHeader } from '../components/cellarium';
+import { CellariumHeader, IosHeaderBackSlot } from '../components/cellarium';
 import { LEGAL_URLS } from '../config/legalUrls';
 import { resolveDisplayName } from '../utils/resolveDisplayName';
 
@@ -304,7 +304,10 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <CellariumHeader title={t('settings.title')} />
+      <CellariumHeader
+        title={t('settings.title')}
+        leftSlot={<IosHeaderBackSlot navigation={navigation} fallbackRoute="AdminDashboard" />}
+      />
 
       <ScrollView
         style={styles.content}

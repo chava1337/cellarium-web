@@ -35,7 +35,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '../lib/supabase';
 import { isValidPrice, formatCurrencyMXN } from '../utils/wineCatalogUtils';
 import { CELLARIUM, CELLARIUM_LAYOUT } from '../theme/cellariumTheme';
-import { CellariumHeader } from '../components/cellarium';
+import { CellariumHeader, IosHeaderBackSlot } from '../components/cellarium';
 import InventoryAnalyticsTabs from '../components/inventory/InventoryAnalyticsTabs';
 import type { InventoryViewMode } from '../components/inventory/InventoryAnalyticsTabs';
 import InventoryItemCard from '../components/inventory/InventoryItemCard';
@@ -1328,6 +1328,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       <CellariumHeader
         title="Inventario y Análisis"
         subtitle={currentBranch?.name || undefined}
+        leftSlot={<IosHeaderBackSlot navigation={navigation} fallbackRoute="AdminDashboard" />}
         rightSlot={
           !helpHidden ? (
             <TouchableOpacity

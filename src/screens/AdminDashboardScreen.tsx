@@ -13,6 +13,7 @@ import {
   FlatList,
   Pressable,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -28,7 +29,8 @@ import { mapMenuItemIdToFeatureId } from '../constants/adminMenuFeatureMap';
 import { canAccessFullAdminScreens } from '../utils/rolePermissions';
 import { useAdminGuard } from '../hooks/useAdminGuard';
 import { PendingApprovalMessage } from '../components/PendingApprovalMessage';
-import { CELLARIUM_THEME } from '../theme/cellariumTheme';
+import { CELLARIUM_LAYOUT, CELLARIUM_THEME } from '../theme/cellariumTheme';
+import { IosHeaderBackSlot } from '../components/cellarium';
 
 type AdminDashboardScreenNavigationProp = StackNavigationProp<RootStackParamList, 'AdminDashboard'>;
 type AdminDashboardScreenRouteProp = RouteProp<RootStackParamList, 'AdminDashboard'>;
@@ -369,9 +371,21 @@ const AdminDashboardScreen: React.FC<Props> = ({ navigation, route }) => {
         end={{ x: 1, y: 0 }}
         style={styles.headerGradient}
       >
-        <View style={styles.headerContent}>
-          <Text style={styles.title}>{t('admin.title')}</Text>
-        </View>
+        {Platform.OS === 'ios' ? (
+          <View style={styles.headerTitleRowIos}>
+            <View style={[styles.headerTitleSide, { width: CELLARIUM_LAYOUT.headerSlotWidth }]}>
+              <IosHeaderBackSlot navigation={navigation} fallbackRoute="WineCatalog" />
+            </View>
+            <View style={styles.headerTitleCenter}>
+              <Text style={styles.title}>{t('admin.title')}</Text>
+            </View>
+            <View style={[styles.headerTitleSide, { width: CELLARIUM_LAYOUT.headerSlotWidth }]} />
+          </View>
+        ) : (
+          <View style={styles.headerContent}>
+            <Text style={styles.title}>{t('admin.title')}</Text>
+          </View>
+        )}
         
         {/* Selector de sucursal como field premium */}
         <TouchableOpacity
@@ -484,6 +498,21 @@ const styles = StyleSheet.create({
   headerContent: {
     alignItems: 'center',
     marginBottom: 12,
+  },
+  headerTitleRowIos: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    minHeight: CELLARIUM_LAYOUT.headerBodyMinHeight,
+  },
+  headerTitleSide: {
+    justifyContent: 'center',
+    minHeight: CELLARIUM_LAYOUT.iconButtonSize,
+  },
+  headerTitleCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
     fontSize: 20,

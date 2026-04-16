@@ -12,7 +12,7 @@ import {
   TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CellariumHeader } from '../components/cellarium';
+import { CellariumHeader, IosHeaderBackSlot } from '../components/cellarium';
 import ViewShot from 'react-native-view-shot';
 import QRCode from 'react-native-qrcode-svg';
 import Share from 'react-native-share';
@@ -396,6 +396,7 @@ const QrGenerationScreen: React.FC = () => {
       <CellariumHeader
         title="Generación de QR"
         subtitle={currentBranch?.name?.trim() ? currentBranch.name : undefined}
+        leftSlot={<IosHeaderBackSlot navigation={navigation} fallbackRoute="AdminDashboard" />}
       />
 
       <ScrollView style={styles.content}>

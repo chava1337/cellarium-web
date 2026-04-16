@@ -12,3 +12,5 @@ export { default as CellariumTextField } from './CellariumTextField';
 export type { CellariumTextFieldProps } from './CellariumTextField';
 export { default as CellariumModal } from './CellariumModal';
 export type { CellariumModalProps } from './CellariumModal';
+export { IosHeaderBackSlot } from './IosHeaderBackSlot';
+export type { IosHeaderBackSlotProps, IosHeaderBackNavigationProp } from './IosHeaderBackSlot';

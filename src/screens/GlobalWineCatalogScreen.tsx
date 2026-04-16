@@ -37,7 +37,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { logger } from '../utils/logger';
 import { CELLARIUM, CELLARIUM_GRADIENT } from '../theme/cellariumTheme';
-import { CellariumHeader } from '../components/cellarium';
+import { CellariumHeader, IosHeaderBackSlot } from '../components/cellarium';
 
 type GlobalWineCatalogScreenNavigationProp = StackNavigationProp<RootStackParamList, 'GlobalWineCatalog'>;
 interface Props {
@@ -1015,6 +1015,7 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
  <CellariumHeader
  title={t('global_catalog.title')}
+ leftSlot={<IosHeaderBackSlot navigation={navigation} fallbackRoute="AdminDashboard" />}
  rightSlot={
  <TouchableOpacity
  style={styles.searchButtonHeader}

@@ -14,6 +14,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   CellariumHeader,
+  IosHeaderBackSlot,
   CellariumModal,
   CellariumPrimaryButton,
   CellariumSecondaryButton,
@@ -672,7 +673,11 @@ const WineManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
-      <CellariumHeader title={t('wine_mgmt.title')} compact />
+      <CellariumHeader
+        title={t('wine_mgmt.title')}
+        compact
+        leftSlot={<IosHeaderBackSlot navigation={navigation} fallbackRoute="AdminDashboard" />}
+      />
 
       {renderCaptureScreen()}
 

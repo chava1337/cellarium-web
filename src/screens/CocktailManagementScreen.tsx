@@ -43,7 +43,7 @@ import { getEffectivePlan } from '../utils/effectivePlan';
 import { useDeviceInfo } from '../hooks/useDeviceInfo';
 import { compressCocktailImage } from '../utils/imageCompression';
 import { CELLARIUM, CELLARIUM_GRADIENT, CELLARIUM_LAYOUT } from '../theme/cellariumTheme';
-import { CellariumHeader } from '../components/cellarium';
+import { CellariumHeader, IosHeaderBackSlot } from '../components/cellarium';
 
 type CocktailManagementScreenNavigationProp = StackNavigationProp<RootStackParamList, 'CocktailManagement'>;
 type CocktailManagementScreenRouteProp = RouteProp<RootStackParamList, 'CocktailManagement'>;
@@ -744,6 +744,7 @@ const CocktailManagementScreen: React.FC<Props> = ({ navigation, route }) => {
       <CellariumHeader
         title={t('cocktail.title')}
         subtitle={`${drinks.length} ${t('cocktail.beverages_available')}`}
+        leftSlot={<IosHeaderBackSlot navigation={navigation} fallbackRoute="AdminDashboard" />}
         rightSlot={
           <TouchableOpacity
             style={styles.headerAddButton}

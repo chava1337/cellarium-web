@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CellariumHeader } from '../components/cellarium';
+import { CellariumHeader, IosHeaderBackSlot } from '../components/cellarium';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -282,7 +282,11 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
-        <CellariumHeader title="Catas y Degustaciones" subtitle="Cargando exámenes..." />
+        <CellariumHeader
+          title="Catas y Degustaciones"
+          subtitle="Cargando exámenes..."
+          leftSlot={<IosHeaderBackSlot navigation={navigation} fallbackRoute="AdminDashboard" />}
+        />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={CELLARIUM.primary} />
           <Text style={styles.loadingText}>Cargando exámenes...</Text>
@@ -296,6 +300,7 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
       <CellariumHeader
         title="Catas y Degustaciones"
         subtitle={`${exams.length} examen${exams.length !== 1 ? 'es' : ''} en esta sucursal`}
+        leftSlot={<IosHeaderBackSlot navigation={navigation} fallbackRoute="AdminDashboard" />}
       />
 
       <ScrollView

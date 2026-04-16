@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CellariumHeader } from '../components/cellarium';
+import { CellariumHeader, IosHeaderBackSlot } from '../components/cellarium';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList, User, UserRole } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -531,6 +531,7 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
       <CellariumHeader
         title={t('users.title')}
         subtitle={isOwner ? t('users.all_branches') : currentBranch?.name || t('branches.title')}
+        leftSlot={<IosHeaderBackSlot navigation={navigation} fallbackRoute="AdminDashboard" />}
       />
 
       <ScrollView
