@@ -67,7 +67,9 @@ Deno.serve(async (req: Request) => {
     // 0. Bloquear solo si suscripción activa y NO cancelada/programada. Permitir borrar si ya cancelada o cancel_at_period_end.
     const { data: userRow, error: userRowError } = await supabaseAdmin
       .from('users')
-      .select('subscription_active, subscription_plan, subscription_expires_at, subscription_cancel_at_period_end, stripe_subscription_id, stripe_customer_id')
+      .select(
+        'subscription_active, subscription_plan, subscription_expires_at, subscription_cancel_at_period_end, stripe_subscription_id, stripe_customer_id, billing_provider'
+      )
       .eq('id', user.id)
       .maybeSingle();
 
@@ -83,10 +85,20 @@ Deno.serve(async (req: Request) => {
     const userCancelScheduled = userRow?.subscription_cancel_at_period_end === true;
     const stripeSubId = userRow?.stripe_subscription_id?.trim?.() ?? '';
     const hasStripeSubId = stripeSubId.length > 0;
+    const billingProvider =
+      typeof (userRow as { billing_provider?: string } | null)?.billing_provider === 'string'
+        ? String((userRow as { billing_provider: string }).billing_provider)
+        : 'none';
+
+    /** Si la fecha de fin ya pasó, no bloquear solo por `subscription_active` desactualizado en BD. */
+    const expiresIso = userRow?.subscription_expires_at;
+    const hasExpiry = typeof expiresIso === 'string' && expiresIso.length > 0;
+    const expiredByDate = hasExpiry && new Date(expiresIso).getTime() < Date.now();
+    const subscriptionEffectivelyActive = subscriptionActive && !expiredByDate;
 
     let cancelScheduled = userCancelScheduled;
     // Regla: permitir borrar si la suscripción ya está cancelada/programada, aunque siga activa hasta fin de periodo.
-    let blocked = subscriptionActive && !cancelScheduled;
+    let blocked = subscriptionEffectivelyActive && !cancelScheduled;
 
     // Si hay stripe_subscription_id, consultar Stripe para normalizar cancelScheduled y persistir estado
     if (hasStripeSubId) {
@@ -113,7 +125,7 @@ Deno.serve(async (req: Request) => {
             (status === 'canceled');
 
           cancelScheduled = cancelScheduled || stripeCancelScheduled;
-          blocked = subscriptionActive && !cancelScheduled;
+          blocked = subscriptionEffectivelyActive && !cancelScheduled;
 
           const subIdSuffix = stripeSubId.length >= 6 ? stripeSubId.slice(-6) : '***';
           console.log('[DELETE_ACCOUNT] stripe sub check', {
@@ -178,9 +190,12 @@ Deno.serve(async (req: Request) => {
       console.log('[DELETE_ACCOUNT] SUBSCRIPTION_ACTIVE block', {
         userIdSuffix,
         subscriptionActive,
+        subscriptionEffectivelyActive,
+        expiredByDate,
         cancelScheduled,
         plan: userRow?.subscription_plan ?? null,
         hasStripeSubId,
+        billing_provider: billingProvider,
       });
       return jsonResponse({
         success: false,
@@ -191,6 +206,7 @@ Deno.serve(async (req: Request) => {
           subscription_plan: userRow?.subscription_plan ?? null,
           subscription_expires_at: userRow?.subscription_expires_at ?? null,
           has_stripe_subscription_id: hasStripeSubId,
+          billing_provider: billingProvider,
         },
       }, 409);
     }

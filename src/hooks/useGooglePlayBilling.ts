@@ -22,6 +22,14 @@ export function useGooglePlayBilling() {
     try {
       await ensurePlayBillingConnection();
       const list = await loadSubscriptions();
+      if (__DEV__) {
+        console.log('[useGooglePlayBilling] playSubscriptions', list.length, 'items');
+        list.forEach((p, i) => {
+          const row = p as Record<string, unknown>;
+          console.log(`[useGooglePlayBilling] [${i}] keys:`, Object.keys(p as object));
+          console.log(`[useGooglePlayBilling] [${i}] raw:`, row);
+        });
+      }
       setPlaySubscriptions(list);
     } catch (e) {
       if (__DEV__) console.warn('[useGooglePlayBilling] reloadSubscriptions', e);
@@ -38,6 +46,14 @@ export function useGooglePlayBilling() {
       try {
         await ensurePlayBillingConnection();
         const list = await loadSubscriptions();
+        if (__DEV__) {
+          console.log('[useGooglePlayBilling] initial playSubscriptions', list.length, 'items');
+          list.forEach((p, i) => {
+            const row = p as Record<string, unknown>;
+            console.log(`[useGooglePlayBilling] initial [${i}] keys:`, Object.keys(p as object));
+            console.log(`[useGooglePlayBilling] initial [${i}] raw:`, row);
+          });
+        }
         if (!cancelled) setPlaySubscriptions(list);
       } catch (e) {
         if (__DEV__) console.warn('[useGooglePlayBilling] initial load', e);

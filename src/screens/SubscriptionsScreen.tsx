@@ -61,16 +61,18 @@ import { getEffectivePlan } from '../utils/effectivePlan';
 import { isSensitiveAllowed } from '../utils/sensitiveActionGating';
 import CellariumLoader from '../components/CellariumLoader';
 import { captureCriticalError, sentryFlowBreadcrumb } from '../utils/sentryContext';
-import { APPLE_SUBSCRIPTIONS_MANAGE_URL } from '../constants/appleIap';
+import { APPLE_IAP_PRODUCT_IDS, APPLE_SUBSCRIPTIONS_MANAGE_URL } from '../constants/appleIap';
 import {
   ensureIapConnection,
   finishApplePurchasesAfterBackendSync,
   finishAppleTransactionIfNeeded,
   getReceiptBase64,
+  loadAppleSubscriptionCatalog,
   purchaseAppleSubscription,
   purchaseAppleBranchAddon,
   restoreApplePurchasesForReceipt,
 } from '../services/appleIapSubscription';
+import type { Product, ProductSubscription } from 'react-native-iap';
 import { validateAppleReceiptBackend } from '../services/validateAppleReceipt';
 import { validateGooglePurchaseBackend, getCellariumAndroidPackageName } from '../services/validateGooglePurchase';
 import { finishGoogleTransactionIfNeeded } from '../services/googlePlayBilling';
@@ -263,6 +265,10 @@ interface Plan {
   price: number;
   currency: string;
   period: string;
+  /** Texto del importe en tarjeta de plan: prioridad precio de tienda (displayPrice); si no, `$NNN` como antes. */
+  priceCardText: string;
+  /** Texto del importe donde hace falta moneda explícita (Stripe / upgrade): tienda o `$NNN MXN`. */
+  priceDetailText: string;
   features: string[];
   limitations: {
     branches: number;
@@ -273,6 +279,40 @@ interface Plan {
   lookupKey?: string; // Stripe: bistro_monthly | trattoria_monthly | grand_maison_monthly (no IAP)
 }
 
+/** Mismo SKU en App Store y Google Play para planes principales (ver constants). */
+/** SKUs alineados con `GOOGLE_PLAY_PRODUCT_IDS` / Play Console (`cellarium_*_monthly`). */
+const STORE_SKU_TO_MAIN_PLAN_ID: Record<string, 'bistro' | 'trattoria' | 'grand_maison'> = {
+  [APPLE_IAP_PRODUCT_IDS.bistro]: 'bistro',
+  [APPLE_IAP_PRODUCT_IDS.trattoria]: 'trattoria',
+  [APPLE_IAP_PRODUCT_IDS.grandMaison]: 'grand_maison',
+};
+
+/** Precio localizado para tarjetas: displayPrice de producto, luego ofertas / fases (Android Billing 5+). */
+function storeProductDisplayPrice(p: Product | ProductSubscription): string {
+  const d = p.displayPrice?.trim();
+  if (d) return d;
+  const ext = p as {
+    localizedPrice?: string | null;
+    subscriptionOffers?: { displayPrice?: string }[];
+    subscriptionOfferDetailsAndroid?: {
+      pricingPhases?: { pricingPhaseList?: { formattedPrice?: string; recurrenceMode?: number }[] };
+    }[];
+  };
+  const l = typeof ext.localizedPrice === 'string' ? ext.localizedPrice.trim() : '';
+  if (l) return l;
+  const fromOffer = ext.subscriptionOffers?.[0]?.displayPrice?.trim();
+  if (fromOffer) return fromOffer;
+  const phases = ext.subscriptionOfferDetailsAndroid?.[0]?.pricingPhases?.pricingPhaseList;
+  if (phases?.length) {
+    const base =
+      phases.find((ph) => ph.recurrenceMode === 2) ?? phases[phases.length - 1];
+    const fp = base?.formattedPrice?.trim();
+    if (fp) return fp;
+  }
+  return '';
+}
+
+/** Fallback numérico list price (MXN) cuando el catálogo de tienda aún no está disponible; origen canónico de precio visible es la store. */
 const PRICE_BISTRO_MXN = 1499;
 const PRICE_TRATTORIA_MXN = 2499;
 const PRICE_GRAND_MAISON_MXN = 4499;
@@ -398,7 +438,7 @@ function PlanCard({
         <Text style={styles.planName}>{plan.name}</Text>
         <View style={styles.priceContainer}>
           <Text style={styles.priceAmount}>
-            {plan.price === 0 ? labels.priceFree : `$${plan.price}`}
+            {plan.price === 0 ? labels.priceFree : plan.priceCardText}
           </Text>
           {plan.price > 0 && (
             <Text style={styles.pricePeriod}>/{plan.period}</Text>
@@ -579,7 +619,7 @@ function UpgradePlanSection({
               </View>
             ))}
             <Text style={styles.upgradePlanPrice}>
-              ${plan.price} {plan.currency} / {plan.period}
+              {plan.priceDetailText} / {plan.period}
             </Text>
             <TouchableOpacity
               style={[styles.upgradeCtaButton, isProcessing && styles.buttonDisabled]}
@@ -659,7 +699,44 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   const isAndroid = isAndroidBillingApp();
   const useStripeSubscriptionUi = shouldUseStripeSubscriptionUi();
   const lastAppleSyncAtRef = useRef(0);
-  const { buySubscription, restorePurchases: restoreGooglePlayPurchases } = useGooglePlayBilling();
+  const { playSubscriptions, buySubscription, restorePurchases: restoreGooglePlayPurchases } =
+    useGooglePlayBilling();
+  const [iosStoreProducts, setIosStoreProducts] = useState<Product[]>([]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = (await loadAppleSubscriptionCatalog()) as Product[];
+        if (!cancelled) setIosStoreProducts(list);
+      } catch (e) {
+        if (__DEV__) console.warn('[SubscriptionsScreen] loadAppleSubscriptionCatalog', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const storePriceByMainPlanId = useMemo(() => {
+    const out: Partial<Record<'bistro' | 'trattoria' | 'grand_maison', string>> = {};
+    const ingest = (sku: string, label: string) => {
+      const planId = STORE_SKU_TO_MAIN_PLAN_ID[sku];
+      if (planId && label) out[planId] = label;
+    };
+    const list: ProductSubscription[] | Product[] =
+      Platform.OS === 'android' ? playSubscriptions : iosStoreProducts;
+    for (const p of list) {
+      const raw = p as { id?: string; productId?: string };
+      // En Android (OpenIAP) el id de producto canónico suele ir en productId; id puede diferir del SKU de Play Console.
+      const sku = (raw.productId ?? raw.id ?? '').trim();
+      if (!sku) continue;
+      const label = storeProductDisplayPrice(p);
+      if (label) ingest(sku, label);
+    }
+    return out;
+  }, [playSubscriptions, iosStoreProducts]);
 
   useFocusEffect(
     useCallback(() => {
@@ -913,6 +990,17 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const mainPlans = useMemo((): Plan[] => {
     const period = t('subscription.period_month');
+    const mxn = 'MXN';
+    const premiumTexts = (id: 'bistro' | 'trattoria' | 'grand_maison', fallback: number) => {
+      const fromStore = storePriceByMainPlanId[id];
+      return {
+        priceCardText: fromStore ?? `$${fallback}`,
+        priceDetailText: fromStore ?? `$${fallback} ${mxn}`,
+      };
+    };
+    const bistroT = premiumTexts('bistro', PRICE_BISTRO_MXN);
+    const trattoriaT = premiumTexts('trattoria', PRICE_TRATTORIA_MXN);
+    const grandT = premiumTexts('grand_maison', PRICE_GRAND_MAISON_MXN);
     return [
       {
         id: 'cafe',
@@ -920,6 +1008,8 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         price: 0,
         currency: 'MXN',
         period,
+        priceCardText: '',
+        priceDetailText: '',
         features: [
           t('subscription.plan.cafe.features.0'),
           t('subscription.plan.cafe.features.1'),
@@ -938,6 +1028,8 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         price: PRICE_BISTRO_MXN,
         currency: 'MXN',
         period,
+        priceCardText: bistroT.priceCardText,
+        priceDetailText: bistroT.priceDetailText,
         lookupKey: 'bistro_monthly',
         features: [
           t('subscription.plan.bistro.features.0'),
@@ -954,6 +1046,8 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         price: PRICE_TRATTORIA_MXN,
         currency: 'MXN',
         period,
+        priceCardText: trattoriaT.priceCardText,
+        priceDetailText: trattoriaT.priceDetailText,
         lookupKey: 'trattoria_monthly',
         features: [
           t('subscription.plan.trattoria.features.0'),
@@ -969,13 +1063,15 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         price: PRICE_GRAND_MAISON_MXN,
         currency: 'MXN',
         period,
+        priceCardText: grandT.priceCardText,
+        priceDetailText: grandT.priceDetailText,
         lookupKey: 'grand_maison_monthly',
         features: [t('subscription.plan.grand_maison.features.0'), t('subscription.plan.grand_maison.features.1')],
         limitations: { branches: 1, wines: -1, managers: -1 },
         blockedFeatures: [],
       },
     ];
-  }, [t]);
+  }, [t, storePriceByMainPlanId]);
 
   const effectivePlan = getEffectivePlan(user ?? null);
   const hasActiveSub = effectivePlan !== 'cafe';
@@ -1187,7 +1283,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       Alert.alert(t('msg.error'), t('subscription.plan_invalid_checkout'));
       return;
     }
-    const message = `${t('subscription.confirm_subscribe_message')} $${plan.price} ${plan.currency}/${plan.period}?`;
+    const message = `${t('subscription.confirm_subscribe_message')} ${plan.priceDetailText}/${plan.period}?`;
     Alert.alert(
       t('subscription.confirm_subscribe'),
       message.replace('{plan}', plan.name),
@@ -1440,17 +1536,18 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
     if (isAndroid) {
-      if (user?.billing_provider === 'stripe' || user?.stripe_customer_id) {
-        Alert.alert(
-          t('subscription.android_manage_stripe_title'),
-          t('subscription.android_manage_stripe_message')
-        );
-        return;
-      }
+      /** Google Play primero: no usar `stripe_customer_id` heredado para mostrar el modal de facturación web. */
       if (user?.billing_provider === 'google') {
         const pkg = getCellariumAndroidPackageName();
         const url = `https://play.google.com/store/account/subscriptions?package=${encodeURIComponent(pkg)}`;
         void Linking.openURL(url);
+        return;
+      }
+      if (user?.billing_provider === 'stripe' || !!user?.stripe_customer_id?.trim()) {
+        Alert.alert(
+          t('subscription.android_manage_stripe_title'),
+          t('subscription.android_manage_stripe_message')
+        );
         return;
       }
       Alert.alert(
@@ -2221,7 +2318,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                         ? t('subscription.apple_loading_restore')
                         : loadingAction === 'apple-sync'
                           ? t('subscription.apple_loading_sync')
-                          : t('subscription.loading_save_additional_branches')
+                          : t('subscription.loading_updating_subscription')
           }
           size={140}
         />

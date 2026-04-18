@@ -11,7 +11,7 @@ import {
   requestReceiptRefreshIOS,
 } from 'react-native-iap';
 import type { Product, Purchase, PurchaseError } from 'react-native-iap';
-import { APPLE_IAP_PRODUCT_IDS, APPLE_IAP_SKUS_ALL } from '../constants/appleIap';
+import { APPLE_IAP_PRODUCT_IDS, APPLE_IAP_SKUS_ALL, APPLE_IAP_SKUS_PLANS } from '../constants/appleIap';
 import type { ApplePlanUiId } from './appleIapSubscription';
 
 let connected = false;
@@ -158,6 +158,13 @@ async function purchaseWithSku(sku: string): Promise<{ purchase: Purchase }> {
     void listenerPromise.catch(() => {});
     throw e;
   }
+}
+
+/** Catálogo de suscripciones de planes principales (precios desde StoreKit). Reutiliza el mismo fetch que la compra. */
+export async function loadAppleSubscriptionCatalog(): Promise<Product[]> {
+  await ensureIapConnection();
+  const result = await fetchProducts({ skus: [...APPLE_IAP_SKUS_PLANS], type: 'subs' });
+  return (result ?? []) as Product[];
 }
 
 export async function purchaseAppleSubscription(plan: ApplePlanUiId): Promise<{ purchase: Purchase }> {

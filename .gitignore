@@ -117,3 +117,9 @@ public
 # Temporary folders
 tmp/
 temp/
+
+# Supabase CLI (caché local; no versionar)
+supabase/.temp/
+
+# Generado por prebuild/autolinking en Android (EAS lo regenera)
+android/app/src/main/assets/modules.json

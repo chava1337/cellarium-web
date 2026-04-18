@@ -293,6 +293,14 @@ const translations: Record<Language, Record<string, string>> = {
     'settings.delete_staff_title': '⚠️ Eliminar Cuenta',
     'settings.confirm_placeholder': 'Escribe CONFIRMAR',
     'settings.delete_success': 'Tu cuenta ha sido eliminada exitosamente.',
+    'settings.delete_blocked_subscription_google':
+      'Tienes una suscripción activa facturada en Google Play. Cancélala en Play Store (Suscripciones) o desde Suscripciones en la app, y vuelve a intentar eliminar la cuenta.',
+    'settings.delete_blocked_subscription_apple':
+      'Tienes una suscripción activa en App Store. Cancélala en Ajustes > Suscripciones (Apple ID) o desde Suscripciones en la app, y vuelve a intentar.',
+    'settings.delete_blocked_subscription_stripe':
+      'Tienes una suscripción activa con facturación web (Stripe). Ábrela desde Administrar suscripción en la app y cancélala en el portal; luego podrás eliminar la cuenta.',
+    'settings.delete_blocked_subscription_generic':
+      'Tienes una suscripción activa. Cancélala primero desde Suscripciones > Administrar y vuelve a intentar.',
     'settings.legal_section': 'Legal y privacidad',
     'settings.privacy_policy': 'Política de privacidad',
     'settings.terms_of_service': 'Términos del servicio',
@@ -521,6 +529,7 @@ const translations: Record<Language, Record<string, string>> = {
     'subscription.loading_subscribe': 'Procesando suscripción…',
     'subscription.loading_portal': 'Abriendo portal…',
     'subscription.loading_save_additional_branches': 'Guardando sucursales adicionales…',
+    'subscription.loading_updating_subscription': 'Estamos actualizando tu suscripción…',
     'subscription.apple_manage_title': 'Gestionar suscripción (App Store)',
     'subscription.apple_manage_message':
       'Las suscripciones contratadas con Apple se administran en Ajustes > Apple ID > Suscripciones, o desde la página de cuenta de Apple. No usamos el portal web de Stripe para facturación Apple.',
@@ -1053,6 +1062,14 @@ const translations: Record<Language, Record<string, string>> = {
     'settings.delete_staff_title': '⚠️ Delete Account',
     'settings.confirm_placeholder': 'Type CONFIRMAR',
     'settings.delete_success': 'Your account has been successfully deleted.',
+    'settings.delete_blocked_subscription_google':
+      'You have an active subscription billed through Google Play. Cancel it in the Play Store (Subscriptions) or from Subscriptions in the app, then try deleting your account again.',
+    'settings.delete_blocked_subscription_apple':
+      'You have an active App Store subscription. Cancel it in Settings > Subscriptions (Apple ID) or from Subscriptions in the app, then try again.',
+    'settings.delete_blocked_subscription_stripe':
+      'You have an active subscription billed through the web (Stripe). Open Manage subscription in the app and cancel in the billing portal, then try again.',
+    'settings.delete_blocked_subscription_generic':
+      'You have an active subscription. Cancel it first from Subscriptions > Manage, then try again.',
     'settings.legal_section': 'Legal & privacy',
     'settings.privacy_policy': 'Privacy Policy',
     'settings.terms_of_service': 'Terms of Service',
@@ -1281,6 +1298,7 @@ const translations: Record<Language, Record<string, string>> = {
     'subscription.loading_subscribe': 'Processing subscription…',
     'subscription.loading_portal': 'Opening portal…',
     'subscription.loading_save_additional_branches': 'Saving additional branches…',
+    'subscription.loading_updating_subscription': 'Updating your subscription…',
     'subscription.apple_manage_title': 'Manage subscription (App Store)',
     'subscription.apple_manage_message':
       'Subscriptions purchased through Apple are managed in Settings > Apple ID > Subscriptions, or from your Apple Account page. We do not open the Stripe web portal for Apple billing.',

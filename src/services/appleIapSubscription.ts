@@ -7,6 +7,11 @@ export async function ensureIapConnection(): Promise<void> {
   /* no-op */
 }
 
+/** iOS: appleIapSubscription.ios.ts */
+export async function loadAppleSubscriptionCatalog(): Promise<unknown[]> {
+  return [];
+}
+
 export async function purchaseAppleSubscription(_plan: ApplePlanUiId): Promise<{ purchase: unknown }> {
   throw new Error('Apple IAP solo está disponible en iOS');
 }

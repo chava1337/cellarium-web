@@ -122,7 +122,10 @@ async function purchaseWithSku(sku: string): Promise<{ purchase: Purchase }> {
   }
   const fetched = await fetchProducts({ skus: skuList, type: 'subs' });
   const fetchedIds = new Set(
-    (fetched as ProductSubscription[]).map((p) => p.id).filter(Boolean)
+    (fetched as ProductSubscription[]).map((p) => {
+      const r = p as { id?: string; productId?: string };
+      return (r.productId ?? r.id ?? '').trim();
+    }).filter(Boolean)
   );
   if (__DEV__) {
     console.log('[GooglePlay] Fetched product IDs from Play:', [...fetchedIds]);

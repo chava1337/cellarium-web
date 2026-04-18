@@ -222,9 +222,18 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
             : `${err?.message ?? 'Error desconocido'}`;
 
           if (status === 409) {
+            const bp = user?.billing_provider;
+            const deleteBlockedMsg =
+              bp === 'google'
+                ? t('settings.delete_blocked_subscription_google')
+                : bp === 'apple'
+                  ? t('settings.delete_blocked_subscription_apple')
+                  : bp === 'stripe'
+                    ? t('settings.delete_blocked_subscription_stripe')
+                    : t('settings.delete_blocked_subscription_generic');
             Alert.alert(
               'No se puede eliminar la cuenta',
-              "Primero cancela tu suscripción desde 'Administrar suscripción'. Después podrás eliminar tu cuenta.",
+              deleteBlockedMsg,
               [
                 {
                   text: 'OK',

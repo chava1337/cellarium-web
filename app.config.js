@@ -28,7 +28,7 @@ const config = {
     name: "Cellarium",
     slug: "cellarium-wine-catalog",
     // Versión de marketing. Con appVersionSource: local en eas.json, EAS usa esta versión y android.versionCode del repo.
-    version: "1.0.8",
+    version: "1.0.9",
     orientation: "default",
     userInterfaceStyle: "light",
     // App Store, Play listing, iOS: PNG 1024×1024 recomendado.
@@ -66,7 +66,7 @@ const config = {
       orientation: "default",
       bundleIdentifier: "com.cellarium.winecatalog",
       // CFBundleVersion: debe ser > al último build subido a TestFlight/App Store.
-      buildNumber: "7",
+      buildNumber: "9",
       associatedDomains: [
         "applinks:cellarium.net",
         "applinks:www.cellarium.net"
@@ -85,7 +85,7 @@ const config = {
       package: "com.cellarium.winecatalog",
       // versionName en Gradle = expo.version. versionCode: entero monotónico por subida a Play (alinear con android/app/build.gradle).
       // Debe ser SIEMPRE mayor que el último subido a Play (Play rechaza duplicados).
-      versionCode: 7,
+      versionCode: 9,
       // Foreground: adaptive icon (dejar margen ~20–30% para la máscara del sistema).
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon-v2.png",
