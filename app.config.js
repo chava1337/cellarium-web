@@ -66,7 +66,7 @@ const config = {
       orientation: "default",
       bundleIdentifier: "com.cellarium.winecatalog",
       // CFBundleVersion: debe ser > al último build subido a TestFlight/App Store.
-      buildNumber: "9",
+      buildNumber: "8",
       associatedDomains: [
         "applinks:cellarium.net",
         "applinks:www.cellarium.net"
@@ -85,7 +85,7 @@ const config = {
       package: "com.cellarium.winecatalog",
       // versionName en Gradle = expo.version. versionCode: entero monotónico por subida a Play (alinear con android/app/build.gradle).
       // Debe ser SIEMPRE mayor que el último subido a Play (Play rechaza duplicados).
-      versionCode: 9,
+      versionCode: 8,
       // Foreground: adaptive icon (dejar margen ~20–30% para la máscara del sistema).
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon-v2.png",
