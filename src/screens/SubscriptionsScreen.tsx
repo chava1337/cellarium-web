@@ -59,20 +59,20 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { log } from '../utils/logger';
 import { getEffectivePlan } from '../utils/effectivePlan';
 import { isSensitiveAllowed } from '../utils/sensitiveActionGating';
+import { LEGAL_URLS, APPLE_STANDARD_EULA_URL } from '../config/legalUrls';
+import { openExternalLegalUrl } from '../utils/openExternalLegalUrl';
 import CellariumLoader from '../components/CellariumLoader';
 import { captureCriticalError, sentryFlowBreadcrumb } from '../utils/sentryContext';
-import { APPLE_IAP_PRODUCT_IDS, APPLE_SUBSCRIPTIONS_MANAGE_URL } from '../constants/appleIap';
+import { APPLE_SUBSCRIPTIONS_MANAGE_URL } from '../constants/appleIap';
 import {
   ensureIapConnection,
   finishApplePurchasesAfterBackendSync,
   finishAppleTransactionIfNeeded,
   getReceiptBase64,
-  loadAppleSubscriptionCatalog,
   purchaseAppleSubscription,
   purchaseAppleBranchAddon,
   restoreApplePurchasesForReceipt,
 } from '../services/appleIapSubscription';
-import type { Product, ProductSubscription } from 'react-native-iap';
 import { validateAppleReceiptBackend } from '../services/validateAppleReceipt';
 import { validateGooglePurchaseBackend, getCellariumAndroidPackageName } from '../services/validateGooglePurchase';
 import { finishGoogleTransactionIfNeeded } from '../services/googlePlayBilling';
@@ -265,9 +265,9 @@ interface Plan {
   price: number;
   currency: string;
   period: string;
-  /** Texto del importe en tarjeta de plan: prioridad precio de tienda (displayPrice); si no, `$NNN` como antes. */
+  /** Importe mostrado en tarjeta (MXN fijo en UI). */
   priceCardText: string;
-  /** Texto del importe donde hace falta moneda explícita (Stripe / upgrade): tienda o `$NNN MXN`. */
+  /** Importe con moneda explícita en modales / detalle (MXN fijo en UI). */
   priceDetailText: string;
   features: string[];
   limitations: {
@@ -279,42 +279,9 @@ interface Plan {
   lookupKey?: string; // Stripe: bistro_monthly | trattoria_monthly | grand_maison_monthly (no IAP)
 }
 
-/** Mismo SKU en App Store y Google Play para planes principales (ver constants). */
-/** SKUs alineados con `GOOGLE_PLAY_PRODUCT_IDS` / Play Console (`cellarium_*_monthly`). */
-const STORE_SKU_TO_MAIN_PLAN_ID: Record<string, 'bistro' | 'trattoria' | 'grand_maison'> = {
-  [APPLE_IAP_PRODUCT_IDS.bistro]: 'bistro',
-  [APPLE_IAP_PRODUCT_IDS.trattoria]: 'trattoria',
-  [APPLE_IAP_PRODUCT_IDS.grandMaison]: 'grand_maison',
-};
-
-/** Precio localizado para tarjetas: displayPrice de producto, luego ofertas / fases (Android Billing 5+). */
-function storeProductDisplayPrice(p: Product | ProductSubscription): string {
-  const d = p.displayPrice?.trim();
-  if (d) return d;
-  const ext = p as {
-    localizedPrice?: string | null;
-    subscriptionOffers?: { displayPrice?: string }[];
-    subscriptionOfferDetailsAndroid?: {
-      pricingPhases?: { pricingPhaseList?: { formattedPrice?: string; recurrenceMode?: number }[] };
-    }[];
-  };
-  const l = typeof ext.localizedPrice === 'string' ? ext.localizedPrice.trim() : '';
-  if (l) return l;
-  const fromOffer = ext.subscriptionOffers?.[0]?.displayPrice?.trim();
-  if (fromOffer) return fromOffer;
-  const phases = ext.subscriptionOfferDetailsAndroid?.[0]?.pricingPhases?.pricingPhaseList;
-  if (phases?.length) {
-    const base =
-      phases.find((ph) => ph.recurrenceMode === 2) ?? phases[phases.length - 1];
-    const fp = base?.formattedPrice?.trim();
-    if (fp) return fp;
-  }
-  return '';
-}
-
-/** Fallback numérico list price (MXN) cuando el catálogo de tienda aún no está disponible; origen canónico de precio visible es la store. */
-const PRICE_BISTRO_MXN = 1499;
-const PRICE_TRATTORIA_MXN = 2499;
+/** Precios mensuales visibles (MXN); fijos en UI; el cobro real sigue siendo el de la tienda / Stripe. */
+const PRICE_BISTRO_MXN = 1799;
+const PRICE_TRATTORIA_MXN = 2949;
 const PRICE_GRAND_MAISON_MXN = 4499;
 /** Sucursales base incluidas (modelo canónico). */
 const BASE_BRANCHES_INCLUDED = 1;
@@ -400,6 +367,58 @@ function CurrentStatusCard({
   );
 }
 
+/** Enlaces EULA + privacidad (Guideline 3.1.2). Reutilizado arriba del listado café y junto al CTA. */
+function SubscriptionLegalLinksRow({
+  styles,
+  t,
+  variant = 'inline',
+}: {
+  styles: StylesRecord;
+  t: (key: string) => string;
+  variant?: 'inline' | 'standalone';
+}) {
+  const rowStyle =
+    variant === 'standalone'
+      ? [styles.planLegalLinksRow, styles.planLegalLinksRowStandalone]
+      : styles.planLegalLinksRow;
+
+  return (
+    <View style={rowStyle}>
+      <TouchableOpacity
+        onPress={() =>
+          void openExternalLegalUrl(
+            APPLE_STANDARD_EULA_URL,
+            t('msg.error'),
+            t('settings.link_open_error')
+          )
+        }
+        hitSlop={{ top: 10, bottom: 6, left: 4, right: 4 }}
+        accessibilityRole="link"
+        accessibilityLabel={t('subscription.paywall_terms_eula')}
+      >
+        <Text style={styles.planLegalLink}>{t('subscription.paywall_terms_eula')}</Text>
+      </TouchableOpacity>
+      <Text style={styles.planLegalSep} accessible={false}>
+        {' · '}
+      </Text>
+      <TouchableOpacity
+        onPress={() =>
+          void openExternalLegalUrl(
+            LEGAL_URLS.privacyPolicy,
+            t('msg.error'),
+            t('settings.link_open_error')
+          )
+        }
+        hitSlop={{ top: 10, bottom: 6, left: 4, right: 4 }}
+        accessibilityRole="link"
+        accessibilityLabel={t('subscription.paywall_privacy')}
+      >
+        <Text style={styles.planLegalLink}>{t('subscription.paywall_privacy')}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 function PlanCard({
   styles,
   plan,
@@ -419,6 +438,14 @@ function PlanCard({
   inSelectionBundle?: boolean;
 }) {
   const isFree = plan.id === 'cafe';
+  useEffect(() => {
+    console.log('[Cellarium][PlanCard] RENDER PRICE', {
+      id: plan.id,
+      price: plan.price,
+      priceCardText: plan.priceCardText,
+      priceDetailText: plan.priceDetailText,
+    });
+  }, [plan.id, plan.price, plan.priceCardText, plan.priceDetailText]);
   return (
     <TouchableOpacity
       style={[
@@ -438,9 +465,9 @@ function PlanCard({
         <Text style={styles.planName}>{plan.name}</Text>
         <View style={styles.priceContainer}>
           <Text style={styles.priceAmount}>
-            {plan.price === 0 ? labels.priceFree : plan.priceCardText}
+            {isFree ? labels.priceFree : plan.priceCardText}
           </Text>
-          {plan.price > 0 && (
+          {!isFree && (
             <Text style={styles.pricePeriod}>/{plan.period}</Text>
           )}
         </View>
@@ -699,44 +726,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   const isAndroid = isAndroidBillingApp();
   const useStripeSubscriptionUi = shouldUseStripeSubscriptionUi();
   const lastAppleSyncAtRef = useRef(0);
-  const { playSubscriptions, buySubscription, restorePurchases: restoreGooglePlayPurchases } =
-    useGooglePlayBilling();
-  const [iosStoreProducts, setIosStoreProducts] = useState<Product[]>([]);
-
-  useEffect(() => {
-    if (Platform.OS !== 'ios') return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = (await loadAppleSubscriptionCatalog()) as Product[];
-        if (!cancelled) setIosStoreProducts(list);
-      } catch (e) {
-        if (__DEV__) console.warn('[SubscriptionsScreen] loadAppleSubscriptionCatalog', e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const storePriceByMainPlanId = useMemo(() => {
-    const out: Partial<Record<'bistro' | 'trattoria' | 'grand_maison', string>> = {};
-    const ingest = (sku: string, label: string) => {
-      const planId = STORE_SKU_TO_MAIN_PLAN_ID[sku];
-      if (planId && label) out[planId] = label;
-    };
-    const list: ProductSubscription[] | Product[] =
-      Platform.OS === 'android' ? playSubscriptions : iosStoreProducts;
-    for (const p of list) {
-      const raw = p as { id?: string; productId?: string };
-      // En Android (OpenIAP) el id de producto canónico suele ir en productId; id puede diferir del SKU de Play Console.
-      const sku = (raw.productId ?? raw.id ?? '').trim();
-      if (!sku) continue;
-      const label = storeProductDisplayPrice(p);
-      if (label) ingest(sku, label);
-    }
-    return out;
-  }, [playSubscriptions, iosStoreProducts]);
+  const { buySubscription, restorePurchases: restoreGooglePlayPurchases } = useGooglePlayBilling();
 
   useFocusEffect(
     useCallback(() => {
@@ -991,16 +981,13 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   const mainPlans = useMemo((): Plan[] => {
     const period = t('subscription.period_month');
     const mxn = 'MXN';
-    const premiumTexts = (id: 'bistro' | 'trattoria' | 'grand_maison', fallback: number) => {
-      const fromStore = storePriceByMainPlanId[id];
-      return {
-        priceCardText: fromStore ?? `$${fallback}`,
-        priceDetailText: fromStore ?? `$${fallback} ${mxn}`,
-      };
-    };
-    const bistroT = premiumTexts('bistro', PRICE_BISTRO_MXN);
-    const trattoriaT = premiumTexts('trattoria', PRICE_TRATTORIA_MXN);
-    const grandT = premiumTexts('grand_maison', PRICE_GRAND_MAISON_MXN);
+    const premiumTexts = (amountMxn: number) => ({
+      priceCardText: `$${amountMxn}`,
+      priceDetailText: `$${amountMxn} ${mxn}`,
+    });
+    const bistroT = premiumTexts(PRICE_BISTRO_MXN);
+    const trattoriaT = premiumTexts(PRICE_TRATTORIA_MXN);
+    const grandT = premiumTexts(PRICE_GRAND_MAISON_MXN);
     return [
       {
         id: 'cafe',
@@ -1071,7 +1058,19 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         blockedFeatures: [],
       },
     ];
-  }, [t, storePriceByMainPlanId]);
+  }, [t]);
+
+  useEffect(() => {
+    for (const plan of mainPlans) {
+      if (plan.id === 'cafe') continue;
+      console.log('[Cellarium][Subscriptions] PLAN DEBUG', {
+        id: plan.id,
+        price: plan.price,
+        priceCardText: plan.priceCardText,
+        priceDetailText: plan.priceDetailText,
+      });
+    }
+  }, [mainPlans]);
 
   const effectivePlan = getEffectivePlan(user ?? null);
   const hasActiveSub = effectivePlan !== 'cafe';
@@ -1972,7 +1971,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     if (planMode !== 'cafe') setSelectedPlan(null);
   }, [planMode]);
 
-  const plansForFreeUsers = useMemo(() => mainPlans.filter((p) => p.id !== 'cafe'), []);
+  const plansForFreeUsers = useMemo(() => mainPlans.filter((p) => p.id !== 'cafe'), [mainPlans]);
 
   const expirationRowLabel = useMemo(() => {
     if (cancelScheduled) return t('subscription.access_until');
@@ -2248,6 +2247,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
 
         {planMode === 'cafe' && (
           <>
+            {(!selectedPlan || selectedPlan === 'cafe') && (
+              <SubscriptionLegalLinksRow styles={styles} t={t} variant="standalone" />
+            )}
             {plansForFreeUsers.map((plan) => {
               const isSelected = selectedPlan === plan.id;
               const showInlineSubscribe = isSelected && selectedPlan !== 'cafe';
@@ -2265,6 +2267,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                         inSelectionBundle
                       />
                       <View style={styles.planBundleCtaZone}>
+                        <SubscriptionLegalLinksRow styles={styles} t={t} variant="inline" />
                         <TouchableOpacity
                           style={[
                             styles.ctaButtonPrimary,
@@ -2687,6 +2690,31 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     borderTopWidth: 1,
     borderTopColor: CELLARIUM.border,
+  },
+  planLegalLinksRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingTop: 4,
+  },
+  /** Separación respecto a la primera tarjeta de plan (bloque café, sin selección). */
+  planLegalLinksRowStandalone: {
+    marginBottom: CELLARIUM_LAYOUT.sectionGap,
+    paddingTop: 0,
+  },
+  planLegalLink: {
+    ...CELLARIUM_TEXT.caption,
+    fontSize: 13,
+    lineHeight: 18,
+    color: PALETTE.primary,
+    textDecorationLine: 'underline',
+  },
+  planLegalSep: {
+    ...CELLARIUM_TEXT.caption,
+    fontSize: 13,
+    color: CELLARIUM.muted,
   },
   planCardBase: {
     backgroundColor: CELLARIUM.card,

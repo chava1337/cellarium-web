@@ -9,7 +9,6 @@ import {
   TextInput,
   ScrollView,
   ActivityIndicator,
-  Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -23,6 +22,7 @@ import { supabase } from '../lib/supabase';
 import { CELLARIUM, CELLARIUM_LAYOUT } from '../theme/cellariumTheme';
 import { CellariumHeader, IosHeaderBackSlot } from '../components/cellarium';
 import { LEGAL_URLS } from '../config/legalUrls';
+import { openExternalLegalUrl } from '../utils/openExternalLegalUrl';
 import { resolveDisplayName } from '../utils/resolveDisplayName';
 
 type SettingsScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Settings'>;
@@ -64,28 +64,6 @@ async function extractFunctionsHttpErrorDetails(
   } catch (e) {
     if (__DEV__) console.log('[delete-user-account] extractFunctionsHttpErrorDetails failed:', e);
     return null;
-  }
-}
-
-async function openExternalLegalUrl(
-  url: string,
-  errorTitle: string,
-  errorMessage: string
-): Promise<void> {
-  const trimmed = url.trim();
-  if (!trimmed) {
-    Alert.alert(errorTitle, errorMessage);
-    return;
-  }
-  try {
-    const supported = await Linking.canOpenURL(trimmed);
-    if (!supported) {
-      Alert.alert(errorTitle, errorMessage);
-      return;
-    }
-    await Linking.openURL(trimmed);
-  } catch {
-    Alert.alert(errorTitle, errorMessage);
   }
 }
 

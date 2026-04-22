@@ -374,6 +374,8 @@ const translations: Record<Language, Record<string, string>> = {
 
     // Subscription screen (SubscriptionsScreen)
     'subscription.screen_title': 'Suscripciones',
+    'subscription.paywall_terms_eula': 'Términos de uso (EULA)',
+    'subscription.paywall_privacy': 'Política de privacidad',
     'subscription.android_play_coming_title': 'Google Play',
     'subscription.android_play_coming_message':
       'La suscripción en Android usa Google Play. Elige un plan abajo o revisa tus suscripciones en Google Play si ya pagaste.',
@@ -771,6 +773,8 @@ const translations: Record<Language, Record<string, string>> = {
     'global_catalog.vinification': 'Vinificación',
     'global_catalog.close': 'Cerrar',
     'global_catalog.add_to_catalog': 'Agregar al Catálogo',
+    'global_catalog.add_form_vintage_label': 'Añada (opcional)',
+    'global_catalog.add_form_vintage_placeholder': 'Ej. 2018',
     'global_catalog.restaurant_name_required': 'Nombre del restaurante requerido',
     'global_catalog.restaurant_name_owner_msg': 'Antes de agregar vinos debes definir el nombre de tu restaurante o centro de consumo. Puedes editarlo desde Gestión de Sucursales.',
     'global_catalog.restaurant_name_staff_msg': 'El owner debe definir el nombre del restaurante o centro de consumo antes de agregar vinos. Contacta al responsable para que lo configure.',
@@ -1143,6 +1147,8 @@ const translations: Record<Language, Record<string, string>> = {
 
     // Subscription screen (SubscriptionsScreen)
     'subscription.screen_title': 'Subscriptions',
+    'subscription.paywall_terms_eula': 'Terms of Use (EULA)',
+    'subscription.paywall_privacy': 'Privacy Policy',
     'subscription.android_play_coming_title': 'Google Play',
     'subscription.android_play_coming_message':
       'Android subscriptions use Google Play. Pick a plan below, or check your subscriptions in Google Play if you already paid.',
@@ -1541,6 +1547,8 @@ const translations: Record<Language, Record<string, string>> = {
     'global_catalog.vinification': 'Vinification',
     'global_catalog.close': 'Close',
     'global_catalog.add_to_catalog': 'Add to Catalog',
+    'global_catalog.add_form_vintage_label': 'Vintage (optional)',
+    'global_catalog.add_form_vintage_placeholder': 'e.g. 2018',
     'global_catalog.restaurant_name_required': 'Restaurant Name Required',
     'global_catalog.restaurant_name_owner_msg': 'Before adding wines, you must define your restaurant or consumption center name. You can edit it from Branch Management.',
     'global_catalog.restaurant_name_staff_msg': 'The owner must define the restaurant or consumption center name before adding wines. Contact the responsible person to configure it.',
