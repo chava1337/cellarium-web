@@ -524,6 +524,13 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  }
  return isAdded;
  }, [addedWineIds]);
+ const hasActiveSearch = debouncedSearchQuery.trim().length > 0;
+ const handleAddManualWine = useCallback(() => {
+ if (!ensureBranchNameConfigured()) {
+ return;
+ }
+ navigation.navigate('WineManagement');
+ }, [ensureBranchNameConfigured, navigation]);
 
  if (!profileReady) {
  return (
@@ -663,6 +670,20 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  </View>
  );
  });
+ const formatCardGrapes = (grapes: GlobalWine['grapes']): string => {
+ if (!grapes) return '';
+ if (Array.isArray(grapes)) {
+ return grapes
+   .map((g) => (typeof g === 'string' ? g.replace(/\uFFFD/g, '').trim() : ''))
+   .filter(Boolean)
+   .join(', ');
+ }
+ if (typeof grapes === 'string') {
+ return grapes.replace(/\uFFFD/g, '').trim();
+ }
+ return '';
+ };
+
  const renderWineCard = ({ item }: { item: GlobalWine }) => (
  <View style={styles.cardRow}>
  {/* Columna izquéerda: Thumbnail */}
@@ -707,6 +728,15 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  return null;
  })()}
  </View>
+ {(() => {
+ const grapesLine = formatCardGrapes(item.grapes);
+ if (!grapesLine) return null;
+ return (
+ <Text style={styles.cardGrapesText} numberOfLines={2} ellipsizeMode="tail">
+ {grapesLine}
+ </Text>
+ );
+ })()}
  {(() => {
  const colorValue = typeof item.color === 'string'
    ? item.color
@@ -1128,8 +1158,24 @@ onRequestClose={() => setShowSearchModal(false)}
  </View>
  ) : wines.length === 0 ? (
  <View style={styles.emptyContainer}>
- <Ionicons name="wine-outline" size={80} color="#ccc" />
- <Text style={styles.emptyText}>{t('global_catalog.no_wines')}</Text>
+{hasActiveSearch ? (
+  <View style={styles.emptyCard}>
+    <Ionicons name="wine-outline" size={56} color={CELLARIUM.primary} />
+    <Text style={styles.emptyTitle}>{t('global_catalog.search_empty_title')}</Text>
+    <Text style={styles.emptyDescription}>{t('global_catalog.search_empty_message')}</Text>
+    <Text style={styles.emptyDescription}>{t('global_catalog.search_empty_additional_message')}</Text>
+    <Text style={styles.emptyEmail}>noirsongstudios@gmail.com</Text>
+    <Text style={styles.emptyDescription}>{t('global_catalog.search_empty_manual_hint')}</Text>
+    <TouchableOpacity style={styles.emptyManualButton} onPress={handleAddManualWine}>
+      <Text style={styles.emptyManualButtonText}>{t('global_catalog.search_empty_manual_cta')}</Text>
+    </TouchableOpacity>
+  </View>
+) : (
+  <>
+    <Ionicons name="wine-outline" size={80} color="#ccc" />
+    <Text style={styles.emptyText}>{t('global_catalog.no_wines')}</Text>
+  </>
+)}
  </View>
  ) : (
  <FlatList
@@ -1309,7 +1355,8 @@ const styles = StyleSheet.create({
  cardRow: {
  backgroundColor: '#fff',
  borderRadius: 12,
- padding: 12,
+ paddingVertical: 13,
+ paddingHorizontal: 12,
  marginBottom: 8,
  flexDirection: 'row',
  alignItems: 'center',
@@ -1320,8 +1367,8 @@ const styles = StyleSheet.create({
  shadowRadius: 3,
  },
  cardThumb: {
- width: 86,
- height: 110,
+ width: 88,
+ height: 114,
  borderRadius: 10,
  backgroundColor: '#f7f7f7',
  overflow: 'hidden',
@@ -1348,37 +1395,43 @@ const styles = StyleSheet.create({
  paddingRight: 10,
  },
  cardWinery: {
- fontSize: 14,
+ fontSize: 13,
  fontWeight: '600',
  color: '#924048',
- marginBottom: 3,
+ marginBottom: 2,
  },
  cardTitle: {
- fontSize: 16,
+ fontSize: 15,
  fontWeight: 'bold',
  color: '#333',
- marginBottom: 6,
- lineHeight: 20,
+ marginBottom: 5,
+ lineHeight: 19,
  },
  cardInfoRow: {
  flexDirection: 'row',
  alignItems: 'center',
- marginBottom: 6,
+ marginBottom: 4,
  },
  cardInfoText: {
- fontSize: 12,
+ fontSize: 11,
  color: '#666',
+ },
+ cardGrapesText: {
+ fontSize: 11,
+ color: '#666',
+ lineHeight: 14,
+ marginBottom: 4,
  },
  cardColorTag: {
  alignSelf: 'flex-start',
  backgroundColor: '#f0f0f0',
- paddingVertical: 3,
+ paddingVertical: 2,
  paddingHorizontal: 8,
  borderRadius: 8,
- marginTop: 2,
+ marginTop: 0,
  },
  cardColorText: {
- fontSize: 11,
+ fontSize: 10,
  color: '#666',
  fontWeight: '500',
  },
@@ -1456,11 +1509,71 @@ const styles = StyleSheet.create({
  flex: 1,
  justifyContent: 'center',
  alignItems: 'center',
+ paddingHorizontal: 20,
  },
  emptyText: {
  marginTop: 15,
  fontSize: 18,
  color: '#999',
+ },
+ emptyCard: {
+ width: '100%',
+ maxWidth: 460,
+ backgroundColor: '#fff',
+ borderRadius: 18,
+ borderWidth: 1,
+ borderColor: 'rgba(0,0,0,0.06)',
+ paddingVertical: 24,
+ paddingHorizontal: 20,
+ alignItems: 'center',
+ shadowColor: '#000',
+ shadowOffset: { width: 0, height: 4 },
+ shadowOpacity: 0.08,
+ shadowRadius: 12,
+ elevation: 3,
+ },
+ emptyTitle: {
+ marginTop: 14,
+ fontSize: 21,
+ fontWeight: '700',
+ color: CELLARIUM.primaryDark,
+ textAlign: 'center',
+ lineHeight: 28,
+ },
+ emptyDescription: {
+ marginTop: 10,
+ fontSize: 15,
+ lineHeight: 22,
+ color: '#5E5E5E',
+ textAlign: 'center',
+ },
+ emptyEmail: {
+ marginTop: 10,
+ fontSize: 15,
+ lineHeight: 21,
+ fontWeight: '700',
+ color: CELLARIUM.primary,
+ textAlign: 'center',
+ },
+ emptyManualButton: {
+ marginTop: 18,
+ backgroundColor: CELLARIUM.primary,
+ borderRadius: 12,
+ paddingVertical: 12,
+ paddingHorizontal: 18,
+ minWidth: 220,
+ alignItems: 'center',
+ justifyContent: 'center',
+ shadowColor: '#000',
+ shadowOffset: { width: 0, height: 3 },
+ shadowOpacity: 0.12,
+ shadowRadius: 7,
+ elevation: 3,
+ },
+ emptyManualButtonText: {
+ color: CELLARIUM.textOnDark,
+ fontSize: 15,
+ fontWeight: '700',
  },
  // ✅ FASE 3: Estilos de paginación eliminados (paginationContainer, paginationNumbers, pageButton, etc.)
  // ✅ FASE 3: Estilos para scroll infinito

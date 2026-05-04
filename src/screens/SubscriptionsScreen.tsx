@@ -63,12 +63,13 @@ import { LEGAL_URLS, APPLE_STANDARD_EULA_URL } from '../config/legalUrls';
 import { openExternalLegalUrl } from '../utils/openExternalLegalUrl';
 import CellariumLoader from '../components/CellariumLoader';
 import { captureCriticalError, sentryFlowBreadcrumb } from '../utils/sentryContext';
-import { APPLE_SUBSCRIPTIONS_MANAGE_URL } from '../constants/appleIap';
+import { APPLE_IAP_PRODUCT_IDS, APPLE_SUBSCRIPTIONS_MANAGE_URL } from '../constants/appleIap';
 import {
   ensureIapConnection,
   finishApplePurchasesAfterBackendSync,
   finishAppleTransactionIfNeeded,
   getReceiptBase64,
+  loadAppleSubscriptionCatalog,
   purchaseAppleSubscription,
   purchaseAppleBranchAddon,
   restoreApplePurchasesForReceipt,
@@ -278,6 +279,12 @@ interface Plan {
   blockedFeatures: string[];
   lookupKey?: string; // Stripe: bistro_monthly | trattoria_monthly | grand_maison_monthly (no IAP)
 }
+
+type IosStorePlanPrice = {
+  displayPrice: string;
+  rawPrice: number | null;
+  currency: string | null;
+};
 
 /** Precios mensuales visibles (MXN); fijos en UI; el cobro real sigue siendo el de la tienda / Stripe. */
 const PRICE_BISTRO_MXN = 1799;
@@ -725,6 +732,10 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   const isIos = Platform.OS === 'ios';
   const isAndroid = isAndroidBillingApp();
   const useStripeSubscriptionUi = shouldUseStripeSubscriptionUi();
+  const [iosStorePricesByPlan, setIosStorePricesByPlan] = useState<
+    Partial<Record<'bistro' | 'trattoria' | 'grand_maison', IosStorePlanPrice>>
+  >({});
+  const [iosStoreCatalogLoaded, setIosStoreCatalogLoaded] = useState(false);
   const lastAppleSyncAtRef = useRef(0);
   const { buySubscription, restorePurchases: restoreGooglePlayPurchases } = useGooglePlayBilling();
 
@@ -978,6 +989,79 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    if (!isIos) return;
+    let cancelled = false;
+
+    const extractDisplayPrice = (p: unknown): string | null => {
+      const product = p as {
+        displayPrice?: string;
+        localizedPrice?: string;
+        priceString?: string;
+      };
+      return product.displayPrice ?? product.localizedPrice ?? product.priceString ?? null;
+    };
+
+    const extractPriceNumber = (p: unknown): number | null => {
+      const product = p as { price?: number | string };
+      if (typeof product.price === 'number' && Number.isFinite(product.price)) return product.price;
+      if (typeof product.price === 'string') {
+        const parsed = Number(product.price);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      return null;
+    };
+
+    const extractCurrency = (p: unknown): string | null => {
+      const product = p as { currencyCode?: string; currency?: string };
+      return product.currencyCode ?? product.currency ?? null;
+    };
+
+    const extractProductId = (p: unknown): string => {
+      const product = p as { id?: string; productId?: string };
+      return product.id ?? product.productId ?? '';
+    };
+
+    const loadCatalog = async () => {
+      try {
+        setIosStoreCatalogLoaded(false);
+        const products = await loadAppleSubscriptionCatalog();
+        if (cancelled) return;
+
+        const bySku = new Map<string, IosStorePlanPrice>();
+        for (const product of products) {
+          const productId = extractProductId(product);
+          const displayPrice = extractDisplayPrice(product);
+          if (!productId || !displayPrice) continue;
+          bySku.set(productId, {
+            displayPrice,
+            rawPrice: extractPriceNumber(product),
+            currency: extractCurrency(product),
+          });
+        }
+
+        const next: Partial<Record<'bistro' | 'trattoria' | 'grand_maison', IosStorePlanPrice>> = {
+          bistro: bySku.get(APPLE_IAP_PRODUCT_IDS.bistro),
+          trattoria: bySku.get(APPLE_IAP_PRODUCT_IDS.trattoria),
+          grand_maison: bySku.get(APPLE_IAP_PRODUCT_IDS.grandMaison),
+        };
+
+        if (__DEV__) console.log('[SUBS][iOS] StoreKit mapped prices', next);
+        setIosStorePricesByPlan(next);
+      } catch (error) {
+        if (__DEV__) console.warn('[SUBS][iOS] Failed loading StoreKit catalog', error);
+        setIosStorePricesByPlan({});
+      } finally {
+        if (!cancelled) setIosStoreCatalogLoaded(true);
+      }
+    };
+
+    void loadCatalog();
+    return () => {
+      cancelled = true;
+    };
+  }, [isIos]);
+
   const mainPlans = useMemo((): Plan[] => {
     const period = t('subscription.period_month');
     const mxn = 'MXN';
@@ -985,9 +1069,28 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       priceCardText: `$${amountMxn}`,
       priceDetailText: `$${amountMxn} ${mxn}`,
     });
-    const bistroT = premiumTexts(PRICE_BISTRO_MXN);
-    const trattoriaT = premiumTexts(PRICE_TRATTORIA_MXN);
-    const grandT = premiumTexts(PRICE_GRAND_MAISON_MXN);
+    const bistroStorePrice = iosStorePricesByPlan.bistro?.displayPrice;
+    const trattoriaStorePrice = iosStorePricesByPlan.trattoria?.displayPrice;
+    const grandStorePrice = iosStorePricesByPlan.grand_maison?.displayPrice;
+    const loadingStorePriceLabel = language === 'en' ? 'Loading price...' : 'Cargando precio...';
+    const bistroT = isIos
+      ? {
+          priceCardText: bistroStorePrice ?? loadingStorePriceLabel,
+          priceDetailText: bistroStorePrice ?? loadingStorePriceLabel,
+        }
+      : premiumTexts(PRICE_BISTRO_MXN);
+    const trattoriaT = isIos
+      ? {
+          priceCardText: trattoriaStorePrice ?? loadingStorePriceLabel,
+          priceDetailText: trattoriaStorePrice ?? loadingStorePriceLabel,
+        }
+      : premiumTexts(PRICE_TRATTORIA_MXN);
+    const grandT = isIos
+      ? {
+          priceCardText: grandStorePrice ?? loadingStorePriceLabel,
+          priceDetailText: grandStorePrice ?? loadingStorePriceLabel,
+        }
+      : premiumTexts(PRICE_GRAND_MAISON_MXN);
     return [
       {
         id: 'cafe',
@@ -1012,8 +1115,8 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       {
         id: 'bistro',
         name: t('subscription.plan_name.bistro'),
-        price: PRICE_BISTRO_MXN,
-        currency: 'MXN',
+        price: iosStorePricesByPlan.bistro?.rawPrice ?? PRICE_BISTRO_MXN,
+        currency: iosStorePricesByPlan.bistro?.currency ?? 'MXN',
         period,
         priceCardText: bistroT.priceCardText,
         priceDetailText: bistroT.priceDetailText,
@@ -1030,8 +1133,8 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       {
         id: 'trattoria',
         name: t('subscription.plan_name.trattoria'),
-        price: PRICE_TRATTORIA_MXN,
-        currency: 'MXN',
+        price: iosStorePricesByPlan.trattoria?.rawPrice ?? PRICE_TRATTORIA_MXN,
+        currency: iosStorePricesByPlan.trattoria?.currency ?? 'MXN',
         period,
         priceCardText: trattoriaT.priceCardText,
         priceDetailText: trattoriaT.priceDetailText,
@@ -1047,8 +1150,8 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       {
         id: 'grand_maison',
         name: t('subscription.plan_name.grand_maison'),
-        price: PRICE_GRAND_MAISON_MXN,
-        currency: 'MXN',
+        price: iosStorePricesByPlan.grand_maison?.rawPrice ?? PRICE_GRAND_MAISON_MXN,
+        currency: iosStorePricesByPlan.grand_maison?.currency ?? 'MXN',
         period,
         priceCardText: grandT.priceCardText,
         priceDetailText: grandT.priceDetailText,
@@ -1058,7 +1161,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         blockedFeatures: [],
       },
     ];
-  }, [t]);
+  }, [t, isIos, iosStorePricesByPlan, language]);
 
   useEffect(() => {
     for (const plan of mainPlans) {
@@ -1075,6 +1178,15 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   const effectivePlan = getEffectivePlan(user ?? null);
   const hasActiveSub = effectivePlan !== 'cafe';
   const isPremium = hasActiveSub;
+  const canPurchaseSelectedPlanOnIos = useMemo(() => {
+    if (!isIos || !selectedPlan) return true;
+    if (!iosStoreCatalogLoaded) return false;
+    if (selectedPlan === 'cafe') return true;
+    if (selectedPlan === 'bistro') return Boolean(iosStorePricesByPlan.bistro?.displayPrice);
+    if (selectedPlan === 'trattoria') return Boolean(iosStorePricesByPlan.trattoria?.displayPrice);
+    if (selectedPlan === 'grand_maison') return Boolean(iosStorePricesByPlan.grand_maison?.displayPrice);
+    return false;
+  }, [isIos, selectedPlan, iosStorePricesByPlan, iosStoreCatalogLoaded]);
   const showStripeAddonUi =
     useStripeSubscriptionUi &&
     !isIos &&
@@ -1116,6 +1228,15 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         'Verificación requerida',
         'Verifica tu correo en el bloque de arriba para poder suscribirte.',
         [{ text: 'Entendido', style: 'cancel' }]
+      );
+      return;
+    }
+    if (isIos && !canPurchaseSelectedPlanOnIos) {
+      Alert.alert(
+        t('msg.error'),
+        language === 'en'
+          ? 'We are still loading the official App Store price. Please wait a moment and try again.'
+          : 'Aun estamos cargando el precio oficial de App Store. Espera un momento e intenta de nuevo.'
       );
       return;
     }
@@ -2271,10 +2392,11 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                         <TouchableOpacity
                           style={[
                             styles.ctaButtonPrimary,
-                            (isProcessing || needsEmailVerification) && styles.buttonDisabled,
+                            (isProcessing || needsEmailVerification || (isIos && !canPurchaseSelectedPlanOnIos)) &&
+                              styles.buttonDisabled,
                           ]}
                           onPress={handleSubscribe}
-                          disabled={isProcessing || needsEmailVerification}
+                          disabled={isProcessing || needsEmailVerification || (isIos && !canPurchaseSelectedPlanOnIos)}
                         >
                           {isProcessing ? (
                             <ActivityIndicator color={CELLARIUM.card} size="small" />

@@ -870,6 +870,15 @@ export async function checkWineExistsInCatalog(
 /**
  * Agrega un vino del catálogo global al catálogo del tenant
  */
+/** Misma regla que al guardar desde Inventario: coma → string; si no, número o texto tal cual. */
+function normalizeVintageForWineInsert(raw?: string | null): number | string | null {
+  const v = raw?.trim();
+  if (!v) return null;
+  if (v.includes(',')) return v;
+  const n = parseInt(v, 10);
+  return (Number.isFinite(n) && n) ? n : v;
+}
+
 export async function addWineToUserCatalog({
   tenantId,
   branchId,
@@ -878,6 +887,7 @@ export async function addWineToUserCatalog({
   price,
   initialQty,
   priceGlass,
+  vintage,
   canonicalWine,
 }: {
   tenantId: string;
@@ -887,6 +897,8 @@ export async function addWineToUserCatalog({
   price?: number;
   initialQty?: number;
   priceGlass?: number;
+  /** Añada / vintage opcional (una o varias separadas por coma). */
+  vintage?: string;
   canonicalWine?: Partial<GlobalWine>;
 }) {
   // Obtener detalles canónicos (para el nombre) solo si no vienen en parámetros o si falta abv
@@ -1033,9 +1045,7 @@ export async function addWineToUserCatalog({
   let wineId = existingByCanonical?.id;
 
   if (!wineId) {
-    // NOTA: vintage ya no existe en wines_canonical
-    // El usuario puede agregar la añada manualmente después de agregar el vino a su catálogo
-    const numericVintage: number | null = null;
+    const resolvedVintage = normalizeVintageForWineInsert(vintage);
     
     // Verificar si el nombre del vino es igual al nombre de la bodega
     // Si son iguales (o si no hay label pero sí winery), solo mostrar el nombre y dejar bodega vacía
@@ -1047,6 +1057,7 @@ export async function addWineToUserCatalog({
     
     const finalName = wineNameToUse;
     const finalWinery = isNameEqualToWinery ? '' : canonicalWinery;
+    const insertedWineType = mapColorToType((canonical as any).color);
     
     // Calcular niveles sensoriales antes de insertar
     const bodyLevel = (() => {
@@ -1070,13 +1081,16 @@ export async function addWineToUserCatalog({
       if (!Number.isFinite(num) || num <= 0) return null;
       return Math.max(1, Math.min(5, Math.round(num / 20)));
     })();
-    const intensityLevel = (() => {
-      const tannin = canonical.tasting_profile?.tannin;
-      if (tannin == null || tannin === undefined) return null;
-      const num = typeof tannin === 'number' ? tannin : parseFloat(String(tannin));
-      if (!Number.isFinite(num) || num <= 0) return null;
-      return Math.max(1, Math.min(5, Math.round(num / 20)));
-    })();
+    // Tanicidad → intensity_level solo aplica a tintos (no rosados).
+    const intensityLevel = insertedWineType === 'red'
+      ? (() => {
+          const tannin = canonical.tasting_profile?.tannin;
+          if (tannin == null || tannin === undefined) return null;
+          const num = typeof tannin === 'number' ? tannin : parseFloat(String(tannin));
+          if (!Number.isFinite(num) || num <= 0) return null;
+          return Math.max(1, Math.min(5, Math.round(num / 20)));
+        })()
+      : null;
     const fizzinessLevel = (() => {
       const fizziness = canonical.tasting_profile?.fizziness;
       if (fizziness == null || fizziness === undefined) return null;
@@ -1107,7 +1121,7 @@ export async function addWineToUserCatalog({
         canonical_wine_id: canonicalWineId,
         name: finalName,
         winery: finalWinery,
-        vintage: numericVintage,
+        vintage: resolvedVintage,
         grape_variety: (() => {
           const grapes = canonical.grapes;
           if (!grapes) return '';
@@ -1135,7 +1149,7 @@ export async function addWineToUserCatalog({
           
           return '';
         })(),
-        type: mapColorToType((canonical as any).color),
+        type: insertedWineType,
         region: getBilingualValue(canonical.region, 'es') || '',
         country: getBilingualValue(canonical.country, 'es') || '',
         alcohol_content: (() => {
@@ -1286,7 +1300,7 @@ export const mapColorToType = (
 
 /**
  * Orden y conjunto de claves de `taste_profile` visibles según tipo de vino.
- * Debe coincidir con `WineCatalogScreen` (espumoso: burbujeo; blanco/postre: sin taninos; tinto/rosado: sin burbujeo).
+ * Debe coincidir con `WineCatalogScreen` (espumoso: burbujeo; blanco/rosado/postre/fortificado: sin taninos; tinto: taninos, sin burbujeo).
  */
 export function getTasteProfileKeyOrderForWineType(
   wineType: ReturnType<typeof mapColorToType>
@@ -1294,7 +1308,7 @@ export function getTasteProfileKeyOrderForWineType(
   if (wineType === 'sparkling') {
     return ['body', 'acidity', 'fizziness'];
   }
-  if (wineType === 'white' || wineType === 'dessert' || wineType === 'fortified') {
+  if (wineType === 'white' || wineType === 'rose' || wineType === 'dessert' || wineType === 'fortified') {
     return ['body', 'sweetness', 'acidity'];
   }
   return ['body', 'tannin', 'sweetness', 'acidity'];

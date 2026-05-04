@@ -52,6 +52,9 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
   const [priceBottle, setPriceBottle] = useState('');
   const [priceGlass, setPriceGlass] = useState('');
   const [stock, setStock] = useState('');
+  const [vintage, setVintage] = useState(() =>
+    wine.vintage != null && String(wine.vintage).trim() !== '' ? String(wine.vintage) : ''
+  );
   const [submitting, setSubmitting] = useState(false);
   const [hasWarnedForBranchName, setHasWarnedForBranchName] = useState(false);
   const [dialog, setDialog] = useState<DialogState | null>(null);
@@ -191,6 +194,7 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
         price: bottle,
         priceGlass: glass,
         initialQty: qty,
+        vintage: vintage.trim() ? vintage : undefined,
         canonicalWine: wine,
       });
 
@@ -300,6 +304,15 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
               keyboardType="numeric"
               value={stock}
               onChangeText={setStock}
+              containerStyle={styles.field}
+            />
+            <CellariumTextField
+              label={t('global_catalog.add_form_vintage_label')}
+              placeholder={t('global_catalog.add_form_vintage_placeholder')}
+              value={vintage}
+              onChangeText={setVintage}
+              autoCapitalize="none"
+              autoCorrect={false}
               containerStyle={styles.field}
             />
 

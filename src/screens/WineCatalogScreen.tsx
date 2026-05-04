@@ -37,7 +37,7 @@ import { getWineCarouselDimensions, getWineCarouselDimensionsForTablet } from '.
 import { CELLARIUM as CELLARIUM_DS, CELLARIUM_LAYOUT, CELLARIUM_TEXT } from '../theme/cellariumTheme';
 import { CellariumPrimaryButton } from '../components/cellarium';
 import CellariumLoader from '../components/CellariumLoader';
-import LanguageSelector from '../components/LanguageSelector';
+import CatalogHeader from '../components/catalog/CatalogHeader';
 import { getCocktailMenu, CocktailDrink } from '../services/CocktailService';
 import { getBilingualValue as getBilingualFromCatalog } from '../services/GlobalWineCatalogService';
 import { 
@@ -145,6 +145,21 @@ function mapPublicMenuToWineCatalogItems(menu: PublicMenuResponse): { branch: Br
 }
 
 /** Map public-menu cocktails to CocktailDrink[] para UI (guest flow). branch_id requerido; owner_id no viene en payload, se deja vacío. */
+/** Misma regla que renderSensoryProfile: tintos = 4 barras; resto = 3 */
+function getSensoryBarCountForWine(wine: Wine): 3 | 4 {
+  const wineType = wine.type || 'red';
+  if (wineType === 'sparkling') return 3;
+  if (
+    wineType === 'white' ||
+    wineType === 'rose' ||
+    wineType === 'dessert' ||
+    wineType === 'fortified'
+  ) {
+    return 3;
+  }
+  return 4;
+}
+
 function mapPublicMenuCocktailsToCatalogItems(
   cocktails: PublicMenuCocktail[] | undefined,
   branchId: string
@@ -399,6 +414,85 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
       setBranchNameInput(branchDisplayName);
     }
   }, [branchDisplayName, isEditingBranchName]);
+
+  /** Igual que el onPress anterior del ícono de búsqueda: alterna visibilidad y enfoca al abrir */
+  const handleOpenSearch = useCallback(() => {
+    setSearchVisible((prev) => {
+      const newValue = !prev;
+      if (newValue && searchInputRef.current) {
+        setTimeout(() => searchInputRef.current?.focus(), 100);
+      }
+      return newValue;
+    });
+  }, []);
+
+  const handleClearSearch = useCallback(() => {
+    setSearchText('');
+    setSearchVisible(false);
+  }, []);
+
+  const handleStartEditingBranchName = useCallback(() => {
+    if (!activeBranch) {
+      Alert.alert('Sin sucursal seleccionada', 'Selecciona una sucursal antes de editar el nombre.');
+      return;
+    }
+    setBranchNameInput(branchDisplayName);
+    setIsEditingBranchName(true);
+  }, [activeBranch, branchDisplayName]);
+
+  const handleCancelEditingBranchName = useCallback(() => {
+    setIsEditingBranchName(false);
+    setBranchNameInput(branchDisplayName);
+  }, [branchDisplayName]);
+
+  const handleSaveBranchName = useCallback(async () => {
+    if (!activeBranch) {
+      Alert.alert(t('catalog.branch_required'), t('catalog.branch_required_message'));
+      return;
+    }
+
+    const trimmed = branchNameInput.trim();
+    if (!trimmed) {
+      Alert.alert(t('catalog.name_required'), t('catalog.name_required_message'));
+      return;
+    }
+
+    try {
+      setIsSavingBranchName(true);
+      const { data, error } = await supabase
+        .from('branches')
+        .update({
+          name: trimmed,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', activeBranch.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        setCurrentBranch(data);
+        await refreshBranches();
+        Alert.alert(t('catalog.branch_name_updated'), t('catalog.branch_name_updated_message'));
+      }
+
+      setIsEditingBranchName(false);
+    } catch (error: any) {
+      debugWarn('Error actualizando nombre de sucursal:', error);
+      Alert.alert(t('catalog.error'), error?.message || t('catalog.error_update_branch_name'));
+    } finally {
+      setIsSavingBranchName(false);
+    }
+  }, [activeBranch, branchNameInput, refreshBranches, setCurrentBranch, t]);
+
+  const handlePressAdmin = useCallback(() => {
+    if (user && user.status === 'active') {
+      navigation.navigate('AdminDashboard');
+    } else {
+      navigation.navigate('AdminLogin');
+    }
+  }, [navigation, user]);
   
   // Referencia para el FlatList del carrusel
   const flatListRef = useRef<FlatList>(null);
@@ -1594,7 +1688,10 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: isTablet ? 6 : 4 }}>
           <Text style={[
             styles.sensoryBarLabel,
-            { fontSize: labelFontSize }
+            {
+              fontSize: labelFontSize,
+              ...(isTablet ? { lineHeight: Math.round(labelFontSize * 1.34) } : {}),
+            },
           ]}>{label}</Text>
           {isMissing && (
             <Text style={[
@@ -1604,6 +1701,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
                 color: '#999',
                 marginLeft: 4,
                 fontStyle: 'italic',
+                ...(isTablet ? { lineHeight: Math.round((labelFontSize - 2) * 1.34) } : {}),
               }
             ]}>N/D</Text>
           )}
@@ -1688,8 +1786,8 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
           />
         </View>
       );
-    } else if (wineType === 'white' || wineType === 'dessert' || wineType === 'fortified') {
-      // BLANCO/FORTIFICADO/POSTRE: 3 barras - Cuerpo, Dulzor, Acidez
+    } else if (wineType === 'white' || wineType === 'rose' || wineType === 'dessert' || wineType === 'fortified') {
+      // BLANCO/ROSADO/FORTIFICADO/POSTRE: 3 barras - Cuerpo, Dulzor, Acidez (sin tanicidad)
       return (
         <View style={styles.sensorySectionCentered}>
           <SensoryBar 
@@ -1716,7 +1814,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         </View>
       );
     } else {
-      // TINTO (y rose): 4 barras - Cuerpo, Tanicidad, Dulzor, Acidez
+      // TINTO: 4 barras - Cuerpo, Tanicidad, Dulzor, Acidez
       return (
         <View style={styles.sensorySectionCentered}>
           <SensoryBar 
@@ -1995,9 +2093,14 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
   // Subcomponente: Bloque sensorial (wrapper del renderSensoryProfile)
   const WineSensoryBlock = ({ wine, isTablet, isGuest = false, guestCard }: { wine: Wine; isTablet: boolean; isGuest?: boolean; guestCard?: { sensoryHeight: number; sensoryHeightTablet: number } }) => {
     const sectionPadding = isTablet ? 12 : 8;
+    const sensoryBarCount = getSensoryBarCountForWine(wine);
     const sectionHeight = isGuest && guestCard
       ? (isTablet ? guestCard.sensoryHeightTablet : guestCard.sensoryHeight)
-      : (isTablet ? 200 : 180);
+      : isTablet
+        ? sensoryBarCount === 4
+          ? 252
+          : 200
+        : 180;
     
     return (
       <View style={[
@@ -2514,206 +2617,32 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.container}>
-      {/* Header - Top Dock Premium */}
-      <View style={[
-        styles.headerWrapper,
-        { paddingTop: Math.max(6, insets.top * 0.25) }
-      ]}>
-        <View style={styles.headerDock}>
-          <View style={styles.headerRow}>
-            {/* Columna izquierda: LanguageSelector */}
-            <View style={styles.headerLeft}>
-              <LanguageSelector />
-            </View>
-
-            {/* Columna centro: Nombre + Editar */}
-            <View style={styles.headerCenter}>
-              <Text
-                numberOfLines={2}
-                style={[
-                  styles.branchName,
-                  { fontSize: stableIsTablet ? 22 : 18 },
-                  !isBranchNameConfigured && styles.branchNamePending,
-                ]}
-              >
-                {isBranchNameConfigured ? branchDisplayName : t('catalog.define_restaurant')}
-              </Text>
-              {canEditBranchName && (
-                isEditingBranchName ? (
-                  <View style={styles.branchEditContainer}>
-                    <TextInput
-                      value={branchNameInput}
-                      onChangeText={setBranchNameInput}
-                      placeholder={t('catalog.restaurant_name_placeholder')}
-                      style={[
-                        styles.branchEditInput,
-                        { maxWidth: stableIsTablet ? 400 : '100%' }
-                      ]}
-                      editable={!isSavingBranchName}
-                      maxLength={80}
-                    />
-                    <View style={styles.branchEditActions}>
-                      <TouchableOpacity
-                        style={[styles.branchEditButton, styles.branchEditCancel]}
-                        onPress={() => {
-                          setIsEditingBranchName(false);
-                          setBranchNameInput(branchDisplayName);
-                        }}
-                        disabled={isSavingBranchName}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      >
-                        <Text style={styles.branchEditButtonText}>{t('catalog.cancel')}</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.branchEditButton, styles.branchEditSave]}
-                        onPress={async () => {
-                          if (!activeBranch) {
-                            Alert.alert(t('catalog.branch_required'), t('catalog.branch_required_message'));
-                            return;
-                          }
-
-                          const trimmed = branchNameInput.trim();
-                          if (!trimmed) {
-                            Alert.alert(t('catalog.name_required'), t('catalog.name_required_message'));
-                            return;
-                          }
-
-                          try {
-                            setIsSavingBranchName(true);
-                            const { data, error } = await supabase
-                              .from('branches')
-                              .update({
-                                name: trimmed,
-                                updated_at: new Date().toISOString(),
-                              })
-                              .eq('id', activeBranch.id)
-                              .select()
-                              .single();
-
-                            if (error) throw error;
-
-                            if (data) {
-                              setCurrentBranch(data);
-                              await refreshBranches();
-                              Alert.alert(t('catalog.branch_name_updated'), t('catalog.branch_name_updated_message'));
-                            }
-
-                            setIsEditingBranchName(false);
-                          } catch (error: any) {
-                            debugWarn('Error actualizando nombre de sucursal:', error);
-                            Alert.alert(t('catalog.error'), error?.message || t('catalog.error_update_branch_name'));
-                          } finally {
-                            setIsSavingBranchName(false);
-                          }
-                        }}
-                        disabled={isSavingBranchName}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      >
-                        <Text style={styles.branchEditButtonText}>
-                          {isSavingBranchName ? t('catalog.saving') : t('catalog.save')}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    onPress={() => {
-                      if (!activeBranch) {
-                        Alert.alert('Sin sucursal seleccionada', 'Selecciona una sucursal antes de editar el nombre.');
-                        return;
-                      }
-                      setIsEditingBranchName(true);
-                    }}
-                    style={styles.editNameChip}
-                  >
-                    <Text style={styles.editNameChipText}>
-                      {isBranchNameConfigured ? t('catalog.edit_name') : t('catalog.configure_name')}
-                    </Text>
-                  </TouchableOpacity>
-                )
-              )}
-            </View>
-
-            {/* Columna derecha: Botones (búsqueda + admin) */}
-            <View style={styles.headerRight}>
-              <TouchableOpacity 
-                style={[
-                  styles.headerChipButton,
-                  { 
-                    width: stableIsTablet ? 40 : 36,
-                    height: stableIsTablet ? 40 : 36,
-                  }
-                ]}
-                onPress={() => {
-                  setSearchVisible(prev => {
-                    const newValue = !prev;
-                    if (newValue && searchInputRef.current) {
-                      // Enfocar input cuando se abre
-                      setTimeout(() => searchInputRef.current?.focus(), 100);
-                    }
-                    return newValue;
-                  });
-                }}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              >
-                <Ionicons name="search" size={22} color="#3A3534" />
-              </TouchableOpacity>
-              {/* Botón de admin solo visible si NO es invitado */}
-              {!isGuest && (
-                <TouchableOpacity 
-                  style={[
-                    styles.headerChipButton,
-                    { 
-                      width: stableIsTablet ? 40 : 36,
-                      height: stableIsTablet ? 40 : 36,
-                    }
-                  ]}
-                  onPress={() => {
-                    // Si el usuario ya está autenticado, ir directo al panel
-                    // Si no, pedir login
-                    if (user && user.status === 'active') {
-                      navigation.navigate('AdminDashboard');
-                    } else {
-                      navigation.navigate('AdminLogin');
-                    }
-                  }}
-                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                >
-                  <Ionicons name="settings-outline" size={22} color="#3A3534" />
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-        </View>
-      </View>
-
-      {searchVisible && (
-        <View style={[
-          styles.searchBarContainer,
-          { paddingHorizontal: stableIsTablet ? 20 : 16 }
-        ]}>
-          <TextInput
-            ref={searchInputRef}
-            style={styles.searchInput}
-            placeholder={t('catalog.search_placeholder')}
-            placeholderTextColor="#999"
-            value={searchText}
-            onChangeText={setSearchText}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <TouchableOpacity
-            onPress={() => {
-              setSearchText('');
-              setSearchVisible(false);
-            }}
-            style={styles.searchClearButton}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <Ionicons name="close-circle" size={24} color="#3A3534" />
-          </TouchableOpacity>
-        </View>
-      )}
+      <CatalogHeader
+        headerPaddingTop={Math.max(6, insets.top * 0.25)}
+        isTablet={stableIsTablet}
+        branchTitle={
+          isBranchNameConfigured ? branchDisplayName : t('catalog.define_restaurant')
+        }
+        isBranchNameConfigured={isBranchNameConfigured}
+        canEditBranchName={canEditBranchName}
+        isEditingBranchName={isEditingBranchName}
+        branchNameInput={branchNameInput}
+        isSavingBranchName={isSavingBranchName}
+        searchVisible={searchVisible}
+        searchText={searchText}
+        searchInputRef={searchInputRef}
+        isGuest={isGuest}
+        showAdminButton={!isGuest}
+        onBranchNameInputChange={setBranchNameInput}
+        onStartEditingBranchName={handleStartEditingBranchName}
+        onCancelEditingBranchName={handleCancelEditingBranchName}
+        onSaveBranchName={handleSaveBranchName}
+        onOpenSearch={handleOpenSearch}
+        onSearchTextChange={setSearchText}
+        onClearSearch={handleClearSearch}
+        onPressAdmin={handlePressAdmin}
+        t={t}
+      />
 
       {/* Barra horizontal de filtros (chips) - Dock premium */}
       <View style={styles.filterBarOuter}>
@@ -2994,132 +2923,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8f9fa',
   },
-  // Header - Top Dock Premium
-  headerWrapper: {
-    paddingBottom: 3,
-    paddingHorizontal: 10,
-  },
-  headerDock: {
-    backgroundColor: 'rgba(255, 255, 255, 0.98)',
-    borderRadius: 16,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    // iOS shadow
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    // Android elevation
-    elevation: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.04)',
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  headerLeft: {
-    minWidth: 52,
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-  },
-  headerCenter: {
-    flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: 12,
-  },
-  headerRight: {
-    minWidth: 52,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: 8,
-  },
-  headerChipButton: {
-    borderRadius: 12,
-    backgroundColor: 'rgba(58, 53, 52, 0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(58, 53, 52, 0.16)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    // iOS shadow leve
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    // Android elevation
-    elevation: 2,
-  },
-  headerChipText: {
-    fontSize: 18,
-    color: CELLARIUM.primary,
-  },
-  editNameChip: {
-    marginTop: 4,
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(146, 64, 72, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(146, 64, 72, 0.16)',
-  },
-  editNameChipText: {
-    fontSize: 11,
-    color: CELLARIUM.primary,
-    fontWeight: '600',
-  },
   title: {
     fontSize: 16,
     fontWeight: 'bold',
     color: CELLARIUM.primary,
     marginBottom: 0,
-  },
-  branchName: {
-    marginTop: 2,
-    fontWeight: '700',
-    color: CELLARIUM.primary,
-    textAlign: 'center',
-  },
-  branchNamePending: {
-    color: '#B22222',
-    fontStyle: 'italic',
-  },
-  branchEditContainer: {
-    marginTop: 6,
-    width: '100%',
-    alignItems: 'center',
-    gap: 8,
-  },
-  branchEditInput: {
-    width: '100%',
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#fff',
-    fontSize: 16,
-    color: '#333',
-  },
-  branchEditActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  branchEditButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-  },
-  branchEditCancel: {
-    backgroundColor: '#bbb',
-  },
-  branchEditSave: {
-    backgroundColor: CELLARIUM.primary,
-  },
-  branchEditButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 12,
   },
   subtitle: {
     fontSize: 16,
@@ -3770,28 +3578,6 @@ const styles = StyleSheet.create({
     width: '100%',
     marginTop: 'auto',
     flexShrink: 0,
-  },
-  searchBarContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  searchInput: {
-    flex: 1,
-    height: 40,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    fontSize: 14,
-    color: '#000',
-  },
-  searchClearButton: {
-    marginLeft: 8,
-    padding: 4,
   },
   searchClearButtonText: {
     fontSize: 16,

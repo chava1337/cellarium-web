@@ -214,8 +214,8 @@ export const extractTasteLevelsFromCanonical = (
     }
   }
 
-  // Extraer intensity_level (tannin, tannins, intensity, power) - solo para red/rose
-  if (wineType === 'red' || wineType === 'rose') {
+  // Extraer intensity_level (tannin, tannins, intensity, power) - solo para tintos
+  if (wineType === 'red') {
     const intensityValue = extractValue(['tannin', 'tannins', 'intensity', 'power']);
     if (intensityValue != null) {
       const level = toLevel1to5(intensityValue);
@@ -349,10 +349,9 @@ export const normalizeWineFromCanonical = (
       updatesToSave.acidity_level = extractedLevels.acidity_level;
     }
 
-    // intensity_level: solo para red y rose (desde tannin/intensity)
-    // NO para sparkling, white, dessert, fortified
+    // intensity_level: solo para tintos (desde tannin/intensity). Rosado: sin tanicidad en UI ni en métrica.
     if (extractedLevels.intensity_level !== undefined && isEmptyLevel(stock.wines.intensity_level)) {
-      if (wineType === 'red' || wineType === 'rose') {
+      if (wineType === 'red') {
         stock.wines.intensity_level = extractedLevels.intensity_level;
         updatesToSave.intensity_level = extractedLevels.intensity_level;
       }

@@ -40,6 +40,9 @@ export const getWineCarouselDimensions = () => {
   };
 };
 
+/** Padding horizontal del contenido del carrusel en tablet: inset fijo al borde (alineado con chips ~18px), no centrado geométrico. Evita huecos vacíos grandes antes/después del primer/último ítem en FlatList horizontal + snap. */
+const TABLET_CAROUSEL_EDGE_PAD = 18;
+
 // Calcular valores derivados para tablets (solo cuando se detecta tablet)
 export const getWineCarouselDimensionsForTablet = () => {
   const { ITEM_WIDTH, ITEM_SPACING } = TABLET_CAROUSEL_CONFIG;
@@ -49,7 +52,7 @@ export const getWineCarouselDimensionsForTablet = () => {
   const roundedItemWidth = PixelRatio.roundToNearestPixel(ITEM_WIDTH);
   const roundedItemSpacing = PixelRatio.roundToNearestPixel(ITEM_SPACING);
   const roundedItemFull = PixelRatio.roundToNearestPixel(roundedItemWidth + roundedItemSpacing);
-  const roundedContentPad = PixelRatio.roundToNearestPixel((SCREEN_WIDTH - roundedItemWidth) / 2);
+  const roundedContentPad = PixelRatio.roundToNearestPixel(TABLET_CAROUSEL_EDGE_PAD);
   
   return {
     ITEM_WIDTH: roundedItemWidth,

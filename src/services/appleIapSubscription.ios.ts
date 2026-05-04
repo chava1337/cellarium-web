@@ -164,7 +164,26 @@ async function purchaseWithSku(sku: string): Promise<{ purchase: Purchase }> {
 export async function loadAppleSubscriptionCatalog(): Promise<Product[]> {
   await ensureIapConnection();
   const result = await fetchProducts({ skus: [...APPLE_IAP_SKUS_PLANS], type: 'subs' });
-  return (result ?? []) as Product[];
+  const products = (result ?? []) as Product[];
+  if (__DEV__) {
+    const normalized = products.map((p) => {
+      const anyP = p as Product & {
+        displayPrice?: string;
+        localizedPrice?: string;
+        priceString?: string;
+        currencyCode?: string;
+        currency?: string;
+      };
+      return {
+        productId: productIdFromStoreProduct(p),
+        displayPrice: anyP.displayPrice ?? anyP.localizedPrice ?? anyP.priceString ?? null,
+        price: anyP.price ?? null,
+        currency: anyP.currencyCode ?? anyP.currency ?? null,
+      };
+    });
+    console.log('[IAP] Catalog products from StoreKit:', normalized);
+  }
+  return products;
 }
 
 export async function purchaseAppleSubscription(plan: ApplePlanUiId): Promise<{ purchase: Purchase }> {

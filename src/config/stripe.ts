@@ -18,14 +18,14 @@ export const STRIPE_CONFIG = {
     bistro: {
       id: 'bistro',
       name: 'Bistro',
-      price: 149900,
-      priceFormatted: '$1499.00',
+      price: 179900,
+      priceFormatted: '$1799.00',
     },
     trattoria: {
       id: 'trattoria',
       name: 'Trattoria',
-      price: 249900,
-      priceFormatted: '$2499.00',
+      price: 294900,
+      priceFormatted: '$2949.00',
     },
     'grand-maison': {
       id: 'grand-maison',
