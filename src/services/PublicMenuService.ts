@@ -25,6 +25,7 @@ export interface PublicMenuBranch {
   id: string;
   name: string;
   address: string;
+  catalog_background_preset_id?: string | null;
 }
 
 export interface PublicMenuWine {

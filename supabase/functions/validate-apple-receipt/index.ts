@@ -259,22 +259,43 @@ Deno.serve(async (req: Request) => {
     }
 
     const intent = typeof bodyJson.intent === 'string' ? bodyJson.intent.slice(0, 32) : undefined;
-    if (intent) {
-      console.log('[validate-apple-receipt] intent (telemetry only)', intent);
-    }
 
     const receiptData = typeof bodyJson.receiptData === 'string' ? bodyJson.receiptData.trim() : '';
     if (!receiptData) {
       return json(400, { error: 'receiptData es obligatorio', code: 'MISSING_RECEIPT' });
     }
 
+    console.log(
+      '[validate-apple-receipt]',
+      JSON.stringify({
+        stage: 'request',
+        userId: authUser.id,
+        intent: intent ?? null,
+        receiptBase64Length: receiptData.length,
+      })
+    );
+
     const productionUrl = 'https://buy.itunes.apple.com/verifyReceipt';
     const sandboxUrl = 'https://sandbox.itunes.apple.com/verifyReceipt';
 
     let verified = await postVerifyReceipt(productionUrl, receiptData, sharedSecret);
+    let usedSandboxRetry = false;
     if (verified.status === 21007) {
+      usedSandboxRetry = true;
       verified = await postVerifyReceipt(sandboxUrl, receiptData, sharedSecret);
     }
+
+    console.log(
+      '[validate-apple-receipt]',
+      JSON.stringify({
+        stage: 'apple_verify',
+        userId: authUser.id,
+        intent: intent ?? null,
+        appleStatus: verified.status,
+        environment: verified.environment ?? null,
+        usedSandboxRetry,
+      })
+    );
 
     if (verified.status !== 0) {
       console.warn('[validate-apple-receipt] Apple status', verified.status);
@@ -285,8 +306,33 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    const allReceiptInfos = collectReceiptInfos(verified);
+    const productIdsDetected = [
+      ...new Set(allReceiptInfos.map((x) => String(x.product_id ?? '')).filter((s) => s.length > 0)),
+    ];
+    console.log(
+      '[validate-apple-receipt]',
+      JSON.stringify({
+        stage: 'receipt_product_ids',
+        userId: authUser.id,
+        intent: intent ?? null,
+        productIdsDetected,
+        receiptRowCount: allReceiptInfos.length,
+      })
+    );
+
     const resolved = resolveAppleSubscriptionFromReceipt(verified, new Date());
     if ('error' in resolved) {
+      console.log(
+        '[validate-apple-receipt]',
+        JSON.stringify({
+          stage: 'resolve_failed',
+          userId: authUser.id,
+          intent: intent ?? null,
+          reason: resolved.error,
+          productIdsDetected,
+        })
+      );
       if (resolved.error === 'LEGACY_ONLY') {
         return json(400, {
           error:
@@ -307,6 +353,19 @@ Deno.serve(async (req: Request) => {
     }
 
     const { base, addonsCount, addonProductId, legacyAlsoPresent } = resolved;
+    console.log(
+      '[validate-apple-receipt]',
+      JSON.stringify({
+        stage: 'resolved',
+        userId: authUser.id,
+        intent: intent ?? null,
+        planId: base.planId,
+        expiresIso: base.expiresIso,
+        addonsCount,
+        addonProductId,
+        legacyAlsoPresent,
+      })
+    );
     if (legacyAlsoPresent) {
       console.warn('[validate-apple-receipt] recibo contiene producto legacy además del plan nuevo (legacy ignorado)');
     }
@@ -323,8 +382,29 @@ Deno.serve(async (req: Request) => {
       });
       if (lapse.error) {
         console.error('[validate-apple-receipt] lapse failed', lapse.error);
+        console.log(
+          '[validate-apple-receipt]',
+          JSON.stringify({
+            stage: 'handle_apple_subscription_lapsed',
+            userId: authUser.id,
+            intent: intent ?? null,
+            ok: false,
+            error: String(lapse.error).slice(0, 400),
+          })
+        );
         return json(500, { error: 'Error al sincronizar baja', code: 'LAPSE_FAILED', details: lapse.error });
       }
+      console.log(
+        '[validate-apple-receipt]',
+        JSON.stringify({
+          stage: 'handle_apple_subscription_lapsed',
+          userId: authUser.id,
+          intent: intent ?? null,
+          ok: true,
+          synced: 'lapsed',
+          expiresIso,
+        })
+      );
       return json(200, {
         ok: true,
         synced: 'lapsed',
@@ -385,8 +465,30 @@ Deno.serve(async (req: Request) => {
 
     if (sync.error) {
       console.error('[validate-apple-receipt] sync failed', sync.error);
+      console.log(
+        '[validate-apple-receipt]',
+        JSON.stringify({
+          stage: 'handle_subscription_update',
+          userId: authUser.id,
+          intent: intent ?? null,
+          ok: false,
+          error: String(sync.error).slice(0, 400),
+        })
+      );
       return json(500, { error: 'Error al guardar la suscripción', code: 'SYNC_FAILED', details: sync.error });
     }
+
+    console.log(
+      '[validate-apple-receipt]',
+      JSON.stringify({
+        stage: 'handle_subscription_update',
+        userId: authUser.id,
+        intent: intent ?? null,
+        ok: true,
+        planId: base.planId,
+        expiresIso,
+      })
+    );
 
     return json(200, {
       ok: true,

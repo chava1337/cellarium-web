@@ -104,7 +104,7 @@ Deno.serve(async (req: Request) => {
   const branchId = qrRow.branch_id;
   const { data: branchRow, error: branchError } = await supabase
     .from('branches')
-    .select('id, name, address, owner_id')
+    .select('id, name, address, owner_id, catalog_background_preset_id')
     .eq('id', branchId)
     .maybeSingle();
 
@@ -209,10 +209,18 @@ Deno.serve(async (req: Request) => {
     price_by_bottle: row.price_by_bottle ?? null,
   }));
 
+  const row = branchRow as {
+    id: string;
+    name?: string;
+    address?: string | null;
+    catalog_background_preset_id?: string | null;
+  };
+
   const branch = {
-    id: (branchRow as { id: string }).id,
-    name: (branchRow as { name?: string }).name ?? '',
-    address: (branchRow as { address?: string | null }).address ?? null,
+    id: row.id,
+    name: row.name ?? '',
+    address: row.address ?? null,
+    catalog_background_preset_id: row.catalog_background_preset_id ?? 'default',
   };
 
   // Cocktails: same branch/owner, is_active only. name/description/ingredients (jsonb) returned as-is for client i18n.

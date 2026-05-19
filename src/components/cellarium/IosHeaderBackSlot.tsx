@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform, TouchableOpacity } from 'react-native';
+import { StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../types';
@@ -14,12 +14,10 @@ export interface IosHeaderBackSlotProps {
 }
 
 /**
- * Chevron atrás solo en iOS, para `CellariumHeader` `leftSlot`.
- * Sin fondo, token CELLARIUM.textOnDark, área táctil vía hitSlop.
+ * Chevron de regreso cross-platform para `CellariumHeader` `leftSlot`.
+ * Mantiene la estética actual y asegura área táctil mínima 44x44.
  */
 export function IosHeaderBackSlot({ navigation, fallbackRoute }: IosHeaderBackSlotProps): React.ReactElement | null {
-  if (Platform.OS !== 'ios') return null;
-
   const onPress = () => {
     if (navigation.canGoBack()) {
       navigation.goBack();
@@ -30,8 +28,9 @@ export function IosHeaderBackSlot({ navigation, fallbackRoute }: IosHeaderBackSl
 
   return (
     <TouchableOpacity
+      style={styles.touchTarget}
       onPress={onPress}
-      hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       accessibilityRole="button"
       accessibilityLabel="Volver"
     >
@@ -39,3 +38,12 @@ export function IosHeaderBackSlot({ navigation, fallbackRoute }: IosHeaderBackSl
     </TouchableOpacity>
   );
 }
+
+const styles = StyleSheet.create({
+  touchTarget: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

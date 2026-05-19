@@ -23,4 +23,10 @@ export const GOOGLE_PLAY_ADDON_SKUS = [
   GOOGLE_PLAY_PRODUCT_IDS.branch3,
 ] as const;
 
+/** Planes base + add-ons de sucursales (fetch / restore). */
+export const GOOGLE_PLAY_ALL_SUBSCRIPTION_SKUS = [
+  ...GOOGLE_PLAY_SUBSCRIPTION_SKUS,
+  ...GOOGLE_PLAY_ADDON_SKUS,
+] as const;
+
 export type GooglePlanUiId = 'bistro' | 'trattoria' | 'grand_maison';

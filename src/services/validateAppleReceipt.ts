@@ -12,15 +12,50 @@ export type AppleSyncResponse = {
   expires_at?: string;
 };
 
+/** Error devuelto por invoke o por parseo del cuerpo JSON (sin datos sensibles). */
+export type AppleReceiptInvokeError = {
+  message: string;
+  code?: string;
+  /** HTTP status de la respuesta Edge cuando aplica */
+  status?: number;
+  /** Código numérico de verifyReceipt de Apple cuando code === APPLE_VERIFY_FAILED */
+  appleStatus?: number;
+};
+
+/** Error al recuperar compra duplicada (pantalla muestra alertAppleReceiptFailure con detail). */
+export class AppleReceiptRecoveryError extends Error {
+  readonly name = 'AppleReceiptRecoveryError';
+
+  constructor(public readonly detail: AppleReceiptInvokeError) {
+    super(detail.message);
+  }
+}
+
+function safeJsonParse(text: string): Record<string, unknown> | null {
+  try {
+    const o = JSON.parse(text) as Record<string, unknown>;
+    return o && typeof o === 'object' ? o : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function validateAppleReceiptBackend(
   receiptData: string,
-  intent?: 'purchase' | 'restore' | 'sync'
-): Promise<{ data: AppleSyncResponse | null; error: { message: string; code?: string; status?: number } | null }> {
+  intent?: 'purchase' | 'restore' | 'sync' | 'purchase_recovery'
+): Promise<{ data: AppleSyncResponse | null; error: AppleReceiptInvokeError | null }> {
+  const receiptLen = typeof receiptData === 'string' ? receiptData.length : 0;
+  console.log(
+    '[Cellarium][AppleReceipt]',
+    JSON.stringify({ stage: 'invoke_start', intent: intent ?? null, receiptLen })
+  );
+
   try {
     await supabase.auth.refreshSession();
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData?.session?.access_token;
     if (!token) {
+      console.log('[Cellarium][AppleReceipt]', JSON.stringify({ stage: 'invoke_end', outcome: 'no_session' }));
       return { data: null, error: { message: 'No hay sesión activa', code: 'NO_SESSION' } };
     }
 
@@ -30,28 +65,68 @@ export async function validateAppleReceiptBackend(
     });
 
     if (error) {
-      let status: number | undefined;
+      let httpStatus: number | undefined;
       let code: string | undefined;
       let message = error.message ?? 'Error al validar recibo';
+      let appleStatus: number | undefined;
+
       if (error.context?.response) {
         const res = error.context.response as Response;
-        status = res.status;
+        httpStatus = res.status;
         try {
           const text = await res.clone().text();
-          const parsed = JSON.parse(text) as { error?: string; code?: string; message?: string };
-          if (parsed?.message) message = String(parsed.message);
-          if (parsed?.code) code = String(parsed.code);
-          else if (parsed?.error) message = String(parsed.error);
+          const parsed = safeJsonParse(text);
+          if (parsed) {
+            if (typeof parsed.message === 'string') message = parsed.message;
+            if (typeof parsed.code === 'string') code = parsed.code;
+            else if (typeof parsed.error === 'string' && !parsed.message) message = parsed.error;
+
+            const appleCode = parsed.code;
+            const statusNum = parsed.status;
+            if (
+              appleCode === 'APPLE_VERIFY_FAILED' &&
+              typeof statusNum === 'number' &&
+              Number.isFinite(statusNum)
+            ) {
+              appleStatus = statusNum;
+            }
+          }
         } catch {
           /* ignore */
         }
       }
-      return { data: null, error: { message, code, status } };
+
+      console.log(
+        '[Cellarium][AppleReceipt]',
+        JSON.stringify({
+          stage: 'invoke_end',
+          outcome: 'edge_error',
+          httpStatus: httpStatus ?? null,
+          code: code ?? null,
+          appleStatus: appleStatus ?? null,
+        })
+      );
+
+      return { data: null, error: { message, code, status: httpStatus, appleStatus } };
     }
+
+    console.log(
+      '[Cellarium][AppleReceipt]',
+      JSON.stringify({
+        stage: 'invoke_end',
+        outcome: 'ok',
+        synced: data?.synced ?? null,
+        ok: data?.ok ?? null,
+      })
+    );
 
     return { data: data ?? null, error: null };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Error inesperado';
+    console.log(
+      '[Cellarium][AppleReceipt]',
+      JSON.stringify({ stage: 'invoke_end', outcome: 'exception', message: msg.slice(0, 200) })
+    );
     return { data: null, error: { message: msg, code: 'UNEXPECTED' } };
   }
 }

@@ -11,7 +11,7 @@ import {
   Platform,
   Linking,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import {
@@ -54,7 +54,14 @@ import { useBranch } from '../contexts/BranchContext';
 import { useAdminGuard } from '../hooks/useAdminGuard';
 import { supabase } from '../lib/supabase';
 import * as WebBrowser from 'expo-web-browser';
-import { CELLARIUM, CELLARIUM_THEME, CELLARIUM_LAYOUT, CELLARIUM_TEXT } from '../theme/cellariumTheme';
+import { LinearGradient } from 'expo-linear-gradient';
+import {
+  CELLARIUM,
+  CELLARIUM_GRADIENT,
+  CELLARIUM_THEME,
+  CELLARIUM_LAYOUT,
+  CELLARIUM_TEXT,
+} from '../theme/cellariumTheme';
 import { useLanguage } from '../contexts/LanguageContext';
 import { log } from '../utils/logger';
 import { getEffectivePlan } from '../utils/effectivePlan';
@@ -64,6 +71,7 @@ import { openExternalLegalUrl } from '../utils/openExternalLegalUrl';
 import CellariumLoader from '../components/CellariumLoader';
 import { captureCriticalError, sentryFlowBreadcrumb } from '../utils/sentryContext';
 import { APPLE_IAP_PRODUCT_IDS, APPLE_SUBSCRIPTIONS_MANAGE_URL } from '../constants/appleIap';
+import { GOOGLE_PLAY_PRODUCT_IDS } from '../constants/googlePlayProducts';
 import {
   ensureIapConnection,
   finishApplePurchasesAfterBackendSync,
@@ -72,13 +80,168 @@ import {
   loadAppleSubscriptionCatalog,
   purchaseAppleSubscription,
   purchaseAppleBranchAddon,
-  restoreApplePurchasesForReceipt,
+  recoverAppleIapViaReceipt,
+  AppleIapPurchaseUnconfirmedError,
+  AppleIapStorePendingError,
 } from '../services/appleIapSubscription';
-import { validateAppleReceiptBackend } from '../services/validateAppleReceipt';
+import {
+  AppleReceiptRecoveryError,
+  validateAppleReceiptBackend,
+  type AppleReceiptInvokeError,
+} from '../services/validateAppleReceipt';
+import { messageForAppleReceiptError } from '../utils/appleReceiptUserMessages';
 import { validateGooglePurchaseBackend, getCellariumAndroidPackageName } from '../services/validateGooglePurchase';
-import { finishGoogleTransactionIfNeeded } from '../services/googlePlayBilling';
+import {
+  finishGoogleTransactionIfNeeded,
+  purchaseGoogleBranchAddon,
+} from '../services/googlePlayBilling';
 import { useGooglePlayBilling } from '../hooks/useGooglePlayBilling';
 import { isAndroidBillingApp, shouldUseStripeSubscriptionUi, stripeEdgeClientMeta } from '../utils/billingPlatform';
+import {
+  getAppleIapDebugOverlaySnapshot,
+  IAP_DEBUG_OVERLAY,
+  patchAppleIapDebugOverlay,
+  shouldShowAppleIapDebugOverlayOnIos,
+  subscribeAppleIapDebugOverlay,
+  type AppleIapDebugOverlaySnapshot,
+} from '../debug/appleIapDebugOverlayStore';
+
+function formatIapDebugField(v: string | number | null | undefined): string {
+  if (v === undefined || v === null || v === '') return '—';
+  return String(v);
+}
+
+function AppleIapSubscriptionsDebugOverlay(props: {
+  snapshot: AppleIapDebugOverlaySnapshot;
+  expanded: boolean;
+  onToggle: () => void;
+  bottomInset: number;
+}) {
+  const { snapshot, expanded, onToggle, bottomInset } = props;
+  const rows: { key: string; value: string }[] = [
+    { key: 'lastIapEvent', value: formatIapDebugField(snapshot.lastIapEvent) },
+    { key: 'requestPurchase_called', value: formatIapDebugField(snapshot.requestPurchase_called) },
+    { key: 'requestPurchase_resolved', value: formatIapDebugField(snapshot.requestPurchase_resolved) },
+    { key: 'hasImmediatePurchase', value: formatIapDebugField(snapshot.hasImmediatePurchase) },
+    { key: 'purchase_listener_event', value: formatIapDebugField(snapshot.purchase_listener_event) },
+    { key: 'purchase_error_listener_event', value: formatIapDebugField(snapshot.purchase_error_listener_event) },
+    { key: 'appState_changed_active', value: formatIapDebugField(snapshot.appState_changed_active) },
+    { key: 'foreground_recovery_start', value: formatIapDebugField(snapshot.foreground_recovery_start) },
+    { key: 'receipt_hasReceipt', value: formatIapDebugField(snapshot.receipt_hasReceipt) },
+    { key: 'receipt_length', value: formatIapDebugField(snapshot.receipt_length) },
+    { key: 'validate_start', value: formatIapDebugField(snapshot.validate_start) },
+    { key: 'validate_result', value: formatIapDebugField(snapshot.validate_result) },
+    { key: 'validate_error_code', value: formatIapDebugField(snapshot.validate_error_code) },
+    { key: 'synced', value: formatIapDebugField(snapshot.synced) },
+    { key: 'refresh_started', value: formatIapDebugField(snapshot.refresh_started) },
+    { key: 'refresh_finished', value: formatIapDebugField(snapshot.refresh_finished) },
+    { key: 'catalog_effect_started', value: formatIapDebugField(snapshot.catalog_effect_started) },
+    { key: 'catalog_effect_skipped', value: formatIapDebugField(snapshot.catalog_effect_skipped) },
+    { key: 'catalog_skip_reason', value: formatIapDebugField(snapshot.catalog_skip_reason) },
+    { key: 'init_connection_started', value: formatIapDebugField(snapshot.init_connection_started) },
+    { key: 'init_connection_finished', value: formatIapDebugField(snapshot.init_connection_finished) },
+    { key: 'init_connection_error', value: formatIapDebugField(snapshot.init_connection_error) },
+    { key: 'fetch_products_started', value: formatIapDebugField(snapshot.fetch_products_started) },
+    { key: 'fetch_products_requested_skus', value: formatIapDebugField(snapshot.fetch_products_requested_skus) },
+    { key: 'fetch_products_finished', value: formatIapDebugField(snapshot.fetch_products_finished) },
+    { key: 'fetch_products_count', value: formatIapDebugField(snapshot.fetch_products_count) },
+    { key: 'fetch_products_ids', value: formatIapDebugField(snapshot.fetch_products_ids) },
+    { key: 'fetch_products_error', value: formatIapDebugField(snapshot.fetch_products_error) },
+    { key: 'catalog_state_updated', value: formatIapDebugField(snapshot.catalog_state_updated) },
+    { key: 'addon_catalog_skipped', value: formatIapDebugField(snapshot.addon_catalog_skipped) },
+    { key: 'addon_catalog_skip_reason', value: formatIapDebugField(snapshot.addon_catalog_skip_reason) },
+  ];
+  return (
+    <View style={[iapDebugOverlayStyles.wrap, { marginBottom: bottomInset + 8 }]} pointerEvents="box-none">
+      <TouchableOpacity
+        style={iapDebugOverlayStyles.header}
+        onPress={onToggle}
+        activeOpacity={0.85}
+        accessibilityLabel="Panel depuración IAP Apple"
+        pointerEvents="auto"
+      >
+        <Text style={iapDebugOverlayStyles.headerText}>
+          Apple IAP debug{IAP_DEBUG_OVERLAY ? ' · ON' : ''}
+        </Text>
+        <Text style={iapDebugOverlayStyles.headerChev}>{expanded ? '▼' : '▲'}</Text>
+      </TouchableOpacity>
+      {snapshot.flowHintNoAppleConfirmation ? (
+        <Text style={iapDebugOverlayStyles.hint} pointerEvents="none">
+          {snapshot.flowHintNoAppleConfirmation}
+        </Text>
+      ) : null}
+      {expanded ? (
+        <ScrollView
+          style={iapDebugOverlayStyles.body}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
+          pointerEvents="auto"
+        >
+          {rows.map((r) => (
+            <Text key={r.key} style={iapDebugOverlayStyles.row} numberOfLines={4}>
+              {r.key}: {r.value}
+            </Text>
+          ))}
+        </ScrollView>
+      ) : null}
+    </View>
+  );
+}
+
+const iapDebugOverlayStyles = StyleSheet.create({
+  floatingRoot: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9999,
+    elevation: 24,
+    justifyContent: 'flex-end',
+    alignItems: 'stretch',
+  },
+  wrap: {
+    marginHorizontal: 8,
+    maxHeight: 340,
+    alignSelf: 'stretch',
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,248,220,0.97)',
+    borderWidth: 1,
+    borderColor: 'rgba(180,140,0,0.6)',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(255,220,120,0.95)',
+  },
+  headerText: { fontSize: 12, fontWeight: '700', color: '#333' },
+  headerChev: { fontSize: 12, color: '#333' },
+  hint: {
+    fontSize: 11,
+    color: '#7a4a00',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontWeight: '600',
+  },
+  body: { maxHeight: 280, paddingHorizontal: 10, paddingBottom: 10 },
+  row: {
+    fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: '#111',
+    marginBottom: 4,
+  },
+});
+
+function alertAppleReceiptFailure(t: (key: string) => string, error: AppleReceiptInvokeError): void {
+  Alert.alert(t('msg.error'), messageForAppleReceiptError(t, error));
+}
 
 // Paleta: CELLARIUM como base; admin legacy solo sombra / warning donde no hay equivalente único.
 const PALETTE = {
@@ -114,6 +277,7 @@ type LoadingActionSubscription =
   | 'apple-restore'
   | 'apple-sync'
   | 'google-purchase'
+  | 'google-addon-purchase'
   | 'google-restore'
   | null;
 
@@ -713,6 +877,8 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     | { kind: 'plan_synced' }
     | { kind: 'addon_saved'; qty: number };
   const [subsPremiumNotice, setSubsPremiumNotice] = useState<SubsPremiumNotice>(null);
+  const [addonDowngradeModalVisible, setAddonDowngradeModalVisible] = useState(false);
+  const addonDowngradePendingRef = useRef<{ platform: 'apple' | 'google'; slots: 1 | 3 } | null>(null);
   const [verifyCode, setVerifyCode] = useState('');
   const [sendingCode, setSendingCode] = useState(false);
   const [verifyingCode, setVerifyingCode] = useState(false);
@@ -730,14 +896,24 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [user]);
 
   const isIos = Platform.OS === 'ios';
+  const showAppleIapDebugOverlay = isIos && shouldShowAppleIapDebugOverlayOnIos();
+  const safeAreaInsets = useSafeAreaInsets();
   const isAndroid = isAndroidBillingApp();
   const useStripeSubscriptionUi = shouldUseStripeSubscriptionUi();
   const [iosStorePricesByPlan, setIosStorePricesByPlan] = useState<
     Partial<Record<'bistro' | 'trattoria' | 'grand_maison', IosStorePlanPrice>>
   >({});
   const [iosStoreCatalogLoaded, setIosStoreCatalogLoaded] = useState(false);
+  const [iosBranchAddonDisplayPrices, setIosBranchAddonDisplayPrices] = useState<{
+    b1?: string;
+    b3?: string;
+  }>({});
   const lastAppleSyncAtRef = useRef(0);
-  const { buySubscription, restorePurchases: restoreGooglePlayPurchases } = useGooglePlayBilling();
+  const {
+    buySubscription,
+    restorePurchases: restoreGooglePlayPurchases,
+    playSubscriptions,
+  } = useGooglePlayBilling();
 
   useFocusEffect(
     useCallback(() => {
@@ -907,6 +1083,41 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     [refreshUser, refreshUserWithBackoffUntilUpdated]
   );
 
+  /** Igual que `refreshSubscriptionProfileImmediate` pero con marcas para el overlay debug Apple (no-op si overlay off). */
+  const refreshAppleIapDebug = useCallback(
+    async (expectedPlan?: CanonicalPlanId) => {
+      patchAppleIapDebugOverlay({
+        refresh_started: new Date().toISOString(),
+        lastIapEvent: 'refresh_started',
+      });
+      try {
+        await refreshSubscriptionProfileImmediate(expectedPlan);
+      } finally {
+        patchAppleIapDebugOverlay({
+          refresh_finished: new Date().toISOString(),
+          lastIapEvent: 'refresh_finished',
+        });
+      }
+    },
+    [refreshSubscriptionProfileImmediate]
+  );
+
+  const [iapDebugOverlayExpanded, setIapDebugOverlayExpanded] = useState(false);
+  const [iapDebugOverlaySnap, setIapDebugOverlaySnap] = useState(() => getAppleIapDebugOverlaySnapshot());
+
+  useEffect(() => {
+    if (!showAppleIapDebugOverlay) return undefined;
+    patchAppleIapDebugOverlay({
+      lastIapEvent: 'overlay_mounted',
+      requestPurchase_called: '—',
+      requestPurchase_resolved: '—',
+      hasImmediatePurchase: '—',
+    });
+    return subscribeAppleIapDebugOverlay(() => {
+      setIapDebugOverlaySnap(getAppleIapDebugOverlaySnapshot());
+    });
+  }, [showAppleIapDebugOverlay]);
+
   /** RPC enforce_subscription_expiry + refreshUser; fallback a solo refresh si la RPC falla. */
   const enforceExpiryAndRefresh = useCallback(async () => {
     try {
@@ -947,11 +1158,33 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
           await ensureIapConnection();
           let receipt = await getReceiptBase64(false);
           if (!receipt) receipt = await getReceiptBase64(true);
-          if (!receipt) return;
+          if (!receipt) {
+            console.warn(
+              '[Cellarium][Subscriptions][AppleSync]',
+              JSON.stringify({ stage: 'receipt_missing', intent: 'sync' })
+            );
+            return;
+          }
           const { error } = await validateAppleReceiptBackend(receipt, 'sync');
-          if (!error) await refreshSubscriptionProfileImmediate();
-        } catch {
-          /* silencioso: revalidación en segundo plano */
+          if (error) {
+            console.warn(
+              '[Cellarium][Subscriptions][AppleSync]',
+              JSON.stringify({
+                stage: 'validate_failed',
+                intent: 'sync',
+                code: error.code ?? null,
+                httpStatus: error.status ?? null,
+                appleStatus: error.appleStatus ?? null,
+              })
+            );
+            return;
+          }
+          await refreshSubscriptionProfileImmediate();
+        } catch (e) {
+          console.warn(
+            '[Cellarium][Subscriptions][AppleSync]',
+            e instanceof Error ? e.message : String(e)
+          );
         } finally {
           setLoadingAction(null);
         }
@@ -990,7 +1223,14 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   }, []);
 
   useEffect(() => {
-    if (!isIos) return;
+    if (!isIos) {
+      patchAppleIapDebugOverlay({
+        catalog_effect_skipped: new Date().toISOString(),
+        catalog_skip_reason: 'not_ios',
+        lastIapEvent: 'catalog_effect_skipped',
+      });
+      return;
+    }
     let cancelled = false;
 
     const extractDisplayPrice = (p: unknown): string | null => {
@@ -1022,16 +1262,42 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       return product.id ?? product.productId ?? '';
     };
 
+    const localeTag = language === 'en' ? 'en-US' : 'es-MX';
+    const displayPriceForProduct = (p: unknown): string | null => {
+      const raw = extractDisplayPrice(p);
+      if (raw != null && String(raw).trim().length > 0) return String(raw);
+      const n = extractPriceNumber(p);
+      if (n == null) return null;
+      const cur = extractCurrency(p) || 'MXN';
+      try {
+        return new Intl.NumberFormat(localeTag, { style: 'currency', currency: cur }).format(n);
+      } catch {
+        return `${n} ${cur}`;
+      }
+    };
+
     const loadCatalog = async () => {
+      patchAppleIapDebugOverlay({
+        catalog_effect_started: new Date().toISOString(),
+        catalog_effect_skipped: undefined,
+        catalog_skip_reason: '—',
+        lastIapEvent: 'catalog_effect_started',
+      });
       try {
         setIosStoreCatalogLoaded(false);
         const products = await loadAppleSubscriptionCatalog();
-        if (cancelled) return;
+        if (cancelled) {
+          patchAppleIapDebugOverlay({
+            catalog_skip_reason: 'effect_cancelled_before_map',
+            lastIapEvent: 'catalog_effect_cancelled',
+          });
+          return;
+        }
 
         const bySku = new Map<string, IosStorePlanPrice>();
         for (const product of products) {
           const productId = extractProductId(product);
-          const displayPrice = extractDisplayPrice(product);
+          const displayPrice = displayPriceForProduct(product);
           if (!productId || !displayPrice) continue;
           bySku.set(productId, {
             displayPrice,
@@ -1048,9 +1314,17 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
 
         if (__DEV__) console.log('[SUBS][iOS] StoreKit mapped prices', next);
         setIosStorePricesByPlan(next);
+        patchAppleIapDebugOverlay({
+          catalog_state_updated: new Date().toISOString(),
+          lastIapEvent: 'catalog_state_updated',
+        });
       } catch (error) {
         if (__DEV__) console.warn('[SUBS][iOS] Failed loading StoreKit catalog', error);
         setIosStorePricesByPlan({});
+        patchAppleIapDebugOverlay({
+          catalog_state_updated: new Date().toISOString(),
+          lastIapEvent: 'catalog_state_updated_error',
+        });
       } finally {
         if (!cancelled) setIosStoreCatalogLoaded(true);
       }
@@ -1060,6 +1334,19 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
+  }, [isIos, language]);
+
+  useEffect(() => {
+    if (!isIos) {
+      setIosBranchAddonDisplayPrices({});
+      return;
+    }
+    patchAppleIapDebugOverlay({
+      addon_catalog_skipped: new Date().toISOString(),
+      addon_catalog_skip_reason: 'subscriptions_screen_no_storekit_addon_fetch',
+      lastIapEvent: 'addon_catalog_skipped',
+    });
+    setIosBranchAddonDisplayPrices({});
   }, [isIos]);
 
   const mainPlans = useMemo((): Plan[] => {
@@ -1074,22 +1361,25 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     const grandStorePrice = iosStorePricesByPlan.grand_maison?.displayPrice;
     const loadingStorePriceLabel = language === 'en' ? 'Loading price...' : 'Cargando precio...';
     const bistroT = isIos
-      ? {
-          priceCardText: bistroStorePrice ?? loadingStorePriceLabel,
-          priceDetailText: bistroStorePrice ?? loadingStorePriceLabel,
-        }
+      ? bistroStorePrice
+        ? { priceCardText: bistroStorePrice, priceDetailText: bistroStorePrice }
+        : iosStoreCatalogLoaded
+          ? premiumTexts(PRICE_BISTRO_MXN)
+          : { priceCardText: loadingStorePriceLabel, priceDetailText: loadingStorePriceLabel }
       : premiumTexts(PRICE_BISTRO_MXN);
     const trattoriaT = isIos
-      ? {
-          priceCardText: trattoriaStorePrice ?? loadingStorePriceLabel,
-          priceDetailText: trattoriaStorePrice ?? loadingStorePriceLabel,
-        }
+      ? trattoriaStorePrice
+        ? { priceCardText: trattoriaStorePrice, priceDetailText: trattoriaStorePrice }
+        : iosStoreCatalogLoaded
+          ? premiumTexts(PRICE_TRATTORIA_MXN)
+          : { priceCardText: loadingStorePriceLabel, priceDetailText: loadingStorePriceLabel }
       : premiumTexts(PRICE_TRATTORIA_MXN);
     const grandT = isIos
-      ? {
-          priceCardText: grandStorePrice ?? loadingStorePriceLabel,
-          priceDetailText: grandStorePrice ?? loadingStorePriceLabel,
-        }
+      ? grandStorePrice
+        ? { priceCardText: grandStorePrice, priceDetailText: grandStorePrice }
+        : iosStoreCatalogLoaded
+          ? premiumTexts(PRICE_GRAND_MAISON_MXN)
+          : { priceCardText: loadingStorePriceLabel, priceDetailText: loadingStorePriceLabel }
       : premiumTexts(PRICE_GRAND_MAISON_MXN);
     return [
       {
@@ -1161,7 +1451,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         blockedFeatures: [],
       },
     ];
-  }, [t, isIos, iosStorePricesByPlan, language]);
+  }, [t, isIos, iosStorePricesByPlan, iosStoreCatalogLoaded, language]);
 
   useEffect(() => {
     for (const plan of mainPlans) {
@@ -1177,16 +1467,59 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const effectivePlan = getEffectivePlan(user ?? null);
   const hasActiveSub = effectivePlan !== 'cafe';
+  const androidBranchAddonDisplayPrices = useMemo(() => {
+    if (!isAndroid) {
+      return { b1: undefined as string | undefined, b3: undefined as string | undefined };
+    }
+    const extractDisplayPrice = (p: unknown): string | null => {
+      const product = p as {
+        displayPrice?: string;
+        localizedPrice?: string;
+        priceString?: string;
+      };
+      return product.displayPrice ?? product.localizedPrice ?? product.priceString ?? null;
+    };
+    const extractProductId = (p: unknown): string => {
+      const r = p as { id?: string; productId?: string };
+      return (r.productId ?? r.id ?? '').trim();
+    };
+    let b1: string | undefined;
+    let b3: string | undefined;
+    for (const p of playSubscriptions) {
+      const id = extractProductId(p);
+      const dp = extractDisplayPrice(p);
+      if (!id || !dp) continue;
+      if (id === GOOGLE_PLAY_PRODUCT_IDS.branch1) b1 = dp;
+      if (id === GOOGLE_PLAY_PRODUCT_IDS.branch3) b3 = dp;
+    }
+    return { b1, b3 };
+  }, [isAndroid, playSubscriptions]);
+
+  const getBranchAddonPriceLabel = useCallback(
+    (slots: 1 | 3): string => {
+      if (isIos) {
+        const d = slots === 1 ? iosBranchAddonDisplayPrices.b1 : iosBranchAddonDisplayPrices.b3;
+        if (d) return d;
+      }
+      if (isAndroid) {
+        const d = slots === 1 ? androidBranchAddonDisplayPrices.b1 : androidBranchAddonDisplayPrices.b3;
+        if (d) return d;
+      }
+      return slots === 1
+        ? t('subscription.branch_addon_price_fallback_1')
+        : t('subscription.branch_addon_price_fallback_3');
+    },
+    [isIos, isAndroid, iosBranchAddonDisplayPrices, androidBranchAddonDisplayPrices, t]
+  );
+
   const isPremium = hasActiveSub;
   const canPurchaseSelectedPlanOnIos = useMemo(() => {
     if (!isIos || !selectedPlan) return true;
     if (!iosStoreCatalogLoaded) return false;
     if (selectedPlan === 'cafe') return true;
-    if (selectedPlan === 'bistro') return Boolean(iosStorePricesByPlan.bistro?.displayPrice);
-    if (selectedPlan === 'trattoria') return Boolean(iosStorePricesByPlan.trattoria?.displayPrice);
-    if (selectedPlan === 'grand_maison') return Boolean(iosStorePricesByPlan.grand_maison?.displayPrice);
+    if (selectedPlan === 'bistro' || selectedPlan === 'trattoria' || selectedPlan === 'grand_maison') return true;
     return false;
-  }, [isIos, selectedPlan, iosStorePricesByPlan, iosStoreCatalogLoaded]);
+  }, [isIos, selectedPlan, iosStoreCatalogLoaded]);
   const showStripeAddonUi =
     useStripeSubscriptionUi &&
     !isIos &&
@@ -1332,32 +1665,82 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                     : plan.id === 'trattoria'
                       ? 'trattoria'
                       : 'grand_maison';
-                const { purchase } = await purchaseAppleSubscription(applePlan);
-                let receipt = await getReceiptBase64(false);
-                if (!receipt) receipt = await getReceiptBase64(true);
-                if (!receipt) {
-                  Alert.alert(t('msg.error'), t('subscription.error_generic'));
-                  return;
-                }
-                const { data, error } = await validateAppleReceiptBackend(receipt, 'purchase');
-                if (error) {
-                  if (error.code === 'STRIPE_SUBSCRIPTION_ACTIVE') {
-                    Alert.alert(t('msg.error'), error.message);
-                  } else if (error.code === 'NO_SESSION') {
-                    Alert.alert(t('msg.error'), error.message ?? t('subscription.error_no_session'));
-                  } else {
-                    const base = error.message ?? t('subscription.error_generic');
+                const purchaseResult = await purchaseAppleSubscription(applePlan);
+                if (purchaseResult.duplicateRecoverySyncDone) {
+                  console.log(
+                    '[Cellarium][Subscriptions][Apple]',
+                    JSON.stringify({ stage: 'duplicate_recovery_done', applePlan })
+                  );
+                  const expected =
+                    selectedPlan === 'bistro'
+                      ? 'bistro'
+                      : selectedPlan === 'trattoria'
+                        ? 'trattoria'
+                        : selectedPlan === 'grand_maison'
+                          ? 'grand-maison'
+                          : undefined;
+                  await refreshAppleIapDebug(expected);
+                  if (purchaseResult.duplicateRecoveryLapsed) {
                     Alert.alert(
-                      t('msg.error'),
-                      `${base}\n\n${t('subscription.apple_backend_retry_hint')}`
+                      t('subscription.apple_sync_lapsed_title'),
+                      t('subscription.apple_sync_lapsed_message')
                     );
+                  } else {
+                    Alert.alert(t('subscription.apple_success_title'), t('subscription.apple_success_message'));
                   }
                   return;
                 }
+                const { purchase } = purchaseResult;
+                console.log(
+                  '[Cellarium][Subscriptions][Apple]',
+                  JSON.stringify({ stage: 'after_store_purchase', applePlan })
+                );
+                let receipt = await getReceiptBase64(false);
+                if (!receipt) receipt = await getReceiptBase64(true);
+                patchAppleIapDebugOverlay({
+                  lastIapEvent: 'screen_receipt_loaded',
+                  receipt_hasReceipt: receipt ? 'yes' : 'no',
+                  receipt_length: receipt?.length ?? 0,
+                });
+                if (!receipt) {
+                  console.warn(
+                    '[Cellarium][Subscriptions][Apple]',
+                    JSON.stringify({ stage: 'receipt_missing', intent: 'purchase' })
+                  );
+                  patchAppleIapDebugOverlay({
+                    lastIapEvent: 'screen_receipt_missing',
+                    flowHintNoAppleConfirmation:
+                      'No se recibió confirmación de Apple. Intenta Restaurar compras.',
+                  });
+                  Alert.alert(t('msg.error'), t('subscription.apple_error_receipt_recover_instruction'));
+                  return;
+                }
+                patchAppleIapDebugOverlay({
+                  lastIapEvent: 'screen_validate_start',
+                  validate_start: 'purchase',
+                  validate_error_code: null,
+                });
+                const { data, error } = await validateAppleReceiptBackend(receipt, 'purchase');
+                if (error) {
+                  patchAppleIapDebugOverlay({
+                    validate_result: 'error',
+                    validate_error_code: error.code ?? null,
+                    synced: null,
+                    lastIapEvent: 'screen_validate_error',
+                  });
+                  alertAppleReceiptFailure(t, error);
+                  return;
+                }
                 const synced = data?.synced;
-                const ok = data?.ok === true;
-                if (synced === 'active' || ok) {
-                  await finishAppleTransactionIfNeeded(purchase);
+                if (synced === 'active') {
+                  patchAppleIapDebugOverlay({
+                    validate_result: 'ok',
+                    validate_error_code: null,
+                    synced: 'active',
+                    lastIapEvent: 'screen_validate_active',
+                    flowHintNoAppleConfirmation: undefined,
+                  });
+                  if (purchase) await finishAppleTransactionIfNeeded(purchase);
                   await finishApplePurchasesAfterBackendSync();
                   const expected =
                     selectedPlan === 'bistro'
@@ -1367,20 +1750,62 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                         : selectedPlan === 'grand_maison'
                           ? 'grand-maison'
                           : undefined;
-                  await refreshSubscriptionProfileImmediate(expected);
+                  await refreshAppleIapDebug(expected);
                   Alert.alert(t('subscription.apple_success_title'), t('subscription.apple_success_message'));
                 } else if (synced === 'lapsed') {
-                  await finishAppleTransactionIfNeeded(purchase);
+                  patchAppleIapDebugOverlay({
+                    validate_result: 'ok',
+                    validate_error_code: null,
+                    synced: 'lapsed',
+                    lastIapEvent: 'screen_validate_lapsed',
+                    flowHintNoAppleConfirmation: undefined,
+                  });
+                  if (purchase) await finishAppleTransactionIfNeeded(purchase);
                   await finishApplePurchasesAfterBackendSync();
-                  await refreshSubscriptionProfileImmediate();
+                  await refreshAppleIapDebug();
                   Alert.alert(
                     t('subscription.apple_sync_lapsed_title'),
                     t('subscription.apple_sync_lapsed_message')
                   );
                 } else {
+                  patchAppleIapDebugOverlay({
+                    validate_result: 'unclear',
+                    synced: synced != null ? String(synced) : null,
+                    lastIapEvent: 'screen_validate_unclear',
+                    flowHintNoAppleConfirmation:
+                      'No se recibió confirmación de Apple. Intenta Restaurar compras.',
+                  });
                   Alert.alert(t('msg.error'), t('subscription.apple_sync_unclear_message'));
                 }
               } catch (error: unknown) {
+                if (error instanceof Error && error.message === 'Compra cancelada') {
+                  return;
+                }
+                if (error instanceof AppleIapPurchaseUnconfirmedError) {
+                  patchAppleIapDebugOverlay({
+                    lastIapEvent: 'screen_catch_purchase_unconfirmed',
+                    flowHintNoAppleConfirmation:
+                      'No se recibió confirmación de Apple. Intenta Restaurar compras.',
+                  });
+                  Alert.alert(t('msg.error'), t('subscription.apple_purchase_unconfirmed_message'));
+                  return;
+                }
+                if (error instanceof AppleReceiptRecoveryError) {
+                  alertAppleReceiptFailure(t, error.detail);
+                  return;
+                }
+                if (error instanceof AppleIapStorePendingError) {
+                  Alert.alert(t('msg.error'), t('subscription.apple_iap_storekit_pending_message'));
+                  return;
+                }
+                const rawMsg = error instanceof Error ? error.message : String(error ?? '');
+                if (
+                  rawMsg.includes('com.margelo.nitro') ||
+                  rawMsg.toLowerCase().includes('service-error')
+                ) {
+                  Alert.alert(t('msg.error'), t('subscription.apple_iap_storekit_pending_message'));
+                  return;
+                }
                 captureCriticalError(error, {
                   feature: 'apple_iap_purchase',
                   screen: 'Subscriptions',
@@ -1505,26 +1930,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     try {
       setLoadingAction('apple-restore');
-      await restoreApplePurchasesForReceipt();
-      let receipt = await getReceiptBase64(false);
-      if (!receipt) receipt = await getReceiptBase64(true);
-      if (!receipt) {
-        Alert.alert(t('msg.error'), t('subscription.error_generic'));
-        return;
-      }
-      const { data, error } = await validateAppleReceiptBackend(receipt, 'restore');
-      if (error) {
-        if (error.code === 'NO_SESSION') {
-          Alert.alert(t('msg.error'), error.message ?? t('subscription.error_no_session'));
-        } else {
-          const base = error.message ?? t('subscription.error_generic');
-          Alert.alert(t('msg.error'), `${base}\n\n${t('subscription.apple_backend_retry_hint')}`);
-        }
-        return;
-      }
-      await finishApplePurchasesAfterBackendSync();
-      await refreshSubscriptionProfileImmediate();
-      if (data?.synced === 'lapsed') {
+      const r = await recoverAppleIapViaReceipt('restore');
+      await refreshAppleIapDebug();
+      if (r.syncedLapsed) {
         Alert.alert(
           t('subscription.apple_sync_lapsed_title'),
           t('subscription.apple_sync_lapsed_message')
@@ -1533,6 +1941,22 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         Alert.alert(t('subscription.apple_success_title'), t('subscription.apple_success_message'));
       }
     } catch (error: unknown) {
+      if (error instanceof AppleReceiptRecoveryError) {
+        alertAppleReceiptFailure(t, error.detail);
+        return;
+      }
+      if (error instanceof AppleIapStorePendingError) {
+        Alert.alert(t('msg.error'), t('subscription.apple_iap_storekit_pending_message'));
+        return;
+      }
+      const rawRestore = error instanceof Error ? error.message : String(error ?? '');
+      if (
+        rawRestore.includes('com.margelo.nitro') ||
+        rawRestore.toLowerCase().includes('service-error')
+      ) {
+        Alert.alert(t('msg.error'), t('subscription.apple_iap_storekit_pending_message'));
+        return;
+      }
       captureCriticalError(error, {
         feature: 'apple_restore',
         screen: 'Subscriptions',
@@ -1542,7 +1966,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     } finally {
       setLoadingAction(null);
     }
-  }, [user, refreshSubscriptionProfileImmediate, t]);
+  }, [user, refreshAppleIapDebug, t]);
 
   const handleRestoreGooglePurchases = useCallback(async () => {
     if (!isAndroid) return;
@@ -1583,6 +2007,140 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }, [isAndroid, user, refreshSubscriptionProfileImmediate, t, restoreGooglePlayPurchases, refreshUser]);
 
+  const runAppleBranchAddonPurchase = useCallback(
+    async (slots: 1 | 3) => {
+      try {
+        setLoadingAction('apple-purchase');
+        const addonResult = await purchaseAppleBranchAddon(slots);
+        if (addonResult.duplicateRecoverySyncDone) {
+          await refreshAppleIapDebug();
+          if (addonResult.duplicateRecoveryLapsed) {
+            Alert.alert(
+              t('subscription.apple_sync_lapsed_title'),
+              t('subscription.apple_sync_lapsed_message')
+            );
+          } else {
+            Alert.alert(t('subscription.apple_success_title'), t('subscription.apple_success_message'));
+          }
+          return;
+        }
+        const { purchase } = addonResult;
+        let receipt = await getReceiptBase64(false);
+        if (!receipt) receipt = await getReceiptBase64(true);
+        patchAppleIapDebugOverlay({
+          lastIapEvent: 'addon_screen_receipt_loaded',
+          receipt_hasReceipt: receipt ? 'yes' : 'no',
+          receipt_length: receipt?.length ?? 0,
+        });
+        if (!receipt) {
+          console.warn(
+            '[Cellarium][Subscriptions][Apple]',
+            JSON.stringify({ stage: 'receipt_missing', intent: 'branch_addon' })
+          );
+          patchAppleIapDebugOverlay({
+            lastIapEvent: 'addon_screen_receipt_missing',
+            flowHintNoAppleConfirmation:
+              'No se recibió confirmación de Apple. Intenta Restaurar compras.',
+          });
+          Alert.alert(t('msg.error'), t('subscription.apple_error_receipt_recover_instruction'));
+          return;
+        }
+        patchAppleIapDebugOverlay({
+          lastIapEvent: 'addon_screen_validate_start',
+          validate_start: 'purchase',
+          validate_error_code: null,
+        });
+        const { data, error } = await validateAppleReceiptBackend(receipt, 'purchase');
+        if (error) {
+          patchAppleIapDebugOverlay({
+            validate_result: 'error',
+            validate_error_code: error.code ?? null,
+            synced: null,
+            lastIapEvent: 'addon_screen_validate_error',
+          });
+          alertAppleReceiptFailure(t, error);
+          return;
+        }
+        const synced = data?.synced;
+        if (synced === 'active') {
+          patchAppleIapDebugOverlay({
+            validate_result: 'ok',
+            validate_error_code: null,
+            synced: 'active',
+            lastIapEvent: 'addon_screen_validate_active',
+            flowHintNoAppleConfirmation: undefined,
+          });
+          if (purchase) await finishAppleTransactionIfNeeded(purchase as never);
+          await finishApplePurchasesAfterBackendSync();
+          await refreshAppleIapDebug();
+          Alert.alert(t('subscription.apple_success_title'), t('subscription.apple_success_message'));
+        } else if (synced === 'lapsed') {
+          patchAppleIapDebugOverlay({
+            validate_result: 'ok',
+            validate_error_code: null,
+            synced: 'lapsed',
+            lastIapEvent: 'addon_screen_validate_lapsed',
+            flowHintNoAppleConfirmation: undefined,
+          });
+          if (purchase) await finishAppleTransactionIfNeeded(purchase as never);
+          await finishApplePurchasesAfterBackendSync();
+          await refreshAppleIapDebug();
+          Alert.alert(t('subscription.apple_sync_lapsed_title'), t('subscription.apple_sync_lapsed_message'));
+        } else {
+          patchAppleIapDebugOverlay({
+            validate_result: 'unclear',
+            synced: synced != null ? String(synced) : null,
+            lastIapEvent: 'addon_screen_validate_unclear',
+            flowHintNoAppleConfirmation:
+              'No se recibió confirmación de Apple. Intenta Restaurar compras.',
+          });
+          Alert.alert(t('msg.error'), t('subscription.apple_sync_unclear_message'));
+        }
+      } catch (error: unknown) {
+        if (error instanceof Error && error.message === 'Compra cancelada') {
+          return;
+        }
+        if (error instanceof AppleIapPurchaseUnconfirmedError) {
+          patchAppleIapDebugOverlay({
+            lastIapEvent: 'addon_screen_catch_purchase_unconfirmed',
+            flowHintNoAppleConfirmation:
+              'No se recibió confirmación de Apple. Intenta Restaurar compras.',
+          });
+          Alert.alert(t('msg.error'), t('subscription.apple_purchase_unconfirmed_message'));
+          return;
+        }
+        if (error instanceof AppleReceiptRecoveryError) {
+          alertAppleReceiptFailure(t, error.detail);
+          return;
+        }
+        if (error instanceof AppleIapStorePendingError) {
+          Alert.alert(t('msg.error'), t('subscription.apple_iap_storekit_pending_message'));
+          return;
+        }
+        const rawAddon = error instanceof Error ? error.message : String(error ?? '');
+        if (
+          rawAddon.includes('com.margelo.nitro') ||
+          rawAddon.toLowerCase().includes('service-error')
+        ) {
+          Alert.alert(t('msg.error'), t('subscription.apple_iap_storekit_pending_message'));
+          return;
+        }
+        captureCriticalError(error, {
+          feature: 'apple_iap_branch_addon',
+          screen: 'Subscriptions',
+          app_area: 'billing',
+        });
+        Alert.alert(
+          t('msg.error'),
+          error instanceof Error ? error.message : t('subscription.error_generic')
+        );
+      } finally {
+        setLoadingAction(null);
+      }
+    },
+    [t, refreshAppleIapDebug]
+  );
+
   const handleAppleBranchAddon = useCallback(
     async (slots: 1 | 3) => {
       if (!isIos) return;
@@ -1598,39 +2156,75 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         );
         return;
       }
+      const cur = user.subscription_branch_addons_count ?? 0;
+      if (slots === 1 && cur === 3) {
+        addonDowngradePendingRef.current = { platform: 'apple', slots };
+        setAddonDowngradeModalVisible(true);
+        return;
+      }
+      await runAppleBranchAddonPurchase(slots);
+    },
+    [user, t, isIos, runAppleBranchAddonPurchase]
+  );
+
+  const runGoogleBranchAddonPurchase = useCallback(
+    async (slots: 1 | 3) => {
       try {
-        setLoadingAction('apple-purchase');
-        const { purchase } = await purchaseAppleBranchAddon(slots);
-        let receipt = await getReceiptBase64(false);
-        if (!receipt) receipt = await getReceiptBase64(true);
-        if (!receipt) {
+        setLoadingAction('google-addon-purchase');
+        const { purchase } = await purchaseGoogleBranchAddon(slots);
+        const token = purchase.purchaseToken?.trim();
+        const productId = purchase.productId?.trim();
+        if (!token || !productId) {
           Alert.alert(t('msg.error'), t('subscription.error_generic'));
           return;
         }
-        const { data, error } = await validateAppleReceiptBackend(receipt, 'purchase');
+        const { data, error } = await validateGooglePurchaseBackend({
+          purchaseToken: token,
+          productId,
+          packageName: getCellariumAndroidPackageName(),
+        });
         if (error) {
-          const base = error.message ?? t('subscription.error_generic');
-          Alert.alert(t('msg.error'), `${base}\n\n${t('subscription.apple_backend_retry_hint')}`);
+          const code = error.code;
+          if (code === 'STRIPE_SUBSCRIPTION_ACTIVE' || code === 'APPLE_SUBSCRIPTION_ACTIVE') {
+            Alert.alert(t('msg.error'), error.message ?? '');
+          } else if (code === 'ADDON_WITHOUT_BASE' || code === 'BASE_SUBSCRIPTION_INACTIVE') {
+            Alert.alert(t('msg.error'), error.message ?? t('subscription.error_generic'));
+          } else if (code === 'PLAY_PURCHASE_PENDING') {
+            Alert.alert(t('msg.error'), error.message ?? t('subscription.google_pending_message'));
+          } else if (code === 'PLAY_API_ERROR' || error.status === 502) {
+            Alert.alert(t('msg.error'), error.message ?? t('subscription.error_generic'));
+          } else {
+            Alert.alert(t('msg.error'), error.message ?? t('subscription.error_generic'));
+          }
           return;
         }
-        const synced = data?.synced;
-        const ok = data?.ok === true;
-        if (synced === 'active' || ok) {
-          await finishAppleTransactionIfNeeded(purchase as never);
-          await finishApplePurchasesAfterBackendSync();
+        const pendingCode = data?.code as string | undefined;
+        if (pendingCode === 'PLAY_PURCHASE_PENDING') {
+          Alert.alert(t('msg.error'), t('subscription.google_pending_message'));
+          return;
+        }
+        if (data?.synced === 'lapsed' || data?.reason === 'subscription_inactive_or_expired') {
+          await finishGoogleTransactionIfNeeded(purchase);
           await refreshSubscriptionProfileImmediate();
-          Alert.alert(t('subscription.apple_success_title'), t('subscription.apple_success_message'));
-        } else if (synced === 'lapsed') {
-          await finishAppleTransactionIfNeeded(purchase as never);
-          await finishApplePurchasesAfterBackendSync();
+          Alert.alert(
+            t('subscription.apple_sync_lapsed_title'),
+            t('subscription.apple_sync_lapsed_message')
+          );
+          return;
+        }
+        if (data?.synced === 'active' || data?.ok === true) {
+          await finishGoogleTransactionIfNeeded(purchase);
           await refreshSubscriptionProfileImmediate();
-          Alert.alert(t('subscription.apple_sync_lapsed_title'), t('subscription.apple_sync_lapsed_message'));
+          Alert.alert(t('subscription.google_success_title'), t('subscription.google_success_message'));
         } else {
-          Alert.alert(t('msg.error'), t('subscription.apple_sync_unclear_message'));
+          Alert.alert(t('msg.error'), t('subscription.error_generic'));
         }
       } catch (error: unknown) {
+        if (error instanceof Error && error.message === 'Compra cancelada') {
+          return;
+        }
         captureCriticalError(error, {
-          feature: 'apple_iap_branch_addon',
+          feature: 'google_iap_branch_addon',
           screen: 'Subscriptions',
           app_area: 'billing',
         });
@@ -1642,8 +2236,46 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         setLoadingAction(null);
       }
     },
-    [user, t, refreshSubscriptionProfileImmediate, isIos]
+    [t, refreshSubscriptionProfileImmediate]
   );
+
+  const handleGoogleBranchAddon = useCallback(
+    async (slots: 1 | 3) => {
+      if (!isAndroid) return;
+      if (!user?.id) {
+        Alert.alert(t('msg.error'), t('subscription.error_no_session'));
+        return;
+      }
+      if (!isSensitiveAllowed(user)) {
+        Alert.alert(
+          'Verificación requerida',
+          'Verifica tu correo en el bloque de arriba para continuar.',
+          [{ text: 'Entendido', style: 'cancel' }]
+        );
+        return;
+      }
+      const cur = user.subscription_branch_addons_count ?? 0;
+      if (slots === 1 && cur === 3) {
+        addonDowngradePendingRef.current = { platform: 'google', slots };
+        setAddonDowngradeModalVisible(true);
+        return;
+      }
+      await runGoogleBranchAddonPurchase(slots);
+    },
+    [user, t, isAndroid, runGoogleBranchAddonPurchase]
+  );
+
+  const confirmBranchAddonDowngrade = useCallback(() => {
+    const pending = addonDowngradePendingRef.current;
+    setAddonDowngradeModalVisible(false);
+    addonDowngradePendingRef.current = null;
+    if (!pending) return;
+    if (pending.platform === 'apple') {
+      void runAppleBranchAddonPurchase(pending.slots);
+    } else {
+      void runGoogleBranchAddonPurchase(pending.slots);
+    }
+  }, [runAppleBranchAddonPurchase, runGoogleBranchAddonPurchase]);
 
   const handleManageSubscription = useCallback(async () => {
     if (!user?.id) {
@@ -2331,23 +2963,97 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                 updateDisabled={needsEmailVerification}
               />
             ) : null}
-            {isIos && user?.billing_provider === 'apple' && hasActiveSub ? (
-              <View style={styles.iosBranchAddonBlock}>
-                <Text style={styles.appleRestoreHint}>{t('subscription.ios_branch_addon_intro')}</Text>
-                <TouchableOpacity
-                  style={[styles.manageButton, (isProcessing || needsEmailVerification) && styles.buttonDisabled]}
-                  onPress={() => void handleAppleBranchAddon(1)}
-                  disabled={isProcessing || needsEmailVerification}
-                >
-                  <Text style={styles.manageButtonText}>{t('subscription.ios_branch_addon_1')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.manageButton, (isProcessing || needsEmailVerification) && styles.buttonDisabled]}
-                  onPress={() => void handleAppleBranchAddon(3)}
-                  disabled={isProcessing || needsEmailVerification}
-                >
-                  <Text style={styles.manageButtonText}>{t('subscription.ios_branch_addon_3')}</Text>
-                </TouchableOpacity>
+            {((isIos && user?.billing_provider === 'apple') ||
+              (isAndroid && user?.billing_provider === 'google')) &&
+            hasActiveSub ? (
+              <View style={styles.branchAddonReviewCard}>
+                <LinearGradient
+                  colors={[...CELLARIUM_GRADIENT]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.branchAddonReviewGradientBand}
+                />
+                <View style={styles.branchAddonReviewCardInner}>
+                  <Text style={styles.branchAddonReviewSectionTitle}>
+                    {t('subscription.branch_addon_section_title')}
+                  </Text>
+                  <Text style={styles.branchAddonReviewFinePrint}>
+                    {t('subscription.branch_addon_billed_additional')}
+                  </Text>
+                  <Text style={styles.branchAddonReviewBullet}>{t('subscription.branch_addon_auto_renew_monthly')}</Text>
+                  <Text style={styles.branchAddonReviewBullet}>{t('subscription.branch_addon_duration_monthly')}</Text>
+                  <Text style={[styles.branchAddonReviewBullet, styles.branchAddonReviewBulletLast]}>
+                    {t('subscription.branch_addon_non_cumulative')}
+                  </Text>
+
+                  <View style={styles.branchAddonProductBlock}>
+                    <View style={styles.branchAddonProductTitleRow}>
+                      <Text style={styles.branchAddonProductTitle}>
+                        {t('subscription.branch_addon_product_plus1_title')}
+                      </Text>
+                      {(user?.subscription_branch_addons_count ?? 0) === 1 ? (
+                        <View style={styles.branchAddonActivePill}>
+                          <Text style={styles.branchAddonActivePillText}>
+                            {t('subscription.branch_addon_active_badge')}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={styles.branchAddonSkuHint} numberOfLines={2}>
+                      {isIos ? APPLE_IAP_PRODUCT_IDS.branch1 : GOOGLE_PLAY_PRODUCT_IDS.branch1}
+                    </Text>
+                    <Text style={styles.branchAddonPriceText}>{getBranchAddonPriceLabel(1)}</Text>
+                    <Text style={styles.branchAddonLimitText}>{t('subscription.branch_addon_limit_result_1')}</Text>
+                    <TouchableOpacity
+                      style={[
+                        styles.secondaryButton,
+                        styles.branchAddonCtaButton,
+                        (isProcessing || needsEmailVerification) && styles.buttonDisabled,
+                      ]}
+                      onPress={() => void (isIos ? handleAppleBranchAddon(1) : handleGoogleBranchAddon(1))}
+                      disabled={isProcessing || needsEmailVerification}
+                    >
+                      <Text style={styles.secondaryButtonText}>{t('subscription.branch_addon_cta_plus1')}</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.branchAddonDivider} />
+
+                  <View style={styles.branchAddonProductBlock}>
+                    <View style={styles.branchAddonProductTitleRow}>
+                      <Text style={styles.branchAddonProductTitle}>
+                        {t('subscription.branch_addon_product_plus3_title')}
+                      </Text>
+                      {(user?.subscription_branch_addons_count ?? 0) === 3 ? (
+                        <View style={styles.branchAddonActivePill}>
+                          <Text style={styles.branchAddonActivePillText}>
+                            {t('subscription.branch_addon_active_badge')}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={styles.branchAddonSkuHint} numberOfLines={2}>
+                      {isIos ? APPLE_IAP_PRODUCT_IDS.branch3 : GOOGLE_PLAY_PRODUCT_IDS.branch3}
+                    </Text>
+                    <Text style={styles.branchAddonPriceText}>{getBranchAddonPriceLabel(3)}</Text>
+                    <Text style={styles.branchAddonLimitText}>{t('subscription.branch_addon_limit_result_3')}</Text>
+                    <TouchableOpacity
+                      style={[
+                        styles.secondaryButton,
+                        styles.branchAddonCtaButton,
+                        (isProcessing || needsEmailVerification) && styles.buttonDisabled,
+                      ]}
+                      onPress={() => void (isIos ? handleAppleBranchAddon(3) : handleGoogleBranchAddon(3))}
+                      disabled={isProcessing || needsEmailVerification}
+                    >
+                      <Text style={styles.secondaryButtonText}>{t('subscription.branch_addon_cta_plus3')}</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={styles.branchAddonStoreFootnote}>
+                    {isIos ? t('subscription.ios_branch_addon_intro') : t('subscription.android_branch_addon_intro')}
+                  </Text>
+                </View>
               </View>
             ) : null}
             {Platform.OS === 'web' ? (
@@ -2443,7 +3149,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                         ? t('subscription.apple_loading_restore')
                         : loadingAction === 'apple-sync'
                           ? t('subscription.apple_loading_sync')
-                          : t('subscription.loading_updating_subscription')
+                          : loadingAction === 'google-addon-purchase'
+                            ? t('subscription.google_loading_addon_purchase')
+                            : t('subscription.loading_updating_subscription')
           }
           size={140}
         />
@@ -2491,6 +3199,44 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
               : t('subscription.upgrade_success_message')}
         </Text>
       </CellariumModal>
+
+      <CellariumModal
+        visible={addonDowngradeModalVisible}
+        onRequestClose={() => {
+          setAddonDowngradeModalVisible(false);
+          addonDowngradePendingRef.current = null;
+        }}
+        title={t('subscription.branch_addon_downgrade_title')}
+        scrollable={false}
+        presentation="card"
+        footer={
+          <View style={{ gap: 12 }}>
+            <CellariumPrimaryButton title={t('subscription.branch_addon_downgrade_confirm')} onPress={confirmBranchAddonDowngrade} />
+            <TouchableOpacity
+              onPress={() => {
+                setAddonDowngradeModalVisible(false);
+                addonDowngradePendingRef.current = null;
+              }}
+              hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
+              accessibilityRole="button"
+            >
+              <Text style={styles.subsPremiumModalReceiptLink}>{t('btn.cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        }
+      >
+        <Text style={styles.subsPremiumModalBody}>{t('subscription.branch_addon_downgrade_body')}</Text>
+      </CellariumModal>
+      {showAppleIapDebugOverlay ? (
+        <View style={iapDebugOverlayStyles.floatingRoot} pointerEvents="box-none">
+          <AppleIapSubscriptionsDebugOverlay
+            snapshot={iapDebugOverlaySnap}
+            expanded={iapDebugOverlayExpanded}
+            onToggle={() => setIapDebugOverlayExpanded((v) => !v)}
+            bottomInset={safeAreaInsets.bottom}
+          />
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 };
@@ -3020,10 +3766,98 @@ const styles = StyleSheet.create({
   appleRestoreBlock: {
     marginBottom: 20,
   },
-  iosBranchAddonBlock: {
-    marginBottom: 16,
+  branchAddonReviewCard: {
+    borderRadius: CELLARIUM_LAYOUT.cardRadius,
+    backgroundColor: CELLARIUM.card,
+    marginBottom: CELLARIUM_LAYOUT.sectionGap,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: CELLARIUM.border,
+  },
+  branchAddonReviewGradientBand: {
+    height: 5,
+    width: '100%',
+  },
+  branchAddonReviewCardInner: {
     paddingHorizontal: CELLARIUM_LAYOUT.headerHorizontalPadding,
+    paddingTop: 14,
+    paddingBottom: CELLARIUM_LAYOUT.sectionGap,
+  },
+  branchAddonReviewSectionTitle: {
+    ...CELLARIUM_TEXT.sectionTitle,
+    marginBottom: 10,
+  },
+  branchAddonReviewFinePrint: {
+    ...CELLARIUM_TEXT.caption,
+    marginBottom: 10,
+    color: CELLARIUM.text,
+  },
+  branchAddonReviewBullet: {
+    ...CELLARIUM_TEXT.caption,
+    marginBottom: 6,
+    paddingLeft: 4,
+  },
+  branchAddonReviewBulletLast: {
+    marginBottom: 18,
+  },
+  branchAddonProductBlock: {
+    marginBottom: 4,
+  },
+  branchAddonProductTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 10,
+  },
+  branchAddonProductTitle: {
+    ...CELLARIUM_TEXT.cardTitle,
+    flex: 1,
+  },
+  branchAddonSkuHint: {
+    ...CELLARIUM_TEXT.caption,
+    fontSize: 11,
+    marginTop: 6,
+    opacity: 0.92,
+  },
+  branchAddonPriceText: {
+    ...CELLARIUM_TEXT.body,
+    fontWeight: '700',
+    fontSize: 17,
+    marginTop: 8,
+    color: CELLARIUM.text,
+  },
+  branchAddonLimitText: {
+    ...CELLARIUM_TEXT.caption,
+    marginTop: 8,
+    marginBottom: 4,
+    color: CELLARIUM.muted,
+  },
+  branchAddonDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: CELLARIUM.border,
+    marginVertical: 18,
+  },
+  branchAddonActivePill: {
+    backgroundColor: CELLARIUM.primaryDark,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: CELLARIUM_LAYOUT.buttonRadius / 2,
+  },
+  branchAddonActivePillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: CELLARIUM.textOnDark,
+    letterSpacing: 0.3,
+  },
+  branchAddonCtaButton: {
+    marginTop: 14,
+    marginBottom: 0,
+  },
+  branchAddonStoreFootnote: {
+    ...CELLARIUM_TEXT.caption,
+    marginTop: 16,
+    textAlign: 'center',
+    color: CELLARIUM.muted,
   },
   appleRestoreButton: {
     marginBottom: 8,

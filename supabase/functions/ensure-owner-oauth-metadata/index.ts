@@ -4,6 +4,7 @@
 // También sincroniza nombre desde user_metadata (full_name) cuando aplica.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { invokeWelcomeEmail } from '../_shared/invoke_welcome_email.ts';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -52,7 +53,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow, error: userErr } = await supabaseAdmin
       .from('users')
-      .select('id, role, signup_method, owner_email_verified, name, email')
+      .select('id, role, signup_method, owner_email_verified, name, email, welcome_email_sent_at')
       .eq('id', authUser.id)
       .maybeSingle();
 
@@ -102,7 +103,16 @@ Deno.serve(async (req: Request) => {
         (!currentName || isRelayPlaceholderName(currentName, rowEmail || authUser.email)),
     );
 
+    const welcomePending =
+      userRow.welcome_email_sent_at == null &&
+      typeof userRow.email === 'string' &&
+      userRow.email.trim().length > 0;
+
     if (!needsSignup && !shouldFillName) {
+      // Perfil ya completo en trigger (signup_method/name); primer login OAuth sin UPDATE.
+      if (welcomePending) {
+        void invokeWelcomeEmail(authUser.id);
+      }
       return jsonResponse({ success: true, updated: false }, 200);
     }
 
@@ -118,6 +128,11 @@ Deno.serve(async (req: Request) => {
     if (updateErr) {
       console.error('[ensure-owner-oauth-metadata] update failed', updateErr.message);
       return jsonResponse({ code: 'DB_ERROR', message: 'Error al actualizar' }, 500);
+    }
+
+    // Primera sincronización OAuth con perfil listo: needsSignup o bienvenida aún pendiente.
+    if (needsSignup || welcomePending) {
+      void invokeWelcomeEmail(authUser.id);
     }
 
     return jsonResponse({ success: true, updated: true }, 200);

@@ -3,6 +3,7 @@
 // Requiere: EMAIL_VERIFICATION_SALT
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { invokeWelcomeEmail } from '../_shared/invoke_welcome_email.ts';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -98,6 +99,8 @@ Deno.serve(async (req: Request) => {
       console.error('[verify-owner-email] update user failed', updateUserErr.message);
       return jsonResponse({ code: 'DB_ERROR', message: 'Error al actualizar perfil' }, 500);
     }
+
+    void invokeWelcomeEmail(authUser.id);
 
     return jsonResponse({ success: true, message: 'Correo verificado correctamente' }, 200);
   } catch (e: unknown) {

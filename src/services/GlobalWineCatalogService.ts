@@ -405,7 +405,7 @@ export async function fetchGlobalWines({
     // ✅ PRE-FASE 3: Removido count: 'exact' para mejor performance (no necesario en scroll infinito)
     let query = supabase
       .from('wines_canonical')
-      .select('id, winery, label, image_canonical_url, country, region, color, abv')
+      .select('id, winery, label, image_canonical_url, country, region, color, abv, grapes')
       .order('label', { ascending: true })
       .range(from, to);
 
@@ -517,7 +517,7 @@ export async function listWinesKeyset({
     // Construir query base con orden por ID (más eficiente que label JSONB)
     let query = supabase
       .from('wines_canonical_browse')
-      .select('id, winery, label, image_canonical_url, country, region, color, abv, color_en, color_es')
+      .select('id, winery, label, image_canonical_url, country, region, color, abv, grapes, color_en, color_es')
       .order('id', { ascending: true })
       .limit(limit + 1); // +1 para detectar si hay más páginas
 

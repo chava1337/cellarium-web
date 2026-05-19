@@ -28,7 +28,7 @@ const config = {
     name: "Cellarium",
     slug: "cellarium-wine-catalog",
     // Versión de marketing. Con appVersionSource: local en eas.json, EAS usa esta versión y android.versionCode del repo.
-    version: "1.1.1",
+    version: "1.2.1",
     orientation: "default",
     userInterfaceStyle: "light",
     // App Store, Play listing, iOS: PNG 1024×1024 recomendado.
@@ -66,7 +66,7 @@ const config = {
       orientation: "default",
       bundleIdentifier: "com.cellarium.winecatalog",
       // CFBundleVersion: debe ser > al último build subido a TestFlight/App Store.
-      buildNumber: "14",
+      buildNumber: "24",
       associatedDomains: [
         "applinks:cellarium.net",
         "applinks:www.cellarium.net"
@@ -85,7 +85,7 @@ const config = {
       package: "com.cellarium.winecatalog",
       // versionName en Gradle = expo.version. versionCode: entero monotónico por subida a Play (alinear con android/app/build.gradle).
       // Debe ser SIEMPRE mayor que el último subido a Play (Play rechaza duplicados).
-      versionCode: 13,
+      versionCode: 16,
       // Foreground: adaptive icon (dejar margen ~20–30% para la máscara del sistema).
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon-v2.png",
@@ -135,6 +135,10 @@ const config = {
       playStoreUrl: "https://play.google.com/store/apps/details?id=com.cellarium.winecatalog",
       /** Inyectado en build (EAS); alternativa: EXPO_PUBLIC_SENTRY_DSN en .env */
       sentryDsn: process.env.EXPO_PUBLIC_SENTRY_DSN || "",
+      /** TestFlight: EXPO_PUBLIC_IAP_DEBUG_OVERLAY=1 en EAS → panel IAP en Suscripciones (iOS). */
+      iapDebugOverlay:
+        process.env.EXPO_PUBLIC_IAP_DEBUG_OVERLAY === "true" ||
+        process.env.EXPO_PUBLIC_IAP_DEBUG_OVERLAY === "1",
       eas: {
         projectId: "d69705be-f13a-4241-be49-0cbe7a34d8d9"
       }

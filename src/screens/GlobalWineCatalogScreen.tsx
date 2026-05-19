@@ -71,6 +71,7 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  // Ref para evitar múltiples llamadas a onEndReached
  const onEndReachedCalledDuringMomentum = useRef(false);
  const DEBUG_GLOBAL_CATALOG_WINE_ID = 'd0b9e697-1ae3-4311-8287-1d6efc715360';
+ const catalogCardVarietyLoggedRef = useRef(new Set<string>());
  const fadeAnim = useRef(new Animated.Value(1)).current;
  // Request guards para evitar race conditions
  const firstPageReqIdRef = useRef(0);
@@ -85,6 +86,13 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  isMountedRef.current = false;
  };
  }, []);
+
+ /** __DEV__: volver a loguear primera aparición de cada id tras cambiar lista (búsqueda/filtro). */
+ useEffect(() => {
+ if (__DEV__) {
+ catalogCardVarietyLoggedRef.current.clear();
+ }
+ }, [debouncedSearchQuery, filterColor]);
  const ensureBranchNameConfigured = useCallback((): boolean => {
  const branchName = currentBranch?.name?.trim() || '';
  if (branchName) {
@@ -684,7 +692,23 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  return '';
  };
 
- const renderWineCard = ({ item }: { item: GlobalWine }) => (
+ const renderWineCard = ({ item }: { item: GlobalWine }) => {
+ const grapesLine = formatCardGrapes(item.grapes);
+ if (__DEV__) {
+ const already = catalogCardVarietyLoggedRef.current;
+ if (!already.has(item.id)) {
+ already.add(item.id);
+ const wineName = getBilingualValue(item.label, language) ?? '';
+ console.log('[GlobalWineCatalog][cardVarietal]', {
+ id: item.id,
+ wineName,
+ varietalFieldKey: 'grapes',
+ rawGrapes: item.grapes,
+ renderedLine: grapesLine || '(vacío)',
+ });
+ }
+ }
+ return (
  <View style={styles.cardRow}>
  {/* Columna izquéerda: Thumbnail */}
  <View style={styles.cardThumb}>
@@ -702,25 +726,30 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  {getBilingualValue(item.label, language)}
  </Text>
  )}
+ {grapesLine ? (
+ <Text style={styles.cardVarietalText} numberOfLines={1} ellipsizeMode="tail">
+ {grapesLine}
+ </Text>
+ ) : null}
  <View style={styles.cardInfoRow}>
  {(() => {
  const country = getBilingualValue(item.country, language);
  const region = getBilingualValue(item.region, language);
  if (country && region) {
  return (
- <Text style={styles.cardInfoText} numberOfLines={1}>
+ <Text style={styles.cardInfoText} numberOfLines={1} ellipsizeMode="tail">
  {country} · {region}
  </Text>
  );
  } else if (country) {
  return (
- <Text style={styles.cardInfoText} numberOfLines={1}>
+ <Text style={styles.cardInfoText} numberOfLines={1} ellipsizeMode="tail">
  {country}
  </Text>
  );
  } else if (region) {
  return (
- <Text style={styles.cardInfoText} numberOfLines={1}>
+ <Text style={styles.cardInfoText} numberOfLines={1} ellipsizeMode="tail">
  {region}
  </Text>
  );
@@ -728,15 +757,6 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  return null;
  })()}
  </View>
- {(() => {
- const grapesLine = formatCardGrapes(item.grapes);
- if (!grapesLine) return null;
- return (
- <Text style={styles.cardGrapesText} numberOfLines={2} ellipsizeMode="tail">
- {grapesLine}
- </Text>
- );
- })()}
  {(() => {
  const colorValue = typeof item.color === 'string'
    ? item.color
@@ -777,6 +797,8 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  </View>
  </View>
  );
+ };
+
  // Helper para sanitizar textos y eliminar caracteres corruptos
  const sanitizeText = (input?: unknown): string => {
  const s = typeof input === 'string' ? input : (input == null ? '' : String(input));
@@ -1416,10 +1438,9 @@ const styles = StyleSheet.create({
  fontSize: 11,
  color: '#666',
  },
- cardGrapesText: {
- fontSize: 11,
- color: '#666',
- lineHeight: 14,
+ cardVarietalText: {
+ fontSize: 10,
+ color: '#888',
  marginBottom: 4,
  },
  cardColorTag: {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,16 +11,15 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CellariumHeader } from '../components/cellarium';
-import { CELLARIUM, CELLARIUM_LAYOUT } from '../theme/cellariumTheme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { CellariumHeader, CellariumPrimaryButton } from '../components/cellarium';
+import { CELLARIUM, CELLARIUM_GRADIENT, CELLARIUM_LAYOUT, CELLARIUM_TEXT } from '../theme/cellariumTheme';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList, Branch } from '../types';
 import { useBranch } from '../contexts/BranchContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useAdminGuard } from '../hooks/useAdminGuard';
-import { getEffectivePlan, getOwnerEffectivePlan } from '../utils/effectivePlan';
-import { checkSubscriptionFeatureByPlan } from '../utils/subscriptionPermissions';
 import { PendingApprovalMessage } from '../components/PendingApprovalMessage';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,20 +35,16 @@ interface Props {
   route: BranchManagementScreenRouteProp;
 }
 
-const FEATURE_ID_BRANCHES_ADDITIONAL = 'branches_additional' as const;
-
 const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
   const { status: guardStatus } = useAdminGuard({
     navigation,
     route,
-    allowedRoles: ['owner', 'gerente', 'sommelier', 'supervisor'],
+    allowedRoles: ['owner'],
   });
   const { allBranches, setAllBranches, setAvailableBranches, refreshBranches, setCurrentBranch } = useBranch();
   const { user } = useAuth();
   const { t } = useLanguage();
-  const [subscriptionAllowed, setSubscriptionAllowed] = useState<'pending' | true | false>('pending');
-  const alertedBlockedRef = useRef(false);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
   const [isCreatingBranch, setIsCreatingBranch] = useState(false);
@@ -61,29 +56,22 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
     email: '',
   });
 
-  useEffect(() => {
-    if (guardStatus !== 'allowed' || !user) return;
-    let cancelled = false;
-    const run = async () => {
-      const plan = user.role === 'owner'
-        ? getEffectivePlan(user)
-        : await getOwnerEffectivePlan(user);
-      if (cancelled) return;
-      const allowed = checkSubscriptionFeatureByPlan(plan, FEATURE_ID_BRANCHES_ADDITIONAL);
-      if (!allowed) {
-        setSubscriptionAllowed(false);
-        navigation.replace('AdminDashboard');
-        if (!alertedBlockedRef.current) {
-          alertedBlockedRef.current = true;
-          Alert.alert(t('subscription.feature_blocked'), undefined, [{ text: 'OK' }]);
-        }
-      } else {
-        setSubscriptionAllowed(true);
-      }
-    };
-    run();
-    return () => { cancelled = true; };
-  }, [user?.id, user?.role, guardStatus, navigation, t]);
+  const uniqueBranches = useMemo(
+    () => Array.from(new Map(allBranches.map(b => [b.id, b])).values()),
+    [allBranches]
+  );
+
+  const branchStats = useMemo(() => {
+    const { limit, addons } = getBranchLimit(user ?? null);
+    const lockedCount = uniqueBranches.filter(b => b.is_locked === true).length;
+    const atCapacity = uniqueBranches.length >= limit;
+    return { limit, addons, lockedCount, atCapacity, currentCount: uniqueBranches.length };
+  }, [user, uniqueBranches]);
+
+  const ownerBranchAddonCount = useMemo(
+    () => Math.max(0, Math.floor(Number(user?.subscription_branch_addons_count ?? 0))),
+    [user?.subscription_branch_addons_count]
+  );
 
   if (guardStatus === 'loading' || guardStatus === 'profile_loading') {
     return (
@@ -102,16 +90,50 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
   }
   if (guardStatus === 'denied') return null;
 
-  if (guardStatus === 'allowed' && subscriptionAllowed === 'pending') {
+  if (ownerBranchAddonCount === 0) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
-        <ActivityIndicator size="large" color="#8B0000" />
-        <Text style={{ marginTop: 12, color: '#666' }}>{t('msg.loading') || 'Cargando…'}</Text>
-      </View>
+      <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+        <CellariumHeader
+          title={t('branches.title')}
+          subtitle={t('branches.subtitle')}
+          leftSlot={
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityRole="button"
+              accessibilityLabel={t('btn.back') || 'Volver'}
+            >
+              <Ionicons name="chevron-back" size={26} color={CELLARIUM.textOnDark} />
+            </TouchableOpacity>
+          }
+        />
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={{
+            paddingBottom: Math.max(insets.bottom, 24),
+            paddingTop: 8,
+          }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.addonGateCard}>
+            <LinearGradient
+              colors={[...CELLARIUM_GRADIENT]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.addonGateGradientBand}
+            />
+            <View style={styles.addonGateCardInner}>
+              <Text style={styles.addonGateTitle}>{t('admin.branch_addon_gate_title')}</Text>
+              <Text style={styles.addonGateBody}>{t('admin.branch_addon_gate_body')}</Text>
+            </View>
+          </View>
+          <CellariumPrimaryButton
+            title={t('admin.branch_addon_gate_cta')}
+            onPress={() => navigation.navigate('Subscriptions')}
+          />
+        </ScrollView>
+      </SafeAreaView>
     );
-  }
-  if (guardStatus === 'allowed' && subscriptionAllowed === false) {
-    return null;
   }
 
   const handleEditBranch = (branch: Branch) => {
@@ -143,11 +165,13 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
 
     try {
       if (editingBranch) {
-        // Actualizar sucursal existente en Supabase (solo nombre)
         const { data, error } = await supabase
           .from('branches')
           .update({
             name: normalizedName,
+            address: formData.address.trim(),
+            phone: formData.phone.trim(),
+            email: formData.email.trim(),
             updated_at: new Date().toISOString(),
           })
           .eq('id', editingBranch.id)
@@ -167,9 +191,6 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         setEditingBranch(null);
         setFormData({ name: '', address: '', phone: '', email: '' });
       } else {
-        const uniqueBranches = Array.from(
-          new Map(allBranches.map(b => [b.id, b])).values()
-        );
         const existingNames = new Set(uniqueBranches.map(b => b.name.trim().toLowerCase()));
         if (existingNames.has(normalizedLower)) {
           Alert.alert(t('msg.error'), t('branches.duplicate_name') || 'Ya existe una sucursal con ese nombre');
@@ -200,6 +221,9 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
           .insert({
             name: normalizedName,
             owner_id: ownerId,
+            address: formData.address.trim(),
+            phone: formData.phone.trim(),
+            email: formData.email.trim(),
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           })
@@ -232,6 +256,15 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   const handleCreateBranch = () => {
+    if (branchStats.atCapacity) {
+      const message = t('subscription.limit_branches_message')
+        .replace('{current}', String(branchStats.currentCount))
+        .replace('{limit}', String(branchStats.limit));
+      Alert.alert(t('subscription.limit_title'), `${message}\n\n${t('branches.at_capacity_hint')}`, [
+        { text: t('btn.close'), style: 'cancel' },
+      ]);
+      return;
+    }
     setEditingBranch(null);
     setFormData({ name: '', address: '', phone: '', email: '' });
     setIsEditModalVisible(true);
@@ -356,22 +389,35 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) }}
         showsVerticalScrollIndicator={false}
       >
+        <View style={styles.capacityCard}>
+          <Text style={styles.capacityText}>
+            {t('branches.capacity_line')
+              .replace('{current}', String(branchStats.currentCount))
+              .replace('{limit}', String(branchStats.limit))
+              .replace('{addons}', String(branchStats.addons))}
+          </Text>
+          {branchStats.lockedCount > 0 ? (
+            <Text style={styles.lockedSummary}>
+              {t('branches.locked_summary').replace('{count}', String(branchStats.lockedCount))}
+            </Text>
+          ) : null}
+          {branchStats.atCapacity ? (
+            <Text style={styles.atCapacityText}>{t('branches.at_capacity_hint')}</Text>
+          ) : null}
+        </View>
+
         <TouchableOpacity
-          style={styles.createButton}
+          style={[styles.createButton, branchStats.atCapacity && styles.createButtonDisabled]}
           onPress={handleCreateBranch}
           activeOpacity={0.88}
+          disabled={branchStats.atCapacity}
         >
           <Text style={styles.createButtonText}>➕ {t('branches.create_branch')}</Text>
         </TouchableOpacity>
-        {(() => {
-          const uniqueBranches = Array.from(
-            new Map(allBranches.map(b => [b.id, b])).values()
-          );
-          return (
-            <>
-              <Text style={styles.sectionTitle}>
-                {t('branches.registered')} ({uniqueBranches.length})
-              </Text>
+
+        <Text style={styles.sectionTitle}>
+          {t('branches.registered')} ({uniqueBranches.length})
+        </Text>
               {uniqueBranches.map((branch) => (
           <View key={branch.id} style={styles.branchCard}>
             <View style={styles.branchInfo}>
@@ -384,6 +430,9 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                   <Text style={styles.lockedHint}> — {t('branches.locked_by_subscription')}</Text>
                 )}
               </Text>
+              {branch.address?.trim() ? (
+                <Text style={styles.branchAddress} numberOfLines={2}>{branch.address.trim()}</Text>
+              ) : null}
             </View>
             <View style={styles.branchActions}>
               <TouchableOpacity
@@ -408,9 +457,6 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
             </View>
           </View>
               ))}
-            </>
-          );
-        })()}
       </ScrollView>
 
       {/* Modal de edición/creación */}
@@ -426,7 +472,7 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
               {editingBranch ? t('branches.edit_branch') : t('branches.add_branch')}
             </Text>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <View style={styles.inputContainer}>
                 <Text style={styles.label}>{t('branches.name')} *</Text>
                 <TextInput
@@ -436,6 +482,38 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                   placeholder={`Ej: ${t('branches.main')}`}
                   autoFocus={true}
                   onSubmitEditing={handleSaveBranch}
+                  editable={!isCreatingBranch}
+                />
+              </View>
+              <View style={styles.inputContainer}>
+                <Text style={styles.label}>{t('branches.address')}</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formData.address}
+                  onChangeText={(text) => setFormData({ ...formData, address: text })}
+                  placeholder=""
+                  editable={!isCreatingBranch}
+                  multiline
+                />
+              </View>
+              <View style={styles.inputContainer}>
+                <Text style={styles.label}>{t('branches.phone')}</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formData.phone}
+                  onChangeText={(text) => setFormData({ ...formData, phone: text })}
+                  keyboardType="phone-pad"
+                  editable={!isCreatingBranch}
+                />
+              </View>
+              <View style={styles.inputContainer}>
+                <Text style={styles.label}>{t('branches.email')}</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formData.email}
+                  onChangeText={(text) => setFormData({ ...formData, email: text })}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
                   editable={!isCreatingBranch}
                 />
               </View>
@@ -475,6 +553,34 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: CELLARIUM.bg,
   },
+  addonGateCard: {
+    backgroundColor: CELLARIUM.card,
+    borderRadius: CELLARIUM_LAYOUT.cardRadius,
+    marginBottom: CELLARIUM_LAYOUT.sectionGap,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: CELLARIUM.border,
+  },
+  addonGateGradientBand: {
+    height: 5,
+    width: '100%',
+  },
+  addonGateCardInner: {
+    padding: CELLARIUM_LAYOUT.headerHorizontalPadding,
+    paddingTop: 14,
+  },
+  addonGateTitle: {
+    ...CELLARIUM_TEXT.sectionTitle,
+    marginBottom: 12,
+    textAlign: 'center',
+    color: CELLARIUM.text,
+  },
+  addonGateBody: {
+    ...CELLARIUM_TEXT.body,
+    textAlign: 'center',
+    color: CELLARIUM.text,
+    lineHeight: 22,
+  },
   createButton: {
     backgroundColor: CELLARIUM.primary,
     borderRadius: CELLARIUM_LAYOUT.buttonRadius,
@@ -490,10 +596,39 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  createButtonDisabled: {
+    opacity: 0.45,
+  },
   content: {
     flex: 1,
     padding: CELLARIUM_LAYOUT.screenPadding,
     paddingTop: 12,
+  },
+  capacityCard: {
+    backgroundColor: CELLARIUM.card,
+    borderRadius: CELLARIUM_LAYOUT.cardRadius,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: CELLARIUM.border,
+  },
+  capacityText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: CELLARIUM.text,
+    lineHeight: 22,
+  },
+  lockedSummary: {
+    fontSize: 13,
+    color: CELLARIUM.muted,
+    marginTop: 8,
+    lineHeight: 18,
+  },
+  atCapacityText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: CELLARIUM.primary,
+    marginTop: 8,
   },
   sectionTitle: {
     fontSize: 17,

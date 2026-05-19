@@ -47,6 +47,13 @@ const translations: Record<Language, Record<string, string>> = {
     'catalog.sparkling': 'Espumoso',
     'catalog.dessert': 'Postre',
     'catalog.fortified': 'Fortificado',
+    'catalog.background.default': 'Clásico',
+    'catalog.background.wine_soft': 'Vino suave',
+    'catalog.background.champagne': 'Champagne',
+    'catalog.background.dark_luxe': 'Lujo oscuro',
+    'catalog.background.cave_luxe': 'Cava',
+    'catalog.background.vineyard_soft': 'Viñedo',
+    'catalog.background.barrel_cellar': 'Barricas',
     'catalog.edit_name': 'Editar nombre',
     'catalog.configure_name': 'Configurar nombre',
     'catalog.define_restaurant': 'Define el nombre de tu restaurante',
@@ -247,7 +254,11 @@ const translations: Record<Language, Record<string, string>> = {
     'branches.cancel_deletion': 'Cancelar eliminación',
     'branches.generate_pdf_continue': 'Generar PDF y continuar',
     'branches.delete_without_pdf': 'Eliminar sin PDF',
-    
+    'branches.capacity_line': 'Capacidad: {current} / {limit} sucursales (1 base + {addons} adicionales)',
+    'branches.locked_summary': '{count} sucursal(es) bloqueada(s) por límite de plan — no aparecen en el selector hasta que aumentes el cupo o liberes sucursales.',
+    'branches.at_capacity_hint': 'Has alcanzado el límite. Libera una sucursal o amplía tu cupo cuando esté disponible.',
+    'branches.owner_only': 'Solo el titular de la cuenta puede gestionar sucursales.',
+
     // Botones y acciones
     'btn.save': 'Guardar',
     'btn.cancel': 'Cancelar',
@@ -332,6 +343,10 @@ const translations: Record<Language, Record<string, string>> = {
     'admin.users_sub': 'Aprobar, asignar roles y permisos',
     'admin.branches': 'Gestión de Sucursales',
     'admin.branches_sub': 'Crear, editar, eliminar sucursales',
+    'admin.branch_addon_gate_title': 'Gestión multi-sucursal',
+    'admin.branch_addon_gate_body':
+      'Tu cuenta incluye 1 sucursal base en tu plan.\n\nPara crear y administrar varias sucursales necesitas un complemento de sucursales: +1 sucursal adicional o +3 sucursales adicionales (no acumulables entre sí).\n\nContrátalos en Suscripciones; el cargo es adicional a tu suscripción mensual y la renovación automática sigue las condiciones de App Store o Google Play.',
+    'admin.branch_addon_gate_cta': 'Ver planes',
     'admin.subscriptions': 'Suscripciones',
     'admin.subscriptions_sub': 'Planes y facturación',
     'admin.settings': 'Configuración',
@@ -550,6 +565,37 @@ const translations: Record<Language, Record<string, string>> = {
       'Se abrirá el flujo de pago de Apple (App Store). El precio final es el de tu región.',
     'subscription.apple_backend_retry_hint':
       'Si fue un fallo temporal de red o servidor, puedes reintentar. La transacción no se cierra en el dispositivo hasta que el servidor confirme.',
+    'subscription.apple_error_no_session': 'No hay sesión activa. Vuelve a iniciar sesión.',
+    'subscription.apple_error_email_verification':
+      'Debes verificar tu correo antes de activar o sincronizar la suscripción con Apple.',
+    'subscription.apple_error_google_active':
+      'Ya tienes una suscripción activa en Google Play. No puedes activar Apple en paralelo.',
+    'subscription.apple_error_stripe_active':
+      'Ya tienes una suscripción activa con Stripe. Gestiona el plan desde la web o cancela antes de usar Apple.',
+    'subscription.apple_error_apple_verify_failed':
+      'Apple no pudo validar el recibo de la App Store. Reintenta o usa Restaurar compras.',
+    'subscription.apple_error_apple_verify_failed_status':
+      'Apple devolvió el código {status} al validar el recibo.',
+    'subscription.apple_error_no_matching_subscription':
+      'No encontramos un plan Cellarium válido en el recibo.',
+    'subscription.apple_error_sync_failed': 'No pudimos guardar la suscripción en el servidor. Reintenta.',
+    'subscription.apple_error_receipt_missing':
+      'No hay recibo de App Store disponible en el dispositivo. Usa Restaurar compras o espera un momento tras completar la compra.',
+    'subscription.apple_error_receipt_recover_instruction':
+      'No pudimos recuperar el recibo de Apple. Cierra y abre la app, luego intenta Restaurar compras.',
+    'subscription.apple_iap_storekit_pending_message':
+      'Detectamos una compra pendiente de Apple. Intentamos recuperarla. Si el problema continúa, cierra y abre la app e intenta Restaurar compras.',
+    'subscription.apple_purchase_unconfirmed_message':
+      'No pudimos confirmar la compra con Apple. Si el cargo se realizó, toca Restaurar compras.',
+    'subscription.apple_error_addon_without_base':
+      'El recibo muestra sucursales extra sin un plan base activo.',
+    'subscription.apple_error_legacy_product':
+      'Hay una suscripción Apple antigua en el recibo; usa un plan nuevo (Bistro, Trattoria o Grand Maison).',
+    'subscription.apple_error_forbidden': 'Solo el titular de la cuenta puede activar la suscripción.',
+    'subscription.apple_error_auth_required': 'No pudimos verificar tu cuenta en el servidor.',
+    'subscription.apple_error_internal': 'Error interno del servidor. Reintenta más tarde.',
+    'subscription.apple_error_lapse_failed': 'No pudimos sincronizar la baja de tu suscripción.',
+    'subscription.apple_error_code_line': 'Código: {code}',
     'subscription.apple_sync_unclear_message':
       'No recibimos una confirmación clara del servidor. No se finalizó la transacción en el dispositivo; reintenta con conexión estable.',
     'subscription.apple_restore_ios_hint':
@@ -566,6 +612,33 @@ const translations: Record<Language, Record<string, string>> = {
       'Paquetes de sucursales adicionales vía Apple (1 o 3). Tras pagar, sincronizamos con el servidor.',
     'subscription.ios_branch_addon_1': '+1 sucursal adicional (Apple)',
     'subscription.ios_branch_addon_3': '+3 sucursales adicionales (Apple)',
+    'subscription.android_branch_addon_intro':
+      'Paquetes de sucursales adicionales en Google Play (+1 o +3). Tras pagar, sincronizamos con el servidor.',
+    'subscription.android_branch_addon_1': '+1 sucursal adicional (Google Play)',
+    'subscription.android_branch_addon_3': '+3 sucursales adicionales (Google Play)',
+    'subscription.google_loading_addon_purchase': 'Procesando add-on en Google Play…',
+    'subscription.branch_addon_downgrade_title': 'Cambiar a +1 sucursal adicional',
+    'subscription.branch_addon_downgrade_body':
+      'Pasarás del paquete +3 al +1: tu nuevo límite será 2 sucursales en total (base +1). Si tienes más sucursales activas que ese límite, las excedentes quedarán bloqueadas al terminar el periodo de facturación actual del add-on anterior. No eliminamos sucursales automáticamente.',
+    'subscription.branch_addon_downgrade_confirm': 'Continuar con el cambio',
+    'subscription.branch_addon_section_title': 'Sucursales adicionales',
+    'subscription.branch_addon_billed_additional':
+      'Estos productos se cobran aparte de tu suscripción mensual actual.',
+    'subscription.branch_addon_auto_renew_monthly': 'Renovación automática cada mes.',
+    'subscription.branch_addon_duration_monthly': 'Duración: mensual.',
+    'subscription.branch_addon_non_cumulative':
+      'Solo puedes tener activo un add-on a la vez (+1 o +3); no son acumulables.',
+    'subscription.branch_addon_product_plus1_title': '+1 sucursal adicional',
+    'subscription.branch_addon_product_plus3_title': '+3 sucursales adicionales',
+    'subscription.branch_addon_limit_result_1':
+      'Límite resultante: hasta 2 sucursales en total (1 base + 1 adicional).',
+    'subscription.branch_addon_limit_result_3':
+      'Límite resultante: hasta 4 sucursales en total (1 base + 3 adicionales).',
+    'subscription.branch_addon_active_badge': 'Activo',
+    'subscription.branch_addon_cta_plus1': 'Contratar +1',
+    'subscription.branch_addon_cta_plus3': 'Contratar +3',
+    'subscription.branch_addon_price_fallback_1': '$950 MXN/mes',
+    'subscription.branch_addon_price_fallback_3': '$2,800 MXN/mes',
     'subscription.qty_validation': 'La cantidad debe ser un número entre 0 y 50',
     'subscription.plan_updated_title': 'Plan actualizado',
     'subscription.plan_updated_message': 'Los cambios ya están aplicados en tu cuenta.',
@@ -825,6 +898,13 @@ const translations: Record<Language, Record<string, string>> = {
     'catalog.sparkling': 'Sparkling',
     'catalog.dessert': 'Dessert',
     'catalog.fortified': 'Fortified',
+    'catalog.background.default': 'Classic',
+    'catalog.background.wine_soft': 'Soft wine',
+    'catalog.background.champagne': 'Champagne',
+    'catalog.background.dark_luxe': 'Dark luxe',
+    'catalog.background.cave_luxe': 'Wine cave',
+    'catalog.background.vineyard_soft': 'Vineyard',
+    'catalog.background.barrel_cellar': 'Barrel cellar',
     'catalog.edit_name': 'Edit name',
     'catalog.configure_name': 'Configure name',
     'catalog.define_restaurant': 'Define your restaurant name',
@@ -1025,7 +1105,11 @@ const translations: Record<Language, Record<string, string>> = {
     'branches.cancel_deletion': 'Cancel deletion',
     'branches.generate_pdf_continue': 'Generate PDF and continue',
     'branches.delete_without_pdf': 'Delete without PDF',
-    
+    'branches.capacity_line': 'Capacity: {current} / {limit} branches (1 base + {addons} additional)',
+    'branches.locked_summary': '{count} branch(es) locked by plan limit — they won’t appear in the selector until you increase capacity or remove branches.',
+    'branches.at_capacity_hint': 'You’ve reached your branch limit. Remove a branch or expand capacity when available.',
+    'branches.owner_only': 'Only the account owner can manage branches.',
+
     // Buttons and actions
     'btn.save': 'Save',
     'btn.cancel': 'Cancel',
@@ -1110,6 +1194,10 @@ const translations: Record<Language, Record<string, string>> = {
     'admin.users_sub': 'Approve, assign roles and permissions',
     'admin.branches': 'Branch Management',
     'admin.branches_sub': 'Create, edit, delete branches',
+    'admin.branch_addon_gate_title': 'Multi-branch management',
+    'admin.branch_addon_gate_body':
+      'Your plan includes one base branch.\n\nTo create and manage multiple branches you need a branch add-on: +1 additional branch or +3 additional branches (not stackable).\n\nPurchase them under Subscriptions; the charge is in addition to your monthly subscription. Auto-renewal follows App Store or Google Play terms.',
+    'admin.branch_addon_gate_cta': 'View plans',
     'admin.subscriptions': 'Subscriptions',
     'admin.subscriptions_sub': 'Plans and billing',
     'admin.settings': 'Settings',
@@ -1328,6 +1416,37 @@ const translations: Record<Language, Record<string, string>> = {
       'The Apple payment flow will open. The final price is for your App Store region.',
     'subscription.apple_backend_retry_hint':
       'If this was a temporary network or server issue, retry. The transaction is not finished on the device until the server confirms.',
+    'subscription.apple_error_no_session': 'No active session. Sign in again.',
+    'subscription.apple_error_email_verification':
+      'Verify your email before activating or syncing an Apple subscription.',
+    'subscription.apple_error_google_active':
+      'You already have an active Google Play subscription. Apple cannot be activated in parallel.',
+    'subscription.apple_error_stripe_active':
+      'You already have an active Stripe subscription. Manage it on the web or cancel before using Apple.',
+    'subscription.apple_error_apple_verify_failed':
+      'Apple could not validate the App Store receipt. Retry or use Restore purchases.',
+    'subscription.apple_error_apple_verify_failed_status':
+      'Apple returned status {status} when validating the receipt.',
+    'subscription.apple_error_no_matching_subscription':
+      'We could not find a valid Cellarium plan in the receipt.',
+    'subscription.apple_error_sync_failed': 'We could not save the subscription on the server. Please retry.',
+    'subscription.apple_error_receipt_missing':
+      'No App Store receipt is available on this device. Use Restore purchases or wait a moment after completing checkout.',
+    'subscription.apple_error_receipt_recover_instruction':
+      'We could not recover the App Store receipt. Close and reopen the app, then try Restore purchases.',
+    'subscription.apple_iap_storekit_pending_message':
+      'We detected a pending Apple purchase and tried to recover it. If the issue persists, close and reopen the app, then try Restore purchases.',
+    'subscription.apple_purchase_unconfirmed_message':
+      'We could not confirm the purchase with Apple. If you were charged, tap Restore purchases.',
+    'subscription.apple_error_addon_without_base':
+      'The receipt shows extra branches without an active base plan.',
+    'subscription.apple_error_legacy_product':
+      'The receipt contains a legacy Apple subscription; use a current plan (Bistro, Trattoria, or Grand Maison).',
+    'subscription.apple_error_forbidden': 'Only the account owner can activate the subscription.',
+    'subscription.apple_error_auth_required': 'We could not verify your account on the server.',
+    'subscription.apple_error_internal': 'Internal server error. Please try again later.',
+    'subscription.apple_error_lapse_failed': 'We could not sync the subscription lapse.',
+    'subscription.apple_error_code_line': 'Code: {code}',
     'subscription.apple_sync_unclear_message':
       'We did not get a clear confirmation from the server. The transaction was not finished on the device; retry with a stable connection.',
     'subscription.apple_restore_ios_hint':
@@ -1344,6 +1463,33 @@ const translations: Record<Language, Record<string, string>> = {
       'Apple add-on packs (1 or 3 additional branches). After purchase we sync with the server.',
     'subscription.ios_branch_addon_1': '+1 additional branch (Apple)',
     'subscription.ios_branch_addon_3': '+3 additional branches (Apple)',
+    'subscription.android_branch_addon_intro':
+      'Google Play add-on packs (+1 or +3 branches). After purchase we sync with the server.',
+    'subscription.android_branch_addon_1': '+1 additional branch (Google Play)',
+    'subscription.android_branch_addon_3': '+3 additional branches (Google Play)',
+    'subscription.google_loading_addon_purchase': 'Processing Google Play add-on…',
+    'subscription.branch_addon_downgrade_title': 'Switch to +1 additional branch',
+    'subscription.branch_addon_downgrade_body':
+      'You are moving from the +3 pack to +1: your new limit will be 2 branches total (base +1). If you have more active branches than that limit, the extras will be blocked when the current billing period for your previous add-on ends. We never delete branches automatically.',
+    'subscription.branch_addon_downgrade_confirm': 'Continue',
+    'subscription.branch_addon_section_title': 'Additional branches',
+    'subscription.branch_addon_billed_additional':
+      'These products are charged in addition to your current monthly subscription.',
+    'subscription.branch_addon_auto_renew_monthly': 'Automatic monthly renewal.',
+    'subscription.branch_addon_duration_monthly': 'Duration: monthly.',
+    'subscription.branch_addon_non_cumulative':
+      'You can only have one add-on active at a time (+1 or +3); they are not stackable.',
+    'subscription.branch_addon_product_plus1_title': '+1 additional branch',
+    'subscription.branch_addon_product_plus3_title': '+3 additional branches',
+    'subscription.branch_addon_limit_result_1':
+      'Resulting cap: up to 2 branches total (1 base + 1 add-on).',
+    'subscription.branch_addon_limit_result_3':
+      'Resulting cap: up to 4 branches total (1 base + 3 add-ons).',
+    'subscription.branch_addon_active_badge': 'Active',
+    'subscription.branch_addon_cta_plus1': 'Purchase +1',
+    'subscription.branch_addon_cta_plus3': 'Purchase +3',
+    'subscription.branch_addon_price_fallback_1': '$950 MXN/mo',
+    'subscription.branch_addon_price_fallback_3': '$2,800 MXN/mo',
     'subscription.qty_validation': 'Quantity must be a number between 0 and 50',
     'subscription.plan_updated_title': 'Plan updated',
     'subscription.plan_updated_message': 'Your changes are now active on your account.',

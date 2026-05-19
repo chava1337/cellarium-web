@@ -1,6 +1,6 @@
 // NOTA: Este archivo ha sido refactorizado SOLO en UI/estilos.
 // NO se ha alterado lógica de negocio, permisos, navegación, guards ni suscripciones.
-// Cambios: header compacto, sin emoticons, sin flechas, cards elegantes.
+// Cambios: header compacto, sin emoticons, flecha atrás al catálogo (igual que otras pantallas), cards elegantes.
 
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
@@ -13,7 +13,6 @@ import {
   FlatList,
   Pressable,
   ActivityIndicator,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -29,8 +28,14 @@ import { mapMenuItemIdToFeatureId } from '../constants/adminMenuFeatureMap';
 import { canAccessFullAdminScreens } from '../utils/rolePermissions';
 import { useAdminGuard } from '../hooks/useAdminGuard';
 import { PendingApprovalMessage } from '../components/PendingApprovalMessage';
-import { CELLARIUM_LAYOUT, CELLARIUM_THEME } from '../theme/cellariumTheme';
-import { IosHeaderBackSlot } from '../components/cellarium';
+import {
+  CELLARIUM,
+  CELLARIUM_GRADIENT,
+  CELLARIUM_LAYOUT,
+  CELLARIUM_TEXT,
+  CELLARIUM_THEME,
+} from '../theme/cellariumTheme';
+import { CellariumModal, CellariumPrimaryButton, IosHeaderBackSlot } from '../components/cellarium';
 
 type AdminDashboardScreenNavigationProp = StackNavigationProp<RootStackParamList, 'AdminDashboard'>;
 type AdminDashboardScreenRouteProp = RouteProp<RootStackParamList, 'AdminDashboard'>;
@@ -60,8 +65,14 @@ const AdminDashboardScreen: React.FC<Props> = ({ navigation, route }) => {
   const { user, profileReady } = useAuth();
   const { t } = useLanguage();
   const [isBranchSelectorVisible, setIsBranchSelectorVisible] = useState(false);
+  const [branchAddonGateVisible, setBranchAddonGateVisible] = useState(false);
   /** Plan del owner para gating de menú cuando el usuario es staff (gerente/supervisor/etc). Null = aún no cargado. */
   const [ownerPlanForGating, setOwnerPlanForGating] = useState<EffectivePlanId | null>(null);
+
+  const ownerBranchAddonCount = useMemo(
+    () => Math.max(0, Math.floor(Number(user?.subscription_branch_addons_count ?? 0))),
+    [user?.subscription_branch_addons_count]
+  );
 
   if (guardStatus === 'loading' || guardStatus === 'profile_loading') {
     return (
@@ -141,8 +152,12 @@ const AdminDashboardScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [navigation]);
 
   const handleBranchManagement = useCallback(() => {
+    if (isOwner && ownerBranchAddonCount === 0) {
+      setBranchAddonGateVisible(true);
+      return;
+    }
     navigation.navigate('BranchManagement');
-  }, [navigation]);
+  }, [navigation, isOwner, ownerBranchAddonCount]);
 
   const handleSubscriptions = useCallback(() => {
     navigation.navigate('Subscriptions');
@@ -371,21 +386,15 @@ const AdminDashboardScreen: React.FC<Props> = ({ navigation, route }) => {
         end={{ x: 1, y: 0 }}
         style={styles.headerGradient}
       >
-        {Platform.OS === 'ios' ? (
-          <View style={styles.headerTitleRowIos}>
-            <View style={[styles.headerTitleSide, { width: CELLARIUM_LAYOUT.headerSlotWidth }]}>
-              <IosHeaderBackSlot navigation={navigation} fallbackRoute="WineCatalog" />
-            </View>
-            <View style={styles.headerTitleCenter}>
-              <Text style={styles.title}>{t('admin.title')}</Text>
-            </View>
-            <View style={[styles.headerTitleSide, { width: CELLARIUM_LAYOUT.headerSlotWidth }]} />
+        <View style={styles.headerTitleRow}>
+          <View style={[styles.headerTitleSide, { width: CELLARIUM_LAYOUT.headerSlotWidth }]}>
+            <IosHeaderBackSlot navigation={navigation} fallbackRoute="WineCatalog" />
           </View>
-        ) : (
-          <View style={styles.headerContent}>
+          <View style={styles.headerTitleCenter}>
             <Text style={styles.title}>{t('admin.title')}</Text>
           </View>
-        )}
+          <View style={[styles.headerTitleSide, { width: CELLARIUM_LAYOUT.headerSlotWidth }]} />
+        </View>
         
         {/* Selector de sucursal como field premium */}
         <TouchableOpacity
@@ -481,6 +490,43 @@ const AdminDashboardScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={styles.menuTitle}>{t('admin.menu_title')}</Text>
         }
       />
+
+      <CellariumModal
+        visible={branchAddonGateVisible}
+        onRequestClose={() => setBranchAddonGateVisible(false)}
+        title={t('admin.branch_addon_gate_title')}
+        scrollable={false}
+        presentation="card"
+        footer={
+          <View style={styles.branchAddonGateFooter}>
+            <CellariumPrimaryButton
+              title={t('admin.branch_addon_gate_cta')}
+              onPress={() => {
+                setBranchAddonGateVisible(false);
+                navigation.navigate('Subscriptions');
+              }}
+            />
+            <TouchableOpacity
+              onPress={() => setBranchAddonGateVisible(false)}
+              hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
+              accessibilityRole="button"
+              accessibilityLabel={t('btn.cancel')}
+            >
+              <Text style={styles.branchAddonGateCancel}>{t('btn.cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        }
+      >
+        <View>
+          <LinearGradient
+            colors={[...CELLARIUM_GRADIENT]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.branchAddonGateAccent}
+          />
+          <Text style={styles.branchAddonGateModalBody}>{t('admin.branch_addon_gate_body')}</Text>
+        </View>
+      </CellariumModal>
     </SafeAreaView>
   );
 };
@@ -495,11 +541,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
   },
-  headerContent: {
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  headerTitleRowIos: {
+  /** Misma fila título + chevron que pantallas con CellariumHeader / IosHeaderBackSlot (iOS y Android). */
+  headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
@@ -682,6 +725,26 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#FFFFFF',
     fontWeight: '600',
+  },
+  branchAddonGateAccent: {
+    height: 4,
+    width: '100%',
+    marginBottom: 14,
+    borderRadius: 2,
+  },
+  branchAddonGateModalBody: {
+    ...CELLARIUM_TEXT.body,
+    textAlign: 'center',
+    color: CELLARIUM.text,
+  },
+  branchAddonGateFooter: {
+    gap: 12,
+  },
+  branchAddonGateCancel: {
+    ...CELLARIUM_TEXT.caption,
+    textAlign: 'center',
+    color: CELLARIUM.muted,
+    textDecorationLine: 'underline',
   },
 });
 

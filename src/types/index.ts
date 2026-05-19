@@ -57,6 +57,8 @@ export interface Branch {
   email: string;
   created_at: string;
   updated_at: string;
+  /** Preset de fondo del catálogo (BD: public.branches.catalog_background_preset_id). */
+  catalog_background_preset_id?: string | null;
   /** Sucursal bloqueada por límite de suscripción (p. ej. downgrade a free). */
   is_locked?: boolean;
   is_main?: boolean;

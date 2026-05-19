@@ -13,12 +13,16 @@ import {
   requestPurchase,
 } from 'react-native-iap';
 import type { ProductSubscription, Purchase, PurchaseError } from 'react-native-iap';
-import { GOOGLE_PLAY_PRODUCT_IDS, GOOGLE_PLAY_SUBSCRIPTION_SKUS, type GooglePlanUiId } from '../constants/googlePlayProducts';
+import {
+  GOOGLE_PLAY_PRODUCT_IDS,
+  GOOGLE_PLAY_ALL_SUBSCRIPTION_SKUS,
+  type GooglePlanUiId,
+} from '../constants/googlePlayProducts';
 import { getCellariumAndroidPackageName, validateGooglePurchaseBackend } from './validateGooglePurchase';
 
 let connected = false;
 
-const GOOGLE_SKU_SET = new Set<string>([...GOOGLE_PLAY_SUBSCRIPTION_SKUS]);
+const GOOGLE_SKU_SET = new Set<string>([...GOOGLE_PLAY_ALL_SUBSCRIPTION_SKUS]);
 
 const LISTENER_TIMEOUT_MS = 120_000;
 
@@ -115,7 +119,7 @@ function waitForPurchaseFromListener(expectedSku: string, signal: AbortSignal): 
 
 async function purchaseWithSku(sku: string): Promise<{ purchase: Purchase }> {
   await ensurePlayBillingConnection();
-  const skuList = [...GOOGLE_PLAY_SUBSCRIPTION_SKUS];
+  const skuList = [...GOOGLE_PLAY_ALL_SUBSCRIPTION_SKUS];
   if (__DEV__) {
     console.log('[GooglePlay] Requested SKUs:', skuList);
     console.log('[GooglePlay] Purchasing SKU:', sku);
@@ -178,7 +182,7 @@ async function purchaseWithSku(sku: string): Promise<{ purchase: Purchase }> {
 export async function loadSubscriptions(): Promise<ProductSubscription[]> {
   await ensurePlayBillingConnection();
   const result = await fetchProducts({
-    skus: [...GOOGLE_PLAY_SUBSCRIPTION_SKUS],
+    skus: [...GOOGLE_PLAY_ALL_SUBSCRIPTION_SKUS],
     type: 'subs',
   });
   return (result ?? []) as ProductSubscription[];
@@ -189,8 +193,9 @@ export async function purchaseGoogleSubscription(plan: GooglePlanUiId): Promise<
   return purchaseWithSku(sku);
 }
 
-export async function purchaseGoogleBranchAddon(_slots: 1 | 3): Promise<{ purchase: Purchase }> {
-  throw new Error('Add-ons Google Play no están disponibles aún.');
+export async function purchaseGoogleBranchAddon(slots: 1 | 3): Promise<{ purchase: Purchase }> {
+  const sku = slots === 1 ? GOOGLE_PLAY_PRODUCT_IDS.branch1 : GOOGLE_PLAY_PRODUCT_IDS.branch3;
+  return purchaseWithSku(sku);
 }
 
 export async function finishGoogleTransactionIfNeeded(purchase: Purchase): Promise<void> {
