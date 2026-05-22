@@ -60,6 +60,45 @@ export type AppleIapDebugOverlaySnapshot = {
   /** Add-ons sucursales: no se consulta StoreKit aquí hasta tener metadata completa */
   addon_catalog_skipped?: string;
   addon_catalog_skip_reason?: string;
+  /** Cliente → Edge validate-apple-receipt (sin recibo/JWT/PII) */
+  edge_invoke_start?: string;
+  edge_invoke_finished?: string;
+  edge_function_name?: string;
+  supabase_url_host?: string;
+  has_session?: string;
+  has_access_token?: string;
+  receipt_len_before_invoke?: string;
+  edge_invoke_success?: string;
+  edge_invoke_error?: string;
+  edge_http_status?: string;
+  edge_error_code?: string;
+  edge_error_message?: string;
+  edge_response_synced?: string;
+  edge_response_plan_id?: string;
+  /** Restaurar compras (SubscriptionsScreen) */
+  restore_button_pressed?: string;
+  restore_handler_started?: string;
+  restore_skipped?: string;
+  restore_skip_reason?: string;
+  restore_loading_state?: string;
+  restore_is_ios?: string;
+  restore_has_user?: string;
+  restore_has_session_if_checked?: string;
+  restore_disabled?: string;
+  /** getReceiptBase64 / getReceiptIOS / requestReceiptRefreshIOS */
+  receipt_attempt_started?: string;
+  receipt_attempt_force_refresh_false?: string;
+  receipt_attempt_force_refresh_true?: string;
+  receipt_attempt_finished?: string;
+  receipt_attempt_error?: string;
+  receipt_attempt_error_message?: string;
+  receipt_attempt_error_stack_short?: string;
+  receipt_result_empty?: string;
+  receipt_result_length?: string;
+  receipt_refresh_triggered?: string;
+  receipt_refresh_finished?: string;
+  receipt_refresh_failed?: string;
+  receipt_attempt_timeout?: string;
 };
 
 let snapshot: AppleIapDebugOverlaySnapshot = {

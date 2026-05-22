@@ -120,6 +120,15 @@ function AppleIapSubscriptionsDebugOverlay(props: {
   const { snapshot, expanded, onToggle, bottomInset } = props;
   const rows: { key: string; value: string }[] = [
     { key: 'lastIapEvent', value: formatIapDebugField(snapshot.lastIapEvent) },
+    { key: 'restore_button_pressed', value: formatIapDebugField(snapshot.restore_button_pressed) },
+    { key: 'restore_handler_started', value: formatIapDebugField(snapshot.restore_handler_started) },
+    { key: 'restore_skipped', value: formatIapDebugField(snapshot.restore_skipped) },
+    { key: 'restore_skip_reason', value: formatIapDebugField(snapshot.restore_skip_reason) },
+    { key: 'restore_loading_state', value: formatIapDebugField(snapshot.restore_loading_state) },
+    { key: 'restore_is_ios', value: formatIapDebugField(snapshot.restore_is_ios) },
+    { key: 'restore_has_user', value: formatIapDebugField(snapshot.restore_has_user) },
+    { key: 'restore_has_session_if_checked', value: formatIapDebugField(snapshot.restore_has_session_if_checked) },
+    { key: 'restore_disabled', value: formatIapDebugField(snapshot.restore_disabled) },
     { key: 'requestPurchase_called', value: formatIapDebugField(snapshot.requestPurchase_called) },
     { key: 'requestPurchase_resolved', value: formatIapDebugField(snapshot.requestPurchase_resolved) },
     { key: 'hasImmediatePurchase', value: formatIapDebugField(snapshot.hasImmediatePurchase) },
@@ -129,10 +138,37 @@ function AppleIapSubscriptionsDebugOverlay(props: {
     { key: 'foreground_recovery_start', value: formatIapDebugField(snapshot.foreground_recovery_start) },
     { key: 'receipt_hasReceipt', value: formatIapDebugField(snapshot.receipt_hasReceipt) },
     { key: 'receipt_length', value: formatIapDebugField(snapshot.receipt_length) },
+    { key: 'receipt_attempt_started', value: formatIapDebugField(snapshot.receipt_attempt_started) },
+    { key: 'receipt_attempt_force_refresh_false', value: formatIapDebugField(snapshot.receipt_attempt_force_refresh_false) },
+    { key: 'receipt_attempt_force_refresh_true', value: formatIapDebugField(snapshot.receipt_attempt_force_refresh_true) },
+    { key: 'receipt_attempt_finished', value: formatIapDebugField(snapshot.receipt_attempt_finished) },
+    { key: 'receipt_attempt_error', value: formatIapDebugField(snapshot.receipt_attempt_error) },
+    { key: 'receipt_attempt_error_message', value: formatIapDebugField(snapshot.receipt_attempt_error_message) },
+    { key: 'receipt_attempt_error_stack_short', value: formatIapDebugField(snapshot.receipt_attempt_error_stack_short) },
+    { key: 'receipt_attempt_timeout', value: formatIapDebugField(snapshot.receipt_attempt_timeout) },
+    { key: 'receipt_result_empty', value: formatIapDebugField(snapshot.receipt_result_empty) },
+    { key: 'receipt_result_length', value: formatIapDebugField(snapshot.receipt_result_length) },
+    { key: 'receipt_refresh_triggered', value: formatIapDebugField(snapshot.receipt_refresh_triggered) },
+    { key: 'receipt_refresh_finished', value: formatIapDebugField(snapshot.receipt_refresh_finished) },
+    { key: 'receipt_refresh_failed', value: formatIapDebugField(snapshot.receipt_refresh_failed) },
     { key: 'validate_start', value: formatIapDebugField(snapshot.validate_start) },
     { key: 'validate_result', value: formatIapDebugField(snapshot.validate_result) },
     { key: 'validate_error_code', value: formatIapDebugField(snapshot.validate_error_code) },
     { key: 'synced', value: formatIapDebugField(snapshot.synced) },
+    { key: 'edge_function_name', value: formatIapDebugField(snapshot.edge_function_name) },
+    { key: 'supabase_url_host', value: formatIapDebugField(snapshot.supabase_url_host) },
+    { key: 'has_session', value: formatIapDebugField(snapshot.has_session) },
+    { key: 'has_access_token', value: formatIapDebugField(snapshot.has_access_token) },
+    { key: 'receipt_len_before_invoke', value: formatIapDebugField(snapshot.receipt_len_before_invoke) },
+    { key: 'edge_invoke_start', value: formatIapDebugField(snapshot.edge_invoke_start) },
+    { key: 'edge_invoke_finished', value: formatIapDebugField(snapshot.edge_invoke_finished) },
+    { key: 'edge_invoke_success', value: formatIapDebugField(snapshot.edge_invoke_success) },
+    { key: 'edge_invoke_error', value: formatIapDebugField(snapshot.edge_invoke_error) },
+    { key: 'edge_http_status', value: formatIapDebugField(snapshot.edge_http_status) },
+    { key: 'edge_error_code', value: formatIapDebugField(snapshot.edge_error_code) },
+    { key: 'edge_error_message', value: formatIapDebugField(snapshot.edge_error_message) },
+    { key: 'edge_response_synced', value: formatIapDebugField(snapshot.edge_response_synced) },
+    { key: 'edge_response_plan_id', value: formatIapDebugField(snapshot.edge_response_plan_id) },
     { key: 'refresh_started', value: formatIapDebugField(snapshot.refresh_started) },
     { key: 'refresh_finished', value: formatIapDebugField(snapshot.refresh_finished) },
     { key: 'catalog_effect_started', value: formatIapDebugField(snapshot.catalog_effect_started) },
@@ -1118,6 +1154,17 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     });
   }, [showAppleIapDebugOverlay]);
 
+  useEffect(() => {
+    if (!showAppleIapDebugOverlay || !isIos) return;
+    const blockReasons: string[] = [];
+    if (isProcessing) blockReasons.push('already_loading');
+    patchAppleIapDebugOverlay({
+      restore_loading_state: loadingAction ?? 'none',
+      restore_disabled: blockReasons.length > 0 ? 'true' : 'false',
+      restore_is_ios: 'true',
+    });
+  }, [showAppleIapDebugOverlay, isIos, isProcessing, loadingAction]);
+
   /** RPC enforce_subscription_expiry + refreshUser; fallback a solo refresh si la RPC falla. */
   const enforceExpiryAndRefresh = useCallback(async () => {
     try {
@@ -1915,12 +1962,72 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     );
   }, [t]);
 
+  const patchRestoreDiag = useCallback((p: Parameters<typeof patchAppleIapDebugOverlay>[0]) => {
+    if (showAppleIapDebugOverlay) patchAppleIapDebugOverlay(p);
+  }, [showAppleIapDebugOverlay]);
+
   const handleRestoreApplePurchases = useCallback(async () => {
+    const startedAt = new Date().toISOString();
+    patchRestoreDiag({
+      restore_handler_started: startedAt,
+      restore_skipped: 'false',
+      restore_skip_reason: '—',
+      restore_loading_state: loadingAction ?? 'none',
+      restore_is_ios: isIos ? 'true' : 'false',
+      restore_has_user: user?.id ? 'true' : 'false',
+      lastIapEvent: 'restore_handler_started',
+    });
+
+    if (!isIos) {
+      patchRestoreDiag({
+        restore_skipped: 'true',
+        restore_skip_reason: 'not_ios',
+        lastIapEvent: 'restore_skipped:not_ios',
+      });
+      return;
+    }
+    if (isProcessing) {
+      patchRestoreDiag({
+        restore_skipped: 'true',
+        restore_skip_reason: 'already_loading',
+        lastIapEvent: 'restore_skipped:already_loading',
+      });
+      return;
+    }
     if (!user?.id) {
+      patchRestoreDiag({
+        restore_skipped: 'true',
+        restore_skip_reason: 'missing_user',
+        restore_has_user: 'false',
+        lastIapEvent: 'restore_skipped:missing_user',
+      });
       Alert.alert(t('msg.error'), t('subscription.error_no_session'));
       return;
     }
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const hasSession = Boolean(sessionData?.session);
+    const hasToken = Boolean(sessionData?.session?.access_token);
+    patchRestoreDiag({
+      restore_has_session_if_checked: hasSession ? (hasToken ? 'token_yes' : 'token_no') : 'false',
+    });
+
+    if (!hasToken) {
+      patchRestoreDiag({
+        restore_skipped: 'true',
+        restore_skip_reason: 'missing_session',
+        lastIapEvent: 'restore_skipped:missing_session',
+      });
+      Alert.alert(t('msg.error'), t('subscription.error_no_session'));
+      return;
+    }
+
     if (!isSensitiveAllowed(user)) {
+      patchRestoreDiag({
+        restore_skipped: 'true',
+        restore_skip_reason: 'email_not_verified',
+        lastIapEvent: 'restore_skipped:email_not_verified',
+      });
       Alert.alert(
         'Verificación requerida',
         'Verifica tu correo en el bloque de arriba para continuar.',
@@ -1930,6 +2037,10 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     try {
       setLoadingAction('apple-restore');
+      patchRestoreDiag({
+        restore_loading_state: 'apple-restore',
+        lastIapEvent: 'restore_recover_via_receipt',
+      });
       const r = await recoverAppleIapViaReceipt('restore');
       await refreshAppleIapDebug();
       if (r.syncedLapsed) {
@@ -1965,8 +2076,17 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       Alert.alert(t('msg.error'), t('subscription.error_generic'));
     } finally {
       setLoadingAction(null);
+      patchRestoreDiag({ restore_loading_state: 'none' });
     }
-  }, [user, refreshAppleIapDebug, t]);
+  }, [user, refreshAppleIapDebug, t, isIos, isProcessing, loadingAction, patchRestoreDiag, showAppleIapDebugOverlay]);
+
+  const onRestoreAppleButtonPress = useCallback(() => {
+    patchRestoreDiag({
+      restore_button_pressed: new Date().toISOString(),
+      lastIapEvent: 'restore_button_pressed',
+    });
+    void handleRestoreApplePurchases();
+  }, [handleRestoreApplePurchases, patchRestoreDiag]);
 
   const handleRestoreGooglePurchases = useCallback(async () => {
     if (!isAndroid) return;
@@ -2887,12 +3007,12 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
               style={[
                 styles.manageButton,
                 styles.appleRestoreButton,
-                (isProcessing || needsEmailVerification) && styles.buttonDisabled,
+                isProcessing && styles.buttonDisabled,
               ]}
-              onPress={handleRestoreApplePurchases}
-              disabled={isProcessing || needsEmailVerification}
+              onPress={onRestoreAppleButtonPress}
+              disabled={isProcessing}
             >
-              {isProcessing ? (
+              {loadingAction === 'apple-restore' ? (
                 <ActivityIndicator color={PALETTE.primary} size="small" />
               ) : (
                 <Text style={styles.manageButtonText}>{t('subscription.apple_restore')}</Text>

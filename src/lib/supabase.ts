@@ -27,6 +27,17 @@ if (__DEV__) {
   console.log('Supabase Key (first 20 chars):', supabaseAnonKey.substring(0, 20) + '...');
 }
 
+/** Solo host del proyecto (diagnóstico IAP; no incluye keys). */
+export function getSupabaseUrlHostForDebug(): string {
+  try {
+    const raw = supabaseUrl?.trim() ?? '';
+    if (!raw) return '(missing)';
+    return new URL(raw).host;
+  } catch {
+    return '(invalid-url)';
+  }
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: AsyncStorage, // CRÍTICO: Usar AsyncStorage para persistir sesión en React Native

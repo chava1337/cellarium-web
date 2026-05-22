@@ -22,6 +22,7 @@ import {
 import type { AppleIapPurchaseResult, ApplePlanUiId } from './appleIapSubscription';
 import { AppleIapPurchaseUnconfirmedError, AppleIapStorePendingError } from './appleIapSubscription';
 import {
+  getAppleIapDebugOverlaySnapshot,
   patchAppleIapDebugOverlay,
   resetAppleIapDebugOverlay,
   isIapDebugOverlayEnabled,
@@ -34,6 +35,7 @@ let connected = false;
 const CELLARIUM_SKU_SET = new Set<string>([...APPLE_IAP_SKUS_ALL]);
 
 const LISTENER_TIMEOUT_MS = 90_000;
+const RECEIPT_FETCH_TIMEOUT_MS = 15_000;
 
 /** Logs seguros TestFlight: nunca incluir el recibo completo ni PII. */
 function iapLog(payload: Record<string, unknown>): void {
@@ -101,6 +103,35 @@ function extractIapErrorMessage(e: unknown): string {
   return String(e ?? '');
 }
 
+function shortErrorStack(e: unknown): string {
+  if (!(e instanceof Error) || !e.stack) return '—';
+  return e.stack
+    .split('\n')
+    .slice(0, 3)
+    .join(' | ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
+}
+
+function isReceiptFetchTimeoutError(e: unknown): boolean {
+  return e instanceof Error && e.message === 'RECEIPT_FETCH_TIMEOUT';
+}
+
+async function withReceiptFetchTimeout<T>(promise: Promise<T>): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('RECEIPT_FETCH_TIMEOUT')), RECEIPT_FETCH_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId != null) clearTimeout(timeoutId);
+  }
+}
+
 function extractIapErrorCode(e: unknown): string | undefined {
   if (e && typeof e === 'object' && 'code' in e) {
     const c = (e as { code?: unknown }).code;
@@ -147,19 +178,85 @@ export async function recoverAppleIapViaReceipt(
   iapLog({ stage: 'recover_via_receipt_start', intent });
   iapOverlay({
     lastIapEvent: `recover_via_receipt:${intent}`,
-    validate_start: intent,
     validate_error_code: null,
     synced: null,
+    validate_start: undefined,
+    validate_result: undefined,
   });
   await ensureIapConnection();
 
-  let receipt = await getReceiptBase64(false);
-  if (!receipt) receipt = await getReceiptBase64(true);
+  iapOverlay({ lastIapEvent: 'recovery_receipt_fetch_soft' });
+  let receipt: string | null = null;
+
+  try {
+    receipt = await getReceiptBase64(false);
+  } catch (e: unknown) {
+    iapLog({
+      stage: 'soft_receipt_failed_continue_refresh',
+      intent,
+      reason: 'unexpected_throw',
+      message: extractIapErrorMessage(e).slice(0, 160),
+    });
+    iapOverlay({
+      lastIapEvent: 'soft_receipt_throw_continue_refresh',
+      receipt_refresh_triggered: 'true',
+    });
+    receipt = null;
+  }
+
+  if (!receipt) {
+    const softHadError = getAppleIapDebugOverlaySnapshot().receipt_attempt_error === 'true';
+    iapLog({
+      stage: softHadError ? 'soft_receipt_failed_continue_refresh' : 'soft_receipt_empty_continue_refresh',
+      intent,
+    });
+    iapOverlay({
+      receipt_result_empty: 'true',
+      receipt_refresh_triggered: 'true',
+      lastIapEvent: 'receipt_refresh_triggered',
+    });
+
+    const forceRefreshStarted = new Date().toISOString();
+    iapOverlay({
+      receipt_attempt_force_refresh_true: forceRefreshStarted,
+      lastIapEvent: 'receipt_attempt_force_refresh_true',
+    });
+
+    try {
+      receipt = await getReceiptBase64(true);
+    } catch (e: unknown) {
+      iapLog({
+        stage: 'soft_receipt_failed_continue_refresh',
+        intent,
+        reason: 'force_refresh_throw',
+        message: extractIapErrorMessage(e).slice(0, 160),
+      });
+      receipt = null;
+    }
+
+    if (!receipt) {
+      iapOverlay({
+        receipt_refresh_failed: 'true',
+        receipt_refresh_finished: new Date().toISOString(),
+        lastIapEvent: 'receipt_refresh_failed',
+      });
+      iapLog({ recovery_receipt_refresh_failed: true, intent });
+    } else {
+      iapOverlay({
+        receipt_refresh_failed: 'false',
+        receipt_refresh_finished: new Date().toISOString(),
+        lastIapEvent: 'receipt_refresh_finished',
+      });
+    }
+  }
+
   const receiptLen = receipt?.length ?? 0;
   iapLog({ recovery_receipt_len: receiptLen, intent });
   iapOverlay({
     receipt_hasReceipt: receiptLen > 0 ? 'yes' : 'no',
     receipt_length: receiptLen,
+    receipt_result_length: String(receiptLen),
+    receipt_result_empty: receiptLen > 0 ? 'false' : 'true',
     lastIapEvent: 'recovery_receipt_ready',
   });
 
@@ -702,17 +799,77 @@ export async function purchaseAppleBranchAddon(slots: 1 | 3): Promise<AppleIapPu
 
 export async function getReceiptBase64(forceRefresh = false): Promise<string | null> {
   await ensureIapConnection();
+  const startedAt = new Date().toISOString();
+  const nativeLabel = forceRefresh ? 'getReceiptIOS_refresh' : 'getReceiptIOS';
+
   iapLog({ stage: 'getReceiptBase64_start', forceRefresh });
-  const receipt = forceRefresh ? await requestReceiptRefreshIOS() : await getReceiptIOS();
-  const len = receipt?.length ?? 0;
-  const hasReceipt = len > 0;
-  iapLog({ stage: 'getReceiptBase64_result', forceRefresh, hasReceipt, receiptLen: len });
   iapOverlay({
-    lastIapEvent: 'getReceiptBase64',
-    receipt_hasReceipt: hasReceipt ? 'yes' : 'no',
-    receipt_length: len,
+    receipt_attempt_started: startedAt,
+    receipt_attempt_force_refresh_false: forceRefresh ? undefined : startedAt,
+    receipt_attempt_force_refresh_true: forceRefresh ? startedAt : undefined,
+    receipt_attempt_finished: undefined,
+    receipt_attempt_error: undefined,
+    receipt_attempt_error_message: undefined,
+    receipt_attempt_error_stack_short: undefined,
+    receipt_attempt_timeout: undefined,
+    receipt_result_empty: undefined,
+    receipt_result_length: undefined,
+    lastIapEvent: forceRefresh ? 'receipt_attempt_force_refresh_true' : 'receipt_attempt_force_refresh_false',
   });
-  return receipt && receipt.length > 0 ? receipt : null;
+
+  try {
+    const receipt = await withReceiptFetchTimeout(
+      forceRefresh ? requestReceiptRefreshIOS() : getReceiptIOS()
+    );
+    const len = receipt?.length ?? 0;
+    const hasReceipt = len > 0;
+    const finishedAt = new Date().toISOString();
+
+    iapLog({ stage: 'getReceiptBase64_result', forceRefresh, hasReceipt, receiptLen: len, native: nativeLabel });
+    iapOverlay({
+      receipt_attempt_finished: finishedAt,
+      receipt_attempt_error: 'false',
+      receipt_attempt_error_message: '—',
+      receipt_attempt_error_stack_short: '—',
+      receipt_attempt_timeout: 'false',
+      receipt_result_length: String(len),
+      receipt_result_empty: hasReceipt ? 'false' : 'true',
+      receipt_hasReceipt: hasReceipt ? 'yes' : 'no',
+      receipt_length: len,
+      lastIapEvent: hasReceipt ? 'receipt_attempt_ok' : 'receipt_attempt_empty',
+    });
+
+    return hasReceipt ? receipt! : null;
+  } catch (e: unknown) {
+    const finishedAt = new Date().toISOString();
+    const timedOut = isReceiptFetchTimeoutError(e);
+    const msg = timedOut
+      ? `Timeout ${RECEIPT_FETCH_TIMEOUT_MS}ms (${nativeLabel})`
+      : extractIapErrorMessage(e).slice(0, 160);
+
+    iapLog({
+      stage: 'getReceiptBase64_error',
+      forceRefresh,
+      timedOut,
+      native: nativeLabel,
+      message: msg,
+    });
+
+    iapOverlay({
+      receipt_attempt_finished: finishedAt,
+      receipt_attempt_error: 'true',
+      receipt_attempt_error_message: msg,
+      receipt_attempt_error_stack_short: timedOut ? '—' : shortErrorStack(e),
+      receipt_attempt_timeout: timedOut ? 'true' : 'false',
+      receipt_result_empty: 'true',
+      receipt_result_length: '0',
+      receipt_hasReceipt: 'no',
+      receipt_length: 0,
+      lastIapEvent: timedOut ? 'receipt_attempt_timeout' : 'receipt_attempt_error',
+    });
+
+    return null;
+  }
 }
 
 export async function restoreApplePurchasesForReceipt(): Promise<void> {
