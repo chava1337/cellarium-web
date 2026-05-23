@@ -4,6 +4,8 @@
  * La pasarela de Supabase exige Authorization + apikey para aceptar la petición (anon key).
  */
 
+import type { LocaleString, LocaleStringArray } from '../utils/localeContent';
+
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
@@ -50,6 +52,13 @@ export interface PublicMenuWine {
   acidity_level?: number | null;
   intensity_level?: number | null;
   fizziness_level?: number | null;
+  /** Legacy tenant pairings (text[]); optional if Edge adds it later. */
+  food_pairings?: string[] | string | null;
+  /** JSONB multilocale desde wines_canonical (PR1 public-menu). */
+  country_i18n?: LocaleString | null;
+  region_i18n?: LocaleString | null;
+  flavors_i18n?: LocaleStringArray | null;
+  pairing_i18n?: LocaleStringArray | null;
 }
 
 /**

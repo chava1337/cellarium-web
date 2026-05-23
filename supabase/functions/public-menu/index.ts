@@ -3,6 +3,7 @@
 // Returns branch + wines + cocktails for a valid guest QR token.
 // GET /public-menu?token=...  OR  POST /public-menu { "token": "..." }
 // JSONB (name, description, ingredients): returned as-is (bilingual objects/arrays) so the client can choose language.
+// Wine items include legacy tenant strings plus optional *_i18n from wines_canonical when canonical_wine_id is set.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -11,6 +12,65 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'content-type',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
+
+const CANONICAL_BATCH_SIZE = 100;
+
+type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
+
+type CanonicalI18nRow = {
+  id: string;
+  country: JsonValue;
+  region: JsonValue;
+  flavors: JsonValue;
+  serving: JsonValue;
+};
+
+function extractPairingI18n(serving: JsonValue): JsonValue {
+  if (serving == null || typeof serving !== 'object' || Array.isArray(serving)) {
+    return null;
+  }
+  const pairing = (serving as Record<string, unknown>).pairing;
+  return pairing ?? null;
+}
+
+function chunkIds(ids: string[], size: number): string[][] {
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) {
+    chunks.push(ids.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function fetchCanonicalI18nByIds(
+  supabase: ReturnType<typeof createClient>,
+  canonicalIds: string[]
+): Promise<Map<string, CanonicalI18nRow>> {
+  const map = new Map<string, CanonicalI18nRow>();
+  if (canonicalIds.length === 0) return map;
+
+  for (const batch of chunkIds(canonicalIds, CANONICAL_BATCH_SIZE)) {
+    const { data, error } = await supabase
+      .from('wines_canonical')
+      .select('id, country, region, flavors, serving')
+      .in('id', batch);
+
+    if (error) {
+      console.warn('[public-menu] wines_canonical batch error', {
+        message: error.message,
+        batchSize: batch.length,
+      });
+      continue;
+    }
+
+    for (const row of data ?? []) {
+      if (row?.id) {
+        map.set(row.id, row as CanonicalI18nRow);
+      }
+    }
+  }
+
+  return map;
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -146,7 +206,8 @@ Deno.serve(async (req: Request) => {
         sweetness_level,
         acidity_level,
         intensity_level,
-        fizziness_level
+        fizziness_level,
+        canonical_wine_id
       )
     `)
     .eq('branch_id', branchId)
@@ -184,30 +245,63 @@ Deno.serve(async (req: Request) => {
       acidity_level?: number | null;
       intensity_level?: number | null;
       fizziness_level?: number | null;
+      canonical_wine_id?: string | null;
     };
   }>;
 
-  const wines = winesRaw.map((row) => ({
-    id: row.wines.id,
-    name: row.wines.name,
-    grape_variety: row.wines.grape_variety ?? null,
-    region: row.wines.region ?? null,
-    country: row.wines.country ?? null,
-    vintage: row.wines.vintage ?? null,
-    type: row.wines.type ?? null,
-    description: row.wines.description ?? null,
-    image_url: row.wines.image_url ?? null,
-    winery: row.wines.winery ?? null,
-    alcohol_content: row.wines.alcohol_content ?? null,
-    body_level: row.wines.body_level ?? null,
-    sweetness_level: row.wines.sweetness_level ?? null,
-    acidity_level: row.wines.acidity_level ?? null,
-    intensity_level: row.wines.intensity_level ?? null,
-    fizziness_level: row.wines.fizziness_level ?? null,
-    stock_quantity: row.stock_quantity ?? 0,
-    price_by_glass: row.price_by_glass ?? null,
-    price_by_bottle: row.price_by_bottle ?? null,
-  }));
+  const canonicalIds = [
+    ...new Set(
+      winesRaw
+        .map((row) => row.wines.canonical_wine_id)
+        .filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+    ),
+  ];
+
+  const canonicalById = await fetchCanonicalI18nByIds(supabase, canonicalIds);
+
+  let winesWithCanonicalMatch = 0;
+
+  const wines = winesRaw.map((row) => {
+    const canonicalId = row.wines.canonical_wine_id ?? null;
+    const canonical = canonicalId ? canonicalById.get(canonicalId) : undefined;
+
+    if (canonical) {
+      winesWithCanonicalMatch += 1;
+    }
+
+    return {
+      id: row.wines.id,
+      name: row.wines.name,
+      grape_variety: row.wines.grape_variety ?? null,
+      region: row.wines.region ?? null,
+      country: row.wines.country ?? null,
+      vintage: row.wines.vintage ?? null,
+      type: row.wines.type ?? null,
+      description: row.wines.description ?? null,
+      image_url: row.wines.image_url ?? null,
+      winery: row.wines.winery ?? null,
+      alcohol_content: row.wines.alcohol_content ?? null,
+      body_level: row.wines.body_level ?? null,
+      sweetness_level: row.wines.sweetness_level ?? null,
+      acidity_level: row.wines.acidity_level ?? null,
+      intensity_level: row.wines.intensity_level ?? null,
+      fizziness_level: row.wines.fizziness_level ?? null,
+      stock_quantity: row.stock_quantity ?? 0,
+      price_by_glass: row.price_by_glass ?? null,
+      price_by_bottle: row.price_by_bottle ?? null,
+      country_i18n: canonical?.country ?? null,
+      region_i18n: canonical?.region ?? null,
+      flavors_i18n: canonical?.flavors ?? null,
+      pairing_i18n: canonical ? extractPairingI18n(canonical.serving) : null,
+    };
+  });
+
+  console.log('[public-menu] wines i18n', {
+    winesTotal: wines.length,
+    winesWithCanonicalWineId: winesRaw.filter((row) => row.wines.canonical_wine_id).length,
+    uniqueCanonicalIds: canonicalIds.length,
+    withCanonicalMatch: winesWithCanonicalMatch,
+  });
 
   const row = branchRow as {
     id: string;

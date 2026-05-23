@@ -63,6 +63,7 @@ import {
   WINERY_LABEL_LOCALE_OPTIONS,
 } from '../services/GlobalWineCatalogService';
 import type { UiLanguage } from '../utils/localeContent';
+import { resolveLocaleArray, resolveLocaleString } from '../utils/localeContent';
 import { 
   isValidPrice,
   toValidPrice,
@@ -134,8 +135,27 @@ function parseIngredients(ingredientsText: string | null | undefined): string[] 
     .filter(Boolean);
 }
 
+function normalizeLegacyFoodPairings(
+  foodPairings: PublicMenuWine['food_pairings']
+): string[] {
+  if (!foodPairings) return [];
+  if (Array.isArray(foodPairings)) {
+    return foodPairings.filter((p) => typeof p === 'string' && p.trim().length > 0);
+  }
+  if (typeof foodPairings === 'string') {
+    return foodPairings
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+  }
+  return [];
+}
+
 /** Map public-menu JSON to Branch + Wine[] for catalog UI (guest flow). Incluye campos sensoriales si vienen del backend. */
-function mapPublicMenuToWineCatalogItems(menu: PublicMenuResponse): { branch: Branch; wines: Wine[] } {
+function mapPublicMenuToWineCatalogItems(
+  menu: PublicMenuResponse,
+  language: UiLanguage
+): { branch: Branch; wines: Wine[] } {
   const branch: Branch = {
     id: menu.branch.id,
     name: menu.branch.name,
@@ -161,12 +181,20 @@ function mapPublicMenuToWineCatalogItems(menu: PublicMenuResponse): { branch: Br
     const alcohol = w.alcohol_content != null
       ? (typeof w.alcohol_content === 'number' ? w.alcohol_content : parseFloat(String(w.alcohol_content).replace(',', '.')))
       : undefined;
+    const country =
+      resolveLocaleString(w.country_i18n, language) || (w.country ?? '') || '';
+    const region =
+      resolveLocaleString(w.region_i18n, language) || (w.region ?? '') || '';
+    const pairingsFromI18n = resolveLocaleArray(w.pairing_i18n, language);
+    const legacyPairings = normalizeLegacyFoodPairings(w.food_pairings);
+    const food_pairings =
+      pairingsFromI18n.length > 0 ? pairingsFromI18n : legacyPairings;
     return {
       id: w.id,
       name: w.name ?? '',
       grape_variety: w.grape_variety ?? '',
-      region: w.region ?? '',
-      country: w.country ?? '',
+      region,
+      country,
       vintage: w.vintage ?? '',
       description: w.description ?? '',
       alcohol_content: Number.isFinite(alcohol) ? alcohol : undefined,
@@ -176,6 +204,7 @@ function mapPublicMenuToWineCatalogItems(menu: PublicMenuResponse): { branch: Br
       available_by_glass: priceGlass != null,
       image_url: w.image_url ?? undefined,
       winery: w.winery ?? undefined,
+      food_pairings,
       stock_quantity: typeof w.stock_quantity === 'number' && Number.isFinite(w.stock_quantity) ? w.stock_quantity : undefined,
       type: (w.type as Wine['type']) ?? undefined,
       body_level: clamp1to5(w.body_level ?? undefined),
@@ -282,6 +311,8 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
   const { currentBranch, setCurrentBranch, availableBranches, refreshBranches, isInitialized } = useBranch();
   const { session: guestSession, currentBranch: guestBranch } = useGuest(); // Obtener sesión e información de sucursal si existe
   const { language, getBilingualValue, t } = useLanguage(); // Obtener idioma y funciones bilingües
+  const languageRef = useRef(language);
+  languageRef.current = language;
   const deviceInfo = useDeviceInfo();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -496,6 +527,9 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
   // Cache de owner_id por sucursal: { branchId, ownerId } | null
   // Nunca reutilizar ownerId si branchId no coincide con activeBranch.id
   const branchOwnerIdCacheRef = useRef<{ branchId: string; ownerId: string } | null>(null);
+
+  /** Payload crudo de public-menu (guest); remapear al cambiar idioma sin refetch. */
+  const guestRawMenuRef = useRef<PublicMenuResponse | null>(null);
   
   useEffect(() => {
     if (!isEditingBranchName) {
@@ -1381,7 +1415,8 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     stockByWineIdRef.current = new Map();
     try {
       const menu = await getPublicMenuByToken(token);
-      const { branch, wines } = mapPublicMenuToWineCatalogItems(menu);
+      guestRawMenuRef.current = menu;
+      const { branch, wines } = mapPublicMenuToWineCatalogItems(menu, languageRef.current);
       setCatalogBackgroundPresetId(
         normalizeCatalogBackgroundPresetId(menu.branch.catalog_background_preset_id)
       );
@@ -1390,19 +1425,11 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
       setFilteredWines(wines);
       const guestCocktails = mapPublicMenuCocktailsToCatalogItems(menu.cocktails, branch.id);
       setCocktails(guestCocktails);
-      rawWinesDataRef.current = wines.map((w) => ({
-        wines: w,
-        stock_quantity: w.stock_quantity,
-        price_by_glass: w.price_per_glass,
-        price_by_bottle: w.price,
-      }));
-      const stockMap = new Map<string, { wines: Wine; stock_quantity?: number; price_by_glass?: number; price_by_bottle?: number }>();
-      wines.forEach((w) => stockMap.set(w.id, { wines: w, stock_quantity: w.stock_quantity, price_by_glass: w.price_per_glass, price_by_bottle: w.price }));
-      stockByWineIdRef.current = stockMap;
       if (__DEV__) console.log('[WineCatalog] loadGuestMenuByToken success', { branchId: branch?.id, winesCount: wines.length, cocktailsCount: guestCocktails.length });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (__DEV__) console.warn('[GUEST_MENU] fetch failed', msg, err);
+      guestRawMenuRef.current = null;
       // En __DEV__ mostrar error real para diagnosticar; en prod mensaje genérico
       const displayError = __DEV__ ? `${t('catalog.guest_code_expired')} [${msg}]` : t('catalog.guest_code_expired');
       setGuestMenuError(displayError);
@@ -1414,7 +1441,16 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }, [guestToken, t]);
 
-  // Helper para evitar cargas duplicadas de vinos
+  /** Guest: remapear vinos/cócteles al cambiar idioma (sin refetch). */
+  useEffect(() => {
+    const menu = guestRawMenuRef.current;
+    if (!isGuest || !menu) return;
+
+    const { branch, wines } = mapPublicMenuToWineCatalogItems(menu, language);
+    setGuestBranchFromMenu(branch);
+    setWines(wines);
+    setCocktails(mapPublicMenuCocktailsToCatalogItems(menu.cocktails, branch.id));
+  }, [language, isGuest]);
   // Usa useRef para mantener referencia estable a loadWines y evitar loops
   const loadWinesRef = useRef<typeof loadWines | null>(null);
   loadWinesRef.current = loadWines;
@@ -1472,19 +1508,11 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     // Aplicar búsqueda por texto
     if (searchText) {
       filtered = filtered.filter(cocktail => {
-        const name = getBilingualFromCatalog(cocktail.name, language) || getBilingualFromCatalog(cocktail.name, language === 'es' ? 'en' : 'es') || '';
-        const description = cocktail.description 
-          ? (getBilingualFromCatalog(cocktail.description, language) || getBilingualFromCatalog(cocktail.description, language === 'es' ? 'en' : 'es') || '')
+        const name = getBilingualFromCatalog(cocktail.name, language) || '';
+        const description = cocktail.description
+          ? (getBilingualFromCatalog(cocktail.description, language) || '')
           : '';
-        const ingredients = Array.isArray(cocktail.ingredients)
-          ? cocktail.ingredients.join(', ')
-          : (typeof cocktail.ingredients === 'object' && cocktail.ingredients !== null
-              ? (() => {
-                  const esIngredients = Array.isArray(cocktail.ingredients.es) ? cocktail.ingredients.es.join(', ') : (cocktail.ingredients.es || '');
-                  const enIngredients = Array.isArray(cocktail.ingredients.en) ? cocktail.ingredients.en.join(', ') : (cocktail.ingredients.en || '');
-                  return language === 'es' ? (esIngredients || enIngredients) : (enIngredients || esIngredients);
-                })()
-              : '');
+        const ingredients = getBilingualArray(cocktail.ingredients, language).join(', ');
 
         return (
           name.toLowerCase().includes(searchText.toLowerCase()) ||
@@ -1496,8 +1524,8 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
 
     // Ordenar alfabéticamente - asegurar que siempre haya un nombre para ordenar
     filtered = filtered.sort((a, b) => {
-      const nameA = (getBilingualFromCatalog(a.name, language) || getBilingualFromCatalog(a.name, language === 'es' ? 'en' : 'es') || '').toLowerCase();
-      const nameB = (getBilingualFromCatalog(b.name, language) || getBilingualFromCatalog(b.name, language === 'es' ? 'en' : 'es') || '').toLowerCase();
+      const nameA = (getBilingualFromCatalog(a.name, language) || '').toLowerCase();
+      const nameB = (getBilingualFromCatalog(b.name, language) || '').toLowerCase();
       return nameA.localeCompare(nameB);
     });
 
@@ -1618,8 +1646,9 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     loadBranchOwnerId();
   }, [activeBranch?.id, isGuest, user?.owner_id, user?.id]);
 
-  // Recalcular valores bilingües cuando cambia el idioma
+  // Recalcular valores bilingües cuando cambia el idioma (staff/owner; guest usa guestRawMenuRef)
   useEffect(() => {
+    if (isGuest) return;
     // Guard estable: solo procesar si hay datos en cache
     if (rawWinesDataRef.current.length === 0) return;
     
@@ -1661,7 +1690,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         };
       });
     });
-  }, [language, getBilingualValue]);
+  }, [language, getBilingualValue, isGuest]);
 
   useEffect(() => {
     // Crear una copia inmutable del arreglo para evitar mutar el estado original
@@ -2022,25 +2051,11 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [t]);
 
   const renderCocktailCard = useCallback((cocktail: CocktailDrink) => {
-    // Obtener valores bilingües con fallback
-    const cocktailName = getBilingualFromCatalog(cocktail.name, language) || getBilingualFromCatalog(cocktail.name, language === 'es' ? 'en' : 'es') || '';
-    const cocktailDescription = cocktail.description 
-      ? (getBilingualFromCatalog(cocktail.description, language) || getBilingualFromCatalog(cocktail.description, language === 'es' ? 'en' : 'es') || '')
+    const cocktailName = getBilingualFromCatalog(cocktail.name, language) || '';
+    const cocktailDescription = cocktail.description
+      ? (getBilingualFromCatalog(cocktail.description, language) || '')
       : '';
-    // Normalizar ingredientes a string y luego parsear por comas para listado
-    const ingredientsRaw = Array.isArray(cocktail.ingredients)
-      ? cocktail.ingredients.join(', ')
-      : typeof cocktail.ingredients === 'string'
-        ? cocktail.ingredients
-        : typeof cocktail.ingredients === 'object' && cocktail.ingredients !== null
-          ? (() => {
-              const obj = cocktail.ingredients as { es?: string[]; en?: string[] };
-              const esArr = Array.isArray(obj.es) ? obj.es : [];
-              const enArr = Array.isArray(obj.en) ? obj.en : [];
-              const arr = language === 'es' ? (esArr.length > 0 ? esArr : enArr) : (enArr.length > 0 ? enArr : esArr);
-              return arr.join(', ');
-            })()
-          : '';
+    const ingredientsRaw = getBilingualArray(cocktail.ingredients, language).join(', ');
     const cocktailIngredientsParsed = parseIngredients(ingredientsRaw);
     const originalHadComma = ingredientsRaw.indexOf(',') >= 0;
     const visibleIngredients = cocktailIngredientsParsed.slice(0, MAX_INGREDIENTS_VISIBLE);
