@@ -81,6 +81,267 @@ function pickPurchaseForSkus(purchases: Purchase[], preferredSkus: string[]): Pu
   return any ?? null;
 }
 
+type AppleReceiptValidateIntent =
+  | 'restore'
+  | 'purchase_recovery'
+  | 'restore_available_purchases'
+  | 'purchase_recovery_available_purchases';
+
+export type RecoverAppleReceiptFromAvailablePurchasesResult =
+  | { ok: true; receiptData: string; purchase: Purchase }
+  | { ok: false; code: 'GET_AVAILABLE_PURCHASES_FAILED'; message: string }
+  | { ok: false; code: 'NO_AVAILABLE_PURCHASES' }
+  | { ok: false; code: 'PURCHASE_OWNED_NO_RECEIPT' };
+
+/** Extrae recibo base64 de un Purchase (transactionReceipt legacy / campos Nitro). */
+function transactionReceiptFromPurchase(p: Purchase): string | null {
+  const anyP = p as Purchase & {
+    transactionReceipt?: string;
+    transactionReceiptIOS?: string;
+    receiptData?: string;
+    purchaseToken?: string | null;
+  };
+  const candidates = [
+    anyP.transactionReceipt,
+    anyP.transactionReceiptIOS,
+    anyP.receiptData,
+    anyP.purchaseToken,
+  ];
+  for (const raw of candidates) {
+    if (typeof raw !== 'string') continue;
+    const t = raw.trim();
+    if (t.length < 80) continue;
+    // JWS StoreKit 2 — Edge verifyReceipt espera PKCS7 app receipt, no JWT
+    if (t.startsWith('eyJ')) continue;
+    return t;
+  }
+  return null;
+}
+
+/** Preferir plan base más reciente por transactionDate; add-ons no bloquean. */
+function selectBestCellariumPurchaseForReceipt(purchases: Purchase[]): Purchase | null {
+  const cellarium = purchases.filter((p) => CELLARIUM_SKU_SET.has(p.productId));
+  if (cellarium.length === 0) return null;
+
+  const planPurchases = cellarium.filter((p) =>
+    (APPLE_IAP_SKUS_PLANS as readonly string[]).includes(p.productId)
+  );
+  const pool = planPurchases.length > 0 ? planPurchases : cellarium;
+
+  return pool.reduce<Purchase | null>((best, cur) => {
+    if (!best) return cur;
+    const bestDate = best.transactionDate ?? 0;
+    const curDate = cur.transactionDate ?? 0;
+    if (curDate !== bestDate) return curDate > bestDate ? cur : best;
+    const bestIdx = APPLE_IAP_SKUS_PLANS.indexOf(
+      best.productId as (typeof APPLE_IAP_SKUS_PLANS)[number]
+    );
+    const curIdx = APPLE_IAP_SKUS_PLANS.indexOf(
+      cur.productId as (typeof APPLE_IAP_SKUS_PLANS)[number]
+    );
+    if (curIdx >= 0 && (bestIdx < 0 || curIdx < bestIdx)) return cur;
+    return best;
+  }, null);
+}
+
+function availablePurchasesIntentForRecovery(
+  intent: 'restore' | 'purchase_recovery'
+): AppleReceiptValidateIntent {
+  return intent === 'restore' ? 'restore_available_purchases' : 'purchase_recovery_available_purchases';
+}
+
+/**
+ * Fallback cuando getReceiptIOS / requestReceiptRefreshIOS no devuelven recibo.
+ * Consulta getAvailablePurchases y busca transactionReceipt en compras Cellarium.
+ */
+export async function recoverAppleReceiptFromAvailablePurchases(): Promise<RecoverAppleReceiptFromAvailablePurchasesResult> {
+  const startedAt = new Date().toISOString();
+  iapOverlay({
+    available_purchases_started: startedAt,
+    available_purchases_finished: undefined,
+    available_purchases_error: undefined,
+    available_purchases_error_message: undefined,
+    available_purchases_count: undefined,
+    available_purchases_product_ids: undefined,
+    available_purchases_has_cellarium_product: undefined,
+    available_purchases_has_transaction_receipt: undefined,
+    available_purchases_selected_product_id: undefined,
+    available_purchases_selected_transaction_id: undefined,
+    available_purchases_result: undefined,
+    lastIapEvent: 'available_purchases_started',
+  });
+
+  try {
+    await ensureIapConnection();
+    const list = await getAvailablePurchases({ onlyIncludeActiveItemsIOS: false });
+    const finishedAt = new Date().toISOString();
+    const productIds = list.map((p) => p.productId);
+    const cellarium = list.filter((p) => CELLARIUM_SKU_SET.has(p.productId));
+    const cellariumIds = cellarium.map((p) => p.productId);
+
+    iapLog({
+      stage: 'recoverAppleReceiptFromAvailablePurchases',
+      count: list.length,
+      productIds: cellariumIds,
+    });
+
+    iapOverlay({
+      available_purchases_finished: finishedAt,
+      available_purchases_error: 'false',
+      available_purchases_error_message: '—',
+      available_purchases_count: String(list.length),
+      available_purchases_product_ids: productIds.length > 0 ? productIds.join(',') : '—',
+      available_purchases_has_cellarium_product: cellarium.length > 0 ? 'true' : 'false',
+      lastIapEvent: 'available_purchases_finished',
+    });
+
+    if (list.length === 0) {
+      iapOverlay({
+        available_purchases_result: 'NO_AVAILABLE_PURCHASES',
+        available_purchases_has_transaction_receipt: 'false',
+        lastIapEvent: 'available_purchases_no_purchases',
+      });
+      return { ok: false, code: 'NO_AVAILABLE_PURCHASES' };
+    }
+
+    if (cellarium.length === 0) {
+      iapOverlay({
+        available_purchases_result: 'NO_AVAILABLE_PURCHASES',
+        available_purchases_has_transaction_receipt: 'false',
+        lastIapEvent: 'available_purchases_no_cellarium',
+      });
+      return { ok: false, code: 'NO_AVAILABLE_PURCHASES' };
+    }
+
+    const selected = selectBestCellariumPurchaseForReceipt(list);
+    if (!selected) {
+      iapOverlay({
+        available_purchases_result: 'NO_AVAILABLE_PURCHASES',
+        available_purchases_has_transaction_receipt: 'false',
+        lastIapEvent: 'available_purchases_no_selection',
+      });
+      return { ok: false, code: 'NO_AVAILABLE_PURCHASES' };
+    }
+
+    const receiptData = transactionReceiptFromPurchase(selected);
+    const tid = transactionIdFromPurchase(selected);
+
+    iapOverlay({
+      available_purchases_selected_product_id: selected.productId,
+      available_purchases_selected_transaction_id: tid ?? '—',
+      available_purchases_has_transaction_receipt: receiptData ? 'true' : 'false',
+    });
+
+    if (!receiptData) {
+      iapOverlay({
+        available_purchases_result: 'PURCHASE_OWNED_NO_RECEIPT',
+        lastIapEvent: 'available_purchases_owned_no_receipt',
+      });
+      iapLog({
+        stage: 'recoverAppleReceiptFromAvailablePurchases',
+        outcome: 'PURCHASE_OWNED_NO_RECEIPT',
+        productId: selected.productId,
+        transactionId: tid,
+      });
+      return { ok: false, code: 'PURCHASE_OWNED_NO_RECEIPT' };
+    }
+
+    iapOverlay({
+      available_purchases_result: 'RECEIPT_OK',
+      receipt_hasReceipt: 'yes',
+      receipt_length: receiptData.length,
+      receipt_result_length: String(receiptData.length),
+      receipt_result_empty: 'false',
+      lastIapEvent: 'available_purchases_receipt_ok',
+    });
+    iapLog({
+      stage: 'recoverAppleReceiptFromAvailablePurchases',
+      outcome: 'receipt_ok',
+      productId: selected.productId,
+      receiptLen: receiptData.length,
+      transactionId: tid,
+    });
+
+    return { ok: true, receiptData, purchase: selected };
+  } catch (e: unknown) {
+    const msg = extractIapErrorMessage(e).slice(0, 160);
+    iapLog({
+      stage: 'recoverAppleReceiptFromAvailablePurchases',
+      outcome: 'error',
+      message: msg,
+    });
+    iapOverlay({
+      available_purchases_finished: new Date().toISOString(),
+      available_purchases_error: 'true',
+      available_purchases_error_message: msg,
+      available_purchases_result: 'GET_AVAILABLE_PURCHASES_FAILED',
+      lastIapEvent: 'available_purchases_error',
+    });
+    return { ok: false, code: 'GET_AVAILABLE_PURCHASES_FAILED', message: msg };
+  }
+}
+
+async function validateReceiptAndFinish(
+  receipt: string,
+  intent: AppleReceiptValidateIntent
+): Promise<{ syncedActive: boolean; syncedLapsed: boolean }> {
+  iapLog({ recovery_validate_start: true, intent });
+  iapOverlay({ validate_start: intent, lastIapEvent: 'recovery_validate_start' });
+  const { data, error } = await validateAppleReceiptBackend(receipt, intent);
+
+  if (error) {
+    iapLog({
+      recovery_validate_result: 'edge_error',
+      intent,
+      code: error.code ?? null,
+      httpStatus: error.status ?? null,
+      appleStatus: error.appleStatus ?? null,
+    });
+    iapOverlay({
+      validate_result: 'error',
+      validate_error_code: error.code ?? null,
+      synced: null,
+      lastIapEvent: 'recovery_validate_error',
+    });
+    throw new AppleReceiptRecoveryError(error);
+  }
+
+  const syncedActive = data?.synced === 'active';
+  const syncedLapsed = data?.synced === 'lapsed';
+
+  if (syncedActive || syncedLapsed) {
+    await finishApplePurchasesAfterBackendSync();
+    iapLog({ recovery_finish_transactions: true, intent, synced: syncedLapsed ? 'lapsed' : 'active' });
+    iapOverlay({
+      validate_result: 'ok',
+      validate_error_code: null,
+      synced: syncedLapsed ? 'lapsed' : 'active',
+      lastIapEvent: 'recovery_validate_synced',
+    });
+  } else {
+    iapLog({ recovery_validate_result: 'unclear_response', intent });
+    iapOverlay({
+      validate_result: 'unclear',
+      synced: data?.synced != null ? String(data.synced) : null,
+      lastIapEvent: 'recovery_validate_unclear',
+      flowHintNoAppleConfirmation:
+        'No se recibió confirmación de Apple. Intenta Restaurar compras.',
+    });
+    throw new AppleReceiptRecoveryError({
+      message: 'No se pudo confirmar la suscripción con el servidor.',
+      code: 'RECOVERY_AMBIGUOUS',
+    });
+  }
+
+  iapLog({
+    recovery_validate_result: syncedLapsed ? 'lapsed' : 'active',
+    intent,
+    planId: data?.plan_id ?? null,
+  });
+
+  return { syncedActive, syncedLapsed };
+}
+
 /** getAvailablePurchases: solo auditoría; nunca bloquea recuperación por recibo. */
 async function tryGetAvailablePurchasesOptional(): Promise<Purchase[] | null> {
   try {
@@ -169,8 +430,8 @@ function catalogSkusForPurchaseRequest(requestedSku: string): string[] {
 
 /**
  * Recuperación por recibo → validate-apple-receipt.
+ * soft receipt → force refresh → getAvailablePurchases (transactionReceipt).
  * Solo entonces (synced active|lapsed) llama a finishApplePurchasesAfterBackendSync.
- * getAvailablePurchases al final es solo log; no bloquea ni autoriza finish.
  */
 export async function recoverAppleIapViaReceipt(
   intent: 'restore' | 'purchase_recovery'
@@ -261,6 +522,48 @@ export async function recoverAppleIapViaReceipt(
   });
 
   if (!receipt) {
+    iapLog({ recovery_receipt_missing_try_available_purchases: true, intent });
+    iapOverlay({ lastIapEvent: 'recovery_try_available_purchases' });
+
+    const fallback = await recoverAppleReceiptFromAvailablePurchases();
+
+    if (fallback.ok) {
+      receipt = fallback.receiptData;
+      iapLog({
+        recovery_receipt_from_available_purchases: true,
+        productId: fallback.purchase.productId,
+        receiptLen: receipt.length,
+        intent,
+      });
+      const validateIntent = availablePurchasesIntentForRecovery(intent);
+      const result = await validateReceiptAndFinish(receipt, validateIntent);
+      void tryGetAvailablePurchasesOptional();
+      return result;
+    }
+
+    if (fallback.code === 'PURCHASE_OWNED_NO_RECEIPT') {
+      iapOverlay({
+        validate_result: 'purchase_owned_no_receipt',
+        lastIapEvent: 'recovery_purchase_owned_no_receipt',
+      });
+      throw new AppleReceiptRecoveryError({
+        message:
+          'Apple detecta una compra, pero no entregó un recibo para validarla. Cierra y abre la app e intenta Restaurar compras nuevamente.',
+        code: 'PURCHASE_OWNED_NO_RECEIPT',
+      });
+    }
+
+    if (fallback.code === 'GET_AVAILABLE_PURCHASES_FAILED') {
+      iapOverlay({
+        validate_result: 'get_available_purchases_failed',
+        lastIapEvent: 'recovery_get_available_purchases_failed',
+      });
+      throw new AppleReceiptRecoveryError({
+        message: fallback.message || 'No se pudieron consultar las compras en App Store.',
+        code: 'GET_AVAILABLE_PURCHASES_FAILED',
+      });
+    }
+
     iapLog({ recovery_validate_result: 'receipt_missing', intent });
     iapOverlay({
       validate_result: 'receipt_missing',
@@ -268,66 +571,13 @@ export async function recoverAppleIapViaReceipt(
     });
     throw new AppleReceiptRecoveryError({
       message: 'No hay recibo disponible para sincronizar con el servidor.',
-      code: 'RECEIPT_MISSING',
+      code: 'NO_AVAILABLE_PURCHASES',
     });
   }
 
-  iapLog({ recovery_validate_start: true, intent });
-  iapOverlay({ validate_start: intent, lastIapEvent: 'recovery_validate_start' });
-  const { data, error } = await validateAppleReceiptBackend(receipt, intent);
-
-  if (error) {
-    iapLog({
-      recovery_validate_result: 'edge_error',
-      intent,
-      code: error.code ?? null,
-      httpStatus: error.status ?? null,
-      appleStatus: error.appleStatus ?? null,
-    });
-    iapOverlay({
-      validate_result: 'error',
-      validate_error_code: error.code ?? null,
-      synced: null,
-      lastIapEvent: 'recovery_validate_error',
-    });
-    throw new AppleReceiptRecoveryError(error);
-  }
-
-  const syncedActive = data?.synced === 'active';
-  const syncedLapsed = data?.synced === 'lapsed';
-
-  if (syncedActive || syncedLapsed) {
-    await finishApplePurchasesAfterBackendSync();
-    iapLog({ recovery_finish_transactions: true, intent, synced: syncedLapsed ? 'lapsed' : 'active' });
-    iapOverlay({
-      validate_result: 'ok',
-      validate_error_code: null,
-      synced: syncedLapsed ? 'lapsed' : 'active',
-      lastIapEvent: 'recovery_validate_synced',
-    });
-  } else {
-    iapLog({ recovery_validate_result: 'unclear_response', intent });
-    iapOverlay({
-      validate_result: 'unclear',
-      synced: data?.synced != null ? String(data.synced) : null,
-      lastIapEvent: 'recovery_validate_unclear',
-      flowHintNoAppleConfirmation:
-        'No se recibió confirmación de Apple. Intenta Restaurar compras.',
-    });
-    throw new AppleReceiptRecoveryError({
-      message: 'No se pudo confirmar la suscripción con el servidor.',
-      code: 'RECOVERY_AMBIGUOUS',
-    });
-  }
-
-  iapLog({
-    recovery_validate_result: syncedLapsed ? 'lapsed' : 'active',
-    intent,
-    planId: data?.plan_id ?? null,
-  });
-
+  const result = await validateReceiptAndFinish(receipt, intent);
   void tryGetAvailablePurchasesOptional();
-  return { syncedActive, syncedLapsed };
+  return result;
 }
 
 /**

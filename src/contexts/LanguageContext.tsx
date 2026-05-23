@@ -583,6 +583,10 @@ const translations: Record<Language, Record<string, string>> = {
       'No hay recibo de App Store disponible en el dispositivo. Usa Restaurar compras o espera un momento tras completar la compra.',
     'subscription.apple_error_receipt_recover_instruction':
       'No pudimos recuperar el recibo de Apple. Cierra y abre la app, luego intenta Restaurar compras.',
+    'subscription.apple_error_purchase_owned_no_receipt':
+      'Apple detecta una compra, pero no entregó un recibo para validarla. Cierra y abre la app e intenta Restaurar compras nuevamente.',
+    'subscription.apple_error_get_available_purchases_failed':
+      'No pudimos consultar tus compras en App Store. Cierra y abre la app e intenta Restaurar compras nuevamente.',
     'subscription.apple_iap_storekit_pending_message':
       'Detectamos una compra pendiente de Apple. Intentamos recuperarla. Si el problema continúa, cierra y abre la app e intenta Restaurar compras.',
     'subscription.apple_purchase_unconfirmed_message':
@@ -1434,6 +1438,10 @@ const translations: Record<Language, Record<string, string>> = {
       'No App Store receipt is available on this device. Use Restore purchases or wait a moment after completing checkout.',
     'subscription.apple_error_receipt_recover_instruction':
       'We could not recover the App Store receipt. Close and reopen the app, then try Restore purchases.',
+    'subscription.apple_error_purchase_owned_no_receipt':
+      'Apple shows a purchase, but did not provide a receipt to validate it. Close and reopen the app, then try Restore purchases again.',
+    'subscription.apple_error_get_available_purchases_failed':
+      'We could not load your App Store purchases. Close and reopen the app, then try Restore purchases again.',
     'subscription.apple_iap_storekit_pending_message':
       'We detected a pending Apple purchase and tried to recover it. If the issue persists, close and reopen the app, then try Restore purchases.',
     'subscription.apple_purchase_unconfirmed_message':

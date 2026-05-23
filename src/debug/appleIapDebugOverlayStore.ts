@@ -99,6 +99,18 @@ export type AppleIapDebugOverlaySnapshot = {
   receipt_refresh_finished?: string;
   receipt_refresh_failed?: string;
   receipt_attempt_timeout?: string;
+  /** getAvailablePurchases fallback tras fallo getReceiptIOS */
+  available_purchases_started?: string;
+  available_purchases_finished?: string;
+  available_purchases_error?: string;
+  available_purchases_error_message?: string;
+  available_purchases_count?: string;
+  available_purchases_product_ids?: string;
+  available_purchases_has_cellarium_product?: string;
+  available_purchases_has_transaction_receipt?: string;
+  available_purchases_selected_product_id?: string;
+  available_purchases_selected_transaction_id?: string;
+  available_purchases_result?: string;
 };
 
 let snapshot: AppleIapDebugOverlaySnapshot = {

@@ -45,7 +45,14 @@ export function messageForAppleReceiptError(
       break;
     case 'MISSING_RECEIPT':
     case 'RECEIPT_MISSING':
+    case 'NO_AVAILABLE_PURCHASES':
       base = t('subscription.apple_error_receipt_recover_instruction');
+      break;
+    case 'PURCHASE_OWNED_NO_RECEIPT':
+      base = t('subscription.apple_error_purchase_owned_no_receipt');
+      break;
+    case 'GET_AVAILABLE_PURCHASES_FAILED':
+      base = t('subscription.apple_error_get_available_purchases_failed');
       break;
     case 'ADDON_WITHOUT_BASE':
       base = t('subscription.apple_error_addon_without_base');

@@ -70,7 +70,13 @@ function patchEdgeInvokeFailure(
 
 export async function validateAppleReceiptBackend(
   receiptData: string,
-  intent?: 'purchase' | 'restore' | 'sync' | 'purchase_recovery'
+  intent?:
+    | 'purchase'
+    | 'restore'
+    | 'sync'
+    | 'purchase_recovery'
+    | 'restore_available_purchases'
+    | 'purchase_recovery_available_purchases'
 ): Promise<{ data: AppleSyncResponse | null; error: AppleReceiptInvokeError | null }> {
   const receiptLen = typeof receiptData === 'string' ? receiptData.length : 0;
   const host = getSupabaseUrlHostForDebug();
