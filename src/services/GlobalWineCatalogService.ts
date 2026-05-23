@@ -5,6 +5,17 @@
 
 import { supabase } from '../lib/supabase';
 import { logger } from '../utils/logger';
+import {
+  type LocaleString,
+  type LocaleStringArray,
+  type ResolveLocaleOptions,
+  type UiLanguage,
+  resolveLocaleArray,
+  resolveLocaleString,
+} from '../utils/localeContent';
+
+export type { UiLanguage, JsonLocaleKey, LocaleString, LocaleStringArray, ResolveLocaleOptions } from '../utils/localeContent';
+export { uiLanguageToJsonKey, localeKeyChain, resolveLocaleString, resolveLocaleArray } from '../utils/localeContent';
 
 /** Solo logs de diagnóstico en __DEV__ (vino reportado como invisible en browse). */
 const DEBUG_GLOBAL_CATALOG_WINE_ID = 'd0b9e697-1ae3-4311-8287-1d6efc715360';
@@ -158,44 +169,18 @@ const SUPABASE_PROJECT_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 // Cache para imágenes ya buscadas (optimización)
 const imageCache = new Map<string, string | undefined>();
 
-/**
- * Tipo para valores bilingües (español/inglés)
- */
-type BilingualValue = string | { en?: string; es?: string } | null | undefined;
+/** Valor localizable (JSONB es / en / pt o string legacy). */
+type BilingualValue = LocaleString;
 
 /**
- * Helper para extraer el valor según el idioma preferido
- * @param value - Valor que puede ser string o objeto bilingüe {en: "...", es: "..."}
- * @param lang - Idioma preferido ('es' | 'en'), por defecto 'es'
- * @returns El valor en el idioma solicitado, o el disponible si no existe
+ * Helper para extraer el valor según el idioma preferido (delega en localeContent).
  */
 export function getBilingualValue(
   value: BilingualValue,
-  lang: 'es' | 'en' = 'es'
+  lang: UiLanguage = 'es',
+  options?: ResolveLocaleOptions
 ): string | undefined {
-  if (!value) return undefined;
-  
-  // Si es un string simple, retornarlo directamente (retrocompatibilidad)
-  if (typeof value === 'string') {
-    return value;
-  }
-  
-  // Si es un objeto bilingüe
-  if (typeof value === 'object' && value !== null) {
-    // Intentar obtener el valor en el idioma preferido
-    const preferred = value[lang];
-    if (preferred) return preferred;
-    
-    // Fallback al otro idioma si no existe en el preferido
-    const fallbackLang = lang === 'es' ? 'en' : 'es';
-    const fallback = value[fallbackLang];
-    if (fallback) return fallback;
-    
-    // Si no hay ningún valor, retornar undefined
-    return undefined;
-  }
-  
-  return undefined;
+  return resolveLocaleString(value, lang, options);
 }
 
 /**
@@ -232,44 +217,14 @@ export function getBilingualCountryDisplay(
 }
 
 /**
- * Helper para extraer un array bilingüe
- * @param value - Valor que puede ser array, string o objeto bilingüe {en: [...], es: [...]}
- * @param lang - Idioma preferido ('es' | 'en'), por defecto 'es'
- * @returns Array de strings en el idioma solicitado
+ * Helper para extraer un array bilingüe / multilocale (delega en localeContent).
  */
 export function getBilingualArray(
-  value: string[] | string | { en?: string[]; es?: string[] } | null | undefined,
-  lang: 'es' | 'en' = 'es'
+  value: LocaleStringArray,
+  lang: UiLanguage = 'es',
+  options?: ResolveLocaleOptions
 ): string[] {
-  if (!value) return [];
-  
-  // Si es un array simple, retornarlo directamente
-  if (Array.isArray(value)) {
-    return value;
-  }
-  
-  // Si es un string, convertirlo a array
-  if (typeof value === 'string') {
-    return [value];
-  }
-  
-  // Si es un objeto bilingüe
-  if (typeof value === 'object' && value !== null) {
-    // Intentar obtener el array en el idioma preferido
-    const preferred = value[lang];
-    if (Array.isArray(preferred) && preferred.length > 0) {
-      return preferred;
-    }
-    
-    // Fallback al otro idioma si no existe en el preferido
-    const fallbackLang = lang === 'es' ? 'en' : 'es';
-    const fallback = value[fallbackLang];
-    if (Array.isArray(fallback) && fallback.length > 0) {
-      return fallback;
-    }
-  }
-  
-  return [];
+  return resolveLocaleArray(value, lang, options);
 }
 
 export const publicImageUrl = (path?: string) => {

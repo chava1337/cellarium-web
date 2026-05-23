@@ -1,13 +1,23 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  type LocaleString,
+  type ResolveLocaleOptions,
+  type UiLanguage,
+  resolveLocaleString,
+} from '../utils/localeContent';
 
-export type Language = 'es' | 'en';
+export type Language = UiLanguage;
 
 interface LanguageContextType {
   language: Language;
   setLanguage: (lang: Language) => Promise<void>;
   t: (key: string) => string;
-  getBilingualValue: (value: string | { en?: string; es?: string } | null | undefined, fallback?: string) => string;
+  getBilingualValue: (
+    value: LocaleString,
+    fallback?: string,
+    options?: ResolveLocaleOptions
+  ) => string;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -1729,6 +1739,8 @@ const translations: Record<Language, Record<string, string>> = {
     'global_catalog.tannin': 'Tannin',
     'global_catalog.sweetness': 'Sweetness',
   },
+  /** UI pt-BR: strings propias cuando existan; t() hace fallback en → es → key. */
+  'pt-BR': {},
 };
 
 const LANGUAGE_STORAGE_KEY = '@cellarium_language';
@@ -1744,7 +1756,7 @@ export const LanguageProvider: React.FC<LanguageProviderProps> = ({ children }) 
   const loadSavedLanguage = async () => {
     try {
       const savedLanguage = await AsyncStorage.getItem(LANGUAGE_STORAGE_KEY);
-      if (savedLanguage === 'es' || savedLanguage === 'en') {
+      if (savedLanguage === 'es' || savedLanguage === 'en' || savedLanguage === 'pt-BR') {
         setLanguageState(savedLanguage as Language);
       }
     } catch (error) {
@@ -1763,31 +1775,23 @@ export const LanguageProvider: React.FC<LanguageProviderProps> = ({ children }) 
 
   // Función de traducción
   const t = (key: string): string => {
+    if (language === 'pt-BR') {
+      return (
+        translations['pt-BR'][key] ??
+        translations.en[key] ??
+        translations.es[key] ??
+        key
+      );
+    }
     return translations[language][key] || key;
   };
 
-  // Función para obtener valores bilingües
   const getBilingualValue = (
-    value: string | { en?: string; es?: string } | null | undefined,
-    fallback: string = ''
+    value: LocaleString,
+    fallback: string = '',
+    options?: ResolveLocaleOptions
   ): string => {
-    if (!value) return fallback;
-    
-    if (typeof value === 'string') {
-      return value;
-    }
-    
-    if (typeof value === 'object' && value !== null) {
-      const langValue = value[language];
-      if (langValue && typeof langValue === 'string') return langValue;
-      
-      // Fallback al otro idioma si no existe en el idioma actual
-      const fallbackLang = language === 'es' ? 'en' : 'es';
-      const fallbackValue = value[fallbackLang];
-      if (fallbackValue && typeof fallbackValue === 'string') return fallbackValue;
-    }
-    
-    return fallback;
+    return resolveLocaleString(value, language, options) ?? fallback;
   };
 
   const value: LanguageContextType = {

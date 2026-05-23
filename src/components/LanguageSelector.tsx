@@ -1,7 +1,19 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
-import { useLanguage } from '../contexts/LanguageContext';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useLanguage, type Language } from '../contexts/LanguageContext';
 import { useDeviceInfo } from '../hooks/useDeviceInfo';
+
+const LANGUAGE_CYCLE: Record<Language, Language> = {
+  es: 'en',
+  en: 'pt-BR',
+  'pt-BR': 'es',
+};
+
+const LANGUAGE_FLAG: Record<Language, string> = {
+  es: '🇲🇽',
+  en: '🇺🇸',
+  'pt-BR': '🇧🇷',
+};
 
 const LanguageSelector: React.FC = () => {
   const { language, setLanguage } = useLanguage();
@@ -9,8 +21,7 @@ const LanguageSelector: React.FC = () => {
   const size = deviceInfo.deviceType === 'tablet' ? 36 : 32;
 
   const toggleLanguage = () => {
-    const newLanguage = language === 'es' ? 'en' : 'es';
-    setLanguage(newLanguage);
+    setLanguage(LANGUAGE_CYCLE[language]);
   };
 
   return (
@@ -20,14 +31,14 @@ const LanguageSelector: React.FC = () => {
         {
           width: size,
           height: size,
-        }
+        },
       ]}
       onPress={toggleLanguage}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={`Idioma: ${language}`}
     >
-      <Text style={styles.flag}>
-        {language === 'es' ? '🇲🇽' : '🇺🇸'}
-      </Text>
+      <Text style={styles.flag}>{LANGUAGE_FLAG[language]}</Text>
     </TouchableOpacity>
   );
 };
