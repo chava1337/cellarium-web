@@ -57,7 +57,12 @@ import CatalogFilterBar from '../components/catalog/CatalogFilterBar';
 import WineCardShell from '../components/catalog/WineCardShell';
 import CocktailCardShell from '../components/catalog/CocktailCardShell';
 import { getCocktailMenu, CocktailDrink } from '../services/CocktailService';
-import { getBilingualValue as getBilingualFromCatalog } from '../services/GlobalWineCatalogService';
+import {
+  getBilingualValue as getBilingualFromCatalog,
+  getBilingualArray,
+  WINERY_LABEL_LOCALE_OPTIONS,
+} from '../services/GlobalWineCatalogService';
+import type { UiLanguage } from '../utils/localeContent';
 import { 
   isValidPrice,
   toValidPrice,
@@ -82,6 +87,19 @@ import {
 const DEBUG = __DEV__;
 const DEBUG_VERBOSE = false; // solo para logs globales de diagnóstico si lo activo manualmente
 const DEBUG_TASTE_KEYS = false; // solo para detectar nuevas claves en taste_profile (loguear 1 vez por sesión)
+
+type DefaultPairingsLocales = { es: string[]; en: string[]; pt?: string[] };
+
+function pickDefaultPairingsForLanguage(
+  defaults: DefaultPairingsLocales,
+  lang: UiLanguage
+): string[] {
+  if (lang === 'pt-BR') {
+    return defaults.pt && defaults.pt.length > 0 ? defaults.pt : defaults.en;
+  }
+  if (lang === 'es') return defaults.es;
+  return defaults.en;
+}
 
 // Helpers de logging globales (solo para diagnóstico cuando DEBUG_VERBOSE === true)
 const debugLog = (...args: any[]) => {
@@ -1182,10 +1200,10 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
           
           // Extraer valores bilingües
           const bilingualName = canonicalData && canonicalData.label
-            ? getBilingualValue(canonicalData.label, stock.wines.name)
+            ? getBilingualValue(canonicalData.label, stock.wines.name, WINERY_LABEL_LOCALE_OPTIONS)
             : stock.wines.name;
           const bilingualWinery = canonicalData && canonicalData.winery
-            ? getBilingualValue(canonicalData.winery, stock.wines.winery || '')
+            ? getBilingualValue(canonicalData.winery, stock.wines.winery || '', WINERY_LABEL_LOCALE_OPTIONS)
             : stock.wines.winery || '';
           const bilingualRegion = canonicalData && canonicalData.region
             ? getBilingualValue(canonicalData.region, stock.wines.region || '')
@@ -1206,11 +1224,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
               })()
             : null;
           const bilingualFoodPairings = canonicalData && canonicalData.serving && canonicalData.serving.pairing
-            ? (() => {
-                const pairing = canonicalData.serving.pairing;
-                const fp = language === 'es' ? (pairing.es || pairing.en) : (pairing.en || pairing.es);
-                return Array.isArray(fp) ? fp : (typeof fp === 'string' ? fp.split(',').map(f => f.trim()).filter(f => f) : []);
-              })()
+            ? getBilingualArray(canonicalData.serving.pairing, language)
             : (() => {
                 const fp = stock.wines.food_pairings;
                 if (!fp) return [];
@@ -1621,10 +1635,10 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
         if (!canonicalData) return wine;
         
         const bilingualName = canonicalData.label
-          ? getBilingualValue(canonicalData.label, stock.wines.name)
+          ? getBilingualValue(canonicalData.label, stock.wines.name, WINERY_LABEL_LOCALE_OPTIONS)
           : stock.wines.name;
         const bilingualWinery = canonicalData.winery
-          ? getBilingualValue(canonicalData.winery, stock.wines.winery || '')
+          ? getBilingualValue(canonicalData.winery, stock.wines.winery || '', WINERY_LABEL_LOCALE_OPTIONS)
           : stock.wines.winery || '';
         const bilingualRegion = canonicalData.region
           ? getBilingualValue(canonicalData.region, stock.wines.region || '')
@@ -1634,11 +1648,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
           : stock.wines.country || '';
         
         const bilingualFoodPairings = canonicalData.serving && canonicalData.serving.pairing
-          ? (() => {
-              const pairing = canonicalData.serving.pairing;
-              const fp = language === 'es' ? (pairing.es || pairing.en) : (pairing.en || pairing.es);
-              return Array.isArray(fp) ? fp : (typeof fp === 'string' ? fp.split(',').map(f => f.trim()).filter(f => f) : []);
-            })()
+          ? getBilingualArray(canonicalData.serving.pairing, language)
           : wine.food_pairings || [];
         
         return {
@@ -1743,35 +1753,41 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
     // Si no hay suficientes, usar datos por defecto según el tipo de vino (bilingües)
     let finalPairings = pairings;
     if (pairings.length < 3) {
-      const defaultPairings: Record<string, { es: string[]; en: string[] }> = {
+      const defaultPairings: Record<string, DefaultPairingsLocales> = {
         'red': {
           es: ['Carnes rojas', 'Quesos curados', 'Pastas con salsa'],
           en: ['Red meats', 'Aged cheeses', 'Pasta with sauce'],
+          pt: ['Carnes vermelhas', 'Queijos curados', 'Massas com molho'],
         },
         'white': {
           es: ['Pescados', 'Mariscos', 'Aves'],
           en: ['Fish', 'Seafood', 'Poultry'],
+          pt: ['Peixes', 'Frutos do mar', 'Aves'],
         },
         'sparkling': {
           es: ['Aperitivos', 'Mariscos', 'Postres'],
           en: ['Appetizers', 'Seafood', 'Desserts'],
+          pt: ['Aperitivos', 'Frutos do mar', 'Sobremesas'],
         },
         'rose': {
           es: ['Ensaladas', 'Pescados', 'Quesos suaves'],
           en: ['Salads', 'Fish', 'Soft cheeses'],
+          pt: ['Saladas', 'Peixes', 'Queijos suaves'],
         },
         'dessert': {
           es: ['Postres dulces', 'Quesos azules', 'Frutos secos'],
           en: ['Sweet desserts', 'Blue cheeses', 'Dried fruits'],
+          pt: ['Sobremesas doces', 'Queijos azuis', 'Frutos secos'],
         },
         'fortified': {
           es: ['Quesos curados', 'Chocolate', 'Frutos secos'],
           en: ['Aged cheeses', 'Chocolate', 'Dried fruits'],
+          pt: ['Queijos curados', 'Chocolate', 'Frutos secos'],
         },
       };
       const wineType = wine.type || 'red';
       const defaults = defaultPairings[wineType] || defaultPairings['red'];
-      const defaultsForLanguage = language === 'es' ? defaults.es : defaults.en;
+      const defaultsForLanguage = pickDefaultPairingsForLanguage(defaults, language);
       finalPairings = [...pairings, ...defaultsForLanguage.slice(0, 3 - pairings.length)];
     }
     

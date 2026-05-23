@@ -17,6 +17,9 @@ import {
 export type { UiLanguage, JsonLocaleKey, LocaleString, LocaleStringArray, ResolveLocaleOptions } from '../utils/localeContent';
 export { uiLanguageToJsonKey, localeKeyChain, resolveLocaleString, resolveLocaleArray } from '../utils/localeContent';
 
+/** winery / label en UI: es → en, nunca pt (aunque UI sea pt-BR). */
+export const WINERY_LABEL_LOCALE_OPTIONS: ResolveLocaleOptions = { wineryLabelMode: true };
+
 /** Solo logs de diagnóstico en __DEV__ (vino reportado como invisible en browse). */
 const DEBUG_GLOBAL_CATALOG_WINE_ID = 'd0b9e697-1ae3-4311-8287-1d6efc715360';
 
@@ -270,21 +273,20 @@ export const publicImageUrl = (path?: string) => {
 
 export interface GlobalWine {
   id: string;
-  winery?: string | { en?: string; es?: string }; // Nombre de la bodega desde wines_canonical (bilingüe)
-  label?: string | { en?: string; es?: string }; // Nombre del vino desde wines_canonical (bilingüe)
-  country?: string | { en?: string; es?: string }; // País (bilingüe)
-  region?: string | { en?: string; es?: string }; // Región (bilingüe)
-  color?: string | { en?: string; es?: string } | string[]; // Color puede ser string, objeto bilingüe, o array JSONB
+  winery?: LocaleString;
+  label?: LocaleString;
+  country?: LocaleString;
+  region?: LocaleString;
+  color?: LocaleString | string[];
   vintage?: number;
   image_canonical_url?: string;
-  // Campos adicionales para ficha completa
   grapes?: string[] | string;
   abv?: number;
   volume_ml?: number;
   closure?: string;
-  style?: string | { en?: string; es?: string };
-  appellation?: string | { en?: string; es?: string };
-  flavors?: string[] | string | { en?: string[]; es?: string[] };
+  style?: LocaleString;
+  appellation?: LocaleString;
+  flavors?: LocaleStringArray;
   // taste_profile puede venir como columna directa (JSONB) o dentro de tech_data/tasting_notes
   taste_profile?: {
     acidity?: number;
@@ -309,7 +311,7 @@ export interface GlobalWine {
     oak?: number;
   };
   serving?: {
-    pairing?: string[] | string | { en?: string[]; es?: string[] };
+    pairing?: LocaleStringArray;
     temperature?: string;
   };
   tech_data?: {
@@ -1211,7 +1213,7 @@ export async function addWineToUserCatalog({
  * Maneja strings, objetos bilingües y arrays
  */
 export const mapColorToType = (
-  color?: string | { en?: string; es?: string } | string[] | { en?: string[]; es?: string[] }
+  color?: LocaleString | string[]
 ): 'red' | 'white' | 'rose' | 'sparkling' | 'dessert' | 'fortified' => {
   if (!color) return 'red';
   
@@ -1220,7 +1222,7 @@ export const mapColorToType = (
   // Si es un objeto bilingüe, extraer el valor
   if (typeof color === 'object' && !Array.isArray(color) && color !== null) {
     // Es un objeto bilingüe {en: "...", es: "..."}
-    colorValue = getBilingualValue(color, 'es');
+    colorValue = getBilingualValue(color, 'es') ?? null;
     
     // Si no hay valor en español, intentar con inglés
     if (!colorValue) {

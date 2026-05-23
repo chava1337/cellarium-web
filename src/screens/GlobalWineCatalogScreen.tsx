@@ -24,6 +24,7 @@ import {
   GlobalWine,
   getBilingualValue,
   getBilingualArray,
+  WINERY_LABEL_LOCALE_OPTIONS,
   wineColorSearchHaystack,
   mapColorToType,
   getTasteProfileKeyOrderForWineType,
@@ -698,7 +699,7 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  const already = catalogCardVarietyLoggedRef.current;
  if (!already.has(item.id)) {
  already.add(item.id);
- const wineName = getBilingualValue(item.label, language) ?? '';
+ const wineName = getBilingualValue(item.label, language, WINERY_LABEL_LOCALE_OPTIONS) ?? '';
  console.log('[GlobalWineCatalog][cardVarietal]', {
  id: item.id,
  wineName,
@@ -716,14 +717,14 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  </View>
  {/* Columna central: Datos del vino */}
  <View style={styles.cardBody}>
- {getBilingualValue(item.winery, language) && (
+ {getBilingualValue(item.winery, language, WINERY_LABEL_LOCALE_OPTIONS) && (
  <Text style={styles.cardWinery} numberOfLines={1}>
- {getBilingualValue(item.winery, language)}
+ {getBilingualValue(item.winery, language, WINERY_LABEL_LOCALE_OPTIONS)}
  </Text>
  )}
- {getBilingualValue(item.label, language) && (
+ {getBilingualValue(item.label, language, WINERY_LABEL_LOCALE_OPTIONS) && (
  <Text style={styles.cardTitle} numberOfLines={2}>
- {getBilingualValue(item.label, language)}
+ {getBilingualValue(item.label, language, WINERY_LABEL_LOCALE_OPTIONS)}
  </Text>
  )}
  {grapesLine ? (
@@ -822,8 +823,8 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  const needsBottomPadding = detailContentHeight > (detailViewportHeight - footerTotalHeight - 8);
  const dynamicBottomPadding = needsBottomPadding ? (footerTotalHeight + 16) : 16;
  
- const wineryText = selectedWine ? sanitizeText(getBilingualValue(selectedWine.winery, language)) : null;
- const labelText = selectedWine ? sanitizeText(getBilingualValue(selectedWine.label, language)) : null;
+ const wineryText = selectedWine ? sanitizeText(getBilingualValue(selectedWine.winery, language, WINERY_LABEL_LOCALE_OPTIONS)) : null;
+ const labelText = selectedWine ? sanitizeText(getBilingualValue(selectedWine.label, language, WINERY_LABEL_LOCALE_OPTIONS)) : null;
  const countryPillText = selectedWine ? sanitizeText(getBilingualValue(selectedWine.country, language)) : '';
  const headerTitle = wineryText && labelText ? `${wineryText} ${labelText}` : (labelText || wineryText || '');
  
@@ -939,7 +940,7 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  
  {/* Sección: Sabores */}
  {(() => {
- const flavorsArray = getBilingualArray(selectedWine.flavors);
+ const flavorsArray = getBilingualArray(selectedWine.flavors, language);
  if (flavorsArray.length === 0) return null;
  return (
  <View style={styles.sectionCardPro}>
@@ -995,7 +996,7 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  {/* Sección: Maridajes */}
  {(() => {
  const pairingArray = selectedWine.serving?.pairing
-   ? getBilingualArray(selectedWine.serving.pairing)
+   ? getBilingualArray(selectedWine.serving.pairing, language)
    : [];
  if (pairingArray.length === 0) return null;
  return (
