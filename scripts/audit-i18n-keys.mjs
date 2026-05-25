@@ -15,6 +15,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const SRC = path.join(ROOT, 'src');
 const LC_FILE = path.join(SRC, 'contexts', 'LanguageContext.tsx');
+const PT_P1_FILE = path.join(SRC, 'i18n', 'ptBRP1Screens.ts');
 const OUT_DIR = path.join(__dirname, 'reports');
 const OUT_JSON = path.join(OUT_DIR, 'i18n-audit.json');
 
@@ -45,10 +46,16 @@ function parseTranslations() {
   const esBlock = raw.match(/^\s*es:\s*\{([\s\S]*?)\n\s*\},\s*\n\s*en:/m)?.[1] ?? '';
   const enBlock = raw.match(/^\s*en:\s*\{([\s\S]*?)\n\s*\},\s*\n\s*\/\*\* UI pt-BR/m)?.[1] ?? '';
   const ptBlock = raw.match(/'pt-BR':\s*\{([\s\S]*?)\n\s*\},/m)?.[1] ?? '';
+  const ptInline = extractLocaleKeys(ptBlock);
+  let ptP1 = new Set();
+  if (fs.existsSync(PT_P1_FILE)) {
+    ptP1 = extractLocaleKeys(fs.readFileSync(PT_P1_FILE, 'utf8'));
+  }
+  const pt = new Set([...ptInline, ...ptP1]);
   return {
     es: extractLocaleKeys(esBlock),
     en: extractLocaleKeys(enBlock),
-    pt: extractLocaleKeys(ptBlock),
+    pt,
   };
 }
 

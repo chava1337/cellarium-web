@@ -79,21 +79,17 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
     setHasWarnedForBranchName(true);
 
     const isOwner = user?.role === 'owner';
-    const title = 'Nombre del restaurante requerido';
-    const message = isOwner
-      ? 'Antes de agregar vinos debes definir el nombre de tu restaurante o centro de consumo. Puedes editarlo desde Gestión de Sucursales.'
-      : 'El owner debe definir el nombre del restaurante o centro de consumo antes de agregar vinos. Contacta al responsable para que lo configure.';
 
     if (isOwner) {
       showDialog({
-        title,
-        message,
-        primaryLabel: 'Configurar ahora',
+        title: t('add_wine.branch_name_required_title'),
+        message: t('add_wine.branch_name_required_owner'),
+        primaryLabel: t('add_wine.configure_now'),
         onPrimary: () => {
           dismissDialog();
           navigation.replace('BranchManagement');
         },
-        secondaryLabel: 'Volver',
+        secondaryLabel: t('btn.back'),
         onSecondary: () => {
           dismissDialog();
           navigation.goBack();
@@ -101,22 +97,22 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
       });
     } else {
       showDialog({
-        title,
-        message,
-        primaryLabel: 'Entendido',
+        title: t('add_wine.branch_name_required_title'),
+        message: t('add_wine.branch_name_required_staff'),
+        primaryLabel: t('add_wine.understood'),
         onPrimary: () => {
           dismissDialog();
           navigation.goBack();
         },
       });
     }
-  }, [currentBranch, dismissDialog, hasWarnedForBranchName, navigation, showDialog, user?.role]);
+  }, [currentBranch, dismissDialog, hasWarnedForBranchName, navigation, showDialog, t, user?.role]);
 
   const onSubmit = async () => {
     if (!user || !profileReady || !currentBranch) {
       showDialog({
-        title: 'Error',
-        message: 'Usuario o sucursal no identificados',
+        title: t('add_wine.error_title'),
+        message: t('add_wine.error_no_user'),
         primaryLabel: t('btn.close'),
         onPrimary: dismissDialog,
       });
@@ -128,23 +124,21 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
       const isOwner = user.role === 'owner';
       if (isOwner) {
         showDialog({
-          title: 'Nombre del restaurante requerido',
-          message:
-            'Define el nombre de tu restaurante o centro de consumo antes de agregar vinos.',
-          primaryLabel: 'Ir a Gestión',
+          title: t('add_wine.branch_name_required_title'),
+          message: t('add_wine.branch_short_owner'),
+          primaryLabel: t('add_wine.go_branch_mgmt'),
           onPrimary: () => {
             dismissDialog();
             navigation.replace('BranchManagement');
           },
-          secondaryLabel: 'Cancelar',
+          secondaryLabel: t('btn.cancel'),
           onSecondary: dismissDialog,
         });
       } else {
         showDialog({
-          title: 'Nombre del restaurante requerido',
-          message:
-            'Contacta al owner para que defina el nombre del restaurante o centro de consumo.',
-          primaryLabel: 'Entendido',
+          title: t('add_wine.branch_name_required_title'),
+          message: t('add_wine.branch_short_staff'),
+          primaryLabel: t('add_wine.understood'),
           onPrimary: dismissDialog,
         });
       }
@@ -158,8 +152,8 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
 
     if (bottle != null && isNaN(bottle)) {
       showDialog({
-        title: 'Dato inválido',
-        message: 'Precio por botella no es un número',
+        title: t('add_wine.invalid_title'),
+        message: t('add_wine.invalid_bottle'),
         primaryLabel: t('btn.close'),
         onPrimary: dismissDialog,
       });
@@ -167,8 +161,8 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
     }
     if (glass != null && isNaN(glass)) {
       showDialog({
-        title: 'Dato inválido',
-        message: 'Precio por copa no es un número',
+        title: t('add_wine.invalid_title'),
+        message: t('add_wine.invalid_glass'),
         primaryLabel: t('btn.close'),
         onPrimary: dismissDialog,
       });
@@ -176,8 +170,8 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
     }
     if (qty != null && isNaN(qty)) {
       showDialog({
-        title: 'Dato inválido',
-        message: 'Stock debe ser un número',
+        title: t('add_wine.invalid_title'),
+        message: t('add_wine.invalid_stock'),
         primaryLabel: t('btn.close'),
         onPrimary: dismissDialog,
       });
@@ -199,9 +193,9 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
       });
 
       showDialog({
-        title: 'Vino agregado',
-        message: 'Se agregó correctamente al catálogo.',
-        primaryLabel: 'OK',
+        title: t('add_wine.success_title'),
+        message: t('add_wine.success_body'),
+        primaryLabel: t('subscription.alert_ok'),
         onPrimary: () => {
           dismissDialog();
           navigation.goBack();
@@ -254,7 +248,7 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
   return (
     <SafeAreaView style={styles.safe} edges={['bottom', 'left', 'right']}>
       <CellariumHeader
-        title="Agregar al Catálogo"
+        title={t('add_wine.title')}
         subtitle={wineDisplayName}
         leftSlot={
           <TouchableOpacity
@@ -283,24 +277,24 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
         >
           <CellariumCard style={styles.card}>
             <CellariumTextField
-              label="Precio por botella"
-              placeholder="Ej. 450"
+              label={t('add_wine.price_bottle')}
+              placeholder={t('add_wine.price_bottle_ph')}
               keyboardType="numeric"
               value={priceBottle}
               onChangeText={setPriceBottle}
               containerStyle={styles.field}
             />
             <CellariumTextField
-              label="Precio por copa (opcional)"
-              placeholder="Ej. 120"
+              label={t('add_wine.price_glass')}
+              placeholder={t('add_wine.price_glass_ph')}
               keyboardType="numeric"
               value={priceGlass}
               onChangeText={setPriceGlass}
               containerStyle={styles.field}
             />
             <CellariumTextField
-              label="Stock inicial (opcional)"
-              placeholder="Ej. 6"
+              label={t('add_wine.stock')}
+              placeholder={t('add_wine.stock_ph')}
               keyboardType="numeric"
               value={stock}
               onChangeText={setStock}
@@ -319,7 +313,7 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
             <View style={styles.actions}>
               <View style={styles.actionHalf}>
                 <CellariumSecondaryButton
-                  title="Cancelar"
+                  title={t('btn.cancel')}
                   onPress={() => navigation.goBack()}
                   disabled={submitting}
                   variant="neutral"
@@ -327,7 +321,7 @@ const AddWineToCatalogScreen: React.FC<Props> = ({ route, navigation }) => {
               </View>
               <View style={styles.actionHalf}>
                 <CellariumPrimaryButton
-                  title={submitting ? 'Guardando…' : 'Guardar'}
+                  title={submitting ? t('add_wine.saving') : t('btn.save')}
                   onPress={onSubmit}
                   disabled={submitting}
                   loading={submitting}

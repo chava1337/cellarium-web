@@ -1818,6 +1818,21 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
       const defaults = defaultPairings[wineType] || defaultPairings['red'];
       const defaultsForLanguage = pickDefaultPairingsForLanguage(defaults, language);
       finalPairings = [...pairings, ...defaultsForLanguage.slice(0, 3 - pairings.length)];
+      if (__DEV__ && language === 'pt-BR' && pairings.length > 0 && pairings.length < 3) {
+        console.log('[i18n][pairings] pt-BR fallback defaults applied', {
+          wineId: wine.id,
+          wineName: wine.name?.slice(0, 40),
+          fromData: pairings.length,
+          finalCount: finalPairings.length,
+        });
+      }
+    }
+
+    if (__DEV__ && language === 'pt-BR' && finalPairings.some((p) => /^[a-z\s]+$/i.test(p) && !/[áéíóúãõç]/i.test(p))) {
+      console.log('[i18n][pairings] pt-BR showing EN/ES data (no pt in canonical)', {
+        wineId: wine.id,
+        sample: finalPairings.slice(0, 3),
+      });
     }
     
     return finalPairings;

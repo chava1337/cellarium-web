@@ -64,6 +64,11 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const { user, profileReady } = useAuth();
   const { t } = useLanguage();
+  const roleLabel = (role: UserRole) => {
+    const key = `roles.${role}`;
+    const translated = t(key);
+    return translated !== key ? translated : getRoleName(role);
+  };
   const { currentBranch } = useBranch();
   const [pendingUsers, setPendingUsers] = useState<User[]>([]);
   const [activeUsers, setActiveUsers] = useState<User[]>([]);
@@ -169,7 +174,7 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
       await loadUsers();
       setApprovalRoleModalVisible(false);
       setUserPendingApproval(null);
-      Alert.alert(t('msg.success'), `${userToApprove.name || userToApprove.username || userToApprove.email} ${t('users.approved_success')} ${getRoleName(selectedRole)}`);
+      Alert.alert(t('msg.success'), `${userToApprove.name || userToApprove.username || userToApprove.email} ${t('users.approved_success')} ${roleLabel(selectedRole)}`);
     } catch (error: any) {
       if (__DEV__) {
         try {
@@ -361,13 +366,16 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
   const handleOpenChangeRole = (user: User) => {
     // No se puede cambiar el rol de un Owner
     if (user.role === 'owner') {
-      Alert.alert('No Permitido', 'No se puede cambiar el rol de un Owner');
+      Alert.alert(t('users.not_allowed_title'), t('users.cannot_change_owner_alert'));
       return;
     }
 
     // Verificar permisos para cambiar el rol actual del usuario
     if (!canApproveRole(currentUserRole, user.role)) {
-      Alert.alert('Permiso Denegado', `No tienes permisos para modificar el rol de ${getRoleName(user.role)}`);
+      Alert.alert(
+        t('users.permission_denied_title'),
+        `${t('users.permission_denied_modify')} ${roleLabel(user.role)}`
+      );
       return;
     }
 
@@ -379,13 +387,13 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
     if (!selectedUser || !user) return;
 
     if (!canApproveRole(currentUserRole, newRole)) {
-      Alert.alert(t('msg.error'), `${t('users.no_assign_role_permission')} ${getRoleName(newRole)}`);
+      Alert.alert(t('msg.error'), `${t('users.no_assign_role_permission')} ${roleLabel(newRole)}`);
       return;
     }
 
     Alert.alert(
       t('users.change_role'),
-      `${t('users.change_role_confirm')} ${selectedUser.name || selectedUser.username || selectedUser.email} ${t('users.change_role_from_to')} ${getRoleName(selectedUser.role)} ${t('users.change_role_to')} ${getRoleName(newRole)}?`,
+      `${t('users.change_role_confirm')} ${selectedUser.name || selectedUser.username || selectedUser.email} ${t('users.change_role_from_to')} ${roleLabel(selectedUser.role)} ${t('users.change_role_to')} ${roleLabel(newRole)}?`,
       [
         { text: t('btn.cancel'), style: 'cancel' },
         {
@@ -418,7 +426,7 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
               await loadUsers();
               setIsChangeRoleModalVisible(false);
               setSelectedUser(null);
-              const successMsg = result?.message ?? `${t('users.role_updated')} ${selectedUser.name || selectedUser.username || selectedUser.email} ${t('users.role_updated_to')} ${getRoleName(newRole)}`;
+              const successMsg = result?.message ?? `${t('users.role_updated')} ${selectedUser.name || selectedUser.username || selectedUser.email} ${t('users.role_updated_to')} ${roleLabel(newRole)}`;
               Alert.alert(t('msg.success'), successMsg);
             } catch (err: any) {
               console.error('Error cambiando rol:', err);
@@ -442,7 +450,7 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.userInfo}>
           <Text style={styles.userName}>{pendingUser.name || pendingUser.username || pendingUser.email}</Text>
           <Text style={styles.userEmail}>{pendingUser.email}</Text>
-          <Text style={styles.userRole}>{t('users.requesting')} {getRoleName(pendingUser.role)}</Text>
+          <Text style={styles.userRole}>{t('users.requesting')} {roleLabel(pendingUser.role)}</Text>
           {!isOwner && (
             <Text style={styles.branchInfo}>{t('users.branch')} {currentBranch?.name}</Text>
           )}
@@ -486,7 +494,7 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.userName}>{user.name || user.username || user.email}</Text>
           <Text style={styles.userEmail}>{user.email}</Text>
           <Text style={[styles.userRole, { color: getRoleColor(user.role) }]}>
-            {getRoleName(user.role)} • {t('users.active')}
+            {roleLabel(user.role)} • {t('users.active')}
           </Text>
           {!isOwner && (
             <Text style={styles.branchInfo}>{t('users.branch')} {currentBranch?.name}</Text>
@@ -548,7 +556,7 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
           ) : (
             <View style={styles.emptyCard}>
               <Text style={styles.emptyText}>{t('msg.no_data')}</Text>
-              <Text style={styles.emptySubtext}>Las solicitudes de acceso aparecerán aquí.</Text>
+              <Text style={styles.emptySubtext}>{t('users.empty_pending_hint')}</Text>
             </View>
           )}
         </View>
@@ -593,7 +601,7 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
                   disabled={approvalSubmitting}
                 >
                   <Text style={[styles.roleOptionText, { color: getRoleColor(role) }]}>
-                    {getRoleName(role)}
+                    {roleLabel(role)}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -629,7 +637,7 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
               {t('settings.user')}: {selectedUser?.name || selectedUser?.username || selectedUser?.email}
             </Text>
             <Text style={styles.modalCurrentRole}>
-              {t('users.current_role')} {selectedUser && getRoleName(selectedUser.role)}
+              {t('users.current_role')} {selectedUser && roleLabel(selectedUser.role)}
             </Text>
 
             <View style={styles.rolesContainer}>
@@ -646,7 +654,7 @@ const UserManagementScreen: React.FC<Props> = ({ navigation }) => {
                   disabled={changingRoleUserId === selectedUser?.id}
                 >
                   <Text style={[styles.roleOptionText, { color: getRoleColor(role) }]}>
-                    {getRoleName(role)}
+                    {roleLabel(role)}
                   </Text>
                   {selectedUser?.role === role && (
                     <Text style={styles.currentBadge}>{t('users.current')}</Text>

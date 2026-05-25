@@ -30,6 +30,8 @@ import { canGenerateGuestQr, canGenerateAdminInviteQr } from '../utils/permissio
 import { isSensitiveAllowed } from '../utils/sensitiveActionGating';
 import { CELLARIUM } from '../theme/cellariumTheme';
 import { captureCriticalError, sentryFlowBreadcrumb } from '../utils/sentryContext';
+import { useLanguage } from '../contexts/LanguageContext';
+import { getAppLocaleTag } from '../utils/appLocale';
 
 interface QrData {
   id: string;
@@ -40,12 +42,6 @@ interface QrData {
   created_at: string;
   expires_at: string;
 }
-
-const GUEST_DURATION_LABELS: Record<GuestQrDuration, string> = {
-  '1w': '1 semana',
-  '2w': '2 semanas',
-  '1m': '1 mes',
-};
 
 const UI = {
   screenPadding: 16,
@@ -66,6 +62,18 @@ const QrGenerationScreen: React.FC = () => {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList, 'QrGeneration'>>();
   const { currentBranch } = useBranch();
   const { user, profileReady } = useAuth();
+  const { t, language } = useLanguage();
+  const dateLocale = getAppLocaleTag(language);
+  const guestDurationLabels: Record<GuestQrDuration, string> = {
+    '1w': t('qr_gen.duration_1w'),
+    '2w': t('qr_gen.duration_2w'),
+    '1m': t('qr_gen.duration_1m'),
+  };
+  const qrListTypeLabel = (qr: GeneratedQrToken) => {
+    if (qr.type === 'guest') return t('qr_gen.type_guest');
+    if (qr.createdByRole === 'owner') return t('qr_gen.type_owner');
+    return t('qr_gen.type_admin');
+  };
   const [qrType, setQrType] = useState<'guest' | 'admin'>('guest');
   const [guestDuration, setGuestDuration] = useState<GuestQrDuration>('1w');
   const [generatedQrs, setGeneratedQrs] = useState<GeneratedQrToken[]>([]);
@@ -106,11 +114,11 @@ const QrGenerationScreen: React.FC = () => {
       setGeneratedQrs(tokens);
     } catch (error) {
       console.error('Error loading user tokens:', error);
-      Alert.alert('Error', 'No se pudieron cargar los códigos QR existentes');
+      Alert.alert(t('msg.error'), t('qr_gen.error_load'));
     } finally {
       setLoadingTokens(false);
     }
-  }, [user?.id]);
+  }, [user?.id, t]);
 
   useEffect(() => {
     if (user?.id) loadUserTokens();
@@ -136,32 +144,29 @@ const QrGenerationScreen: React.FC = () => {
   if (!user || !canEnterQrScreen) {
     return (
       <View style={[styles.guardContainer, { justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
-        <Text style={styles.guardTitle}>Sin permiso</Text>
-        <Text style={styles.guardSubtitle}>
-          Solo propietarios, gerentes y supervisores pueden generar QR para comensales. Solo propietarios y gerentes pueden generar QR de invitación admin.
-        </Text>
+        <Text style={styles.guardTitle}>{t('qr_gen.guard_title')}</Text>
+        <Text style={styles.guardSubtitle}>{t('qr_gen.guard_subtitle')}</Text>
       </View>
     );
   }
 
   const handleGenerateGuestQr = async () => {
     if (!currentBranch || !user?.id) {
-      Alert.alert('Error', 'No hay sucursal seleccionada o usuario no autenticado');
+      Alert.alert(t('msg.error'), t('qr_gen.error_no_branch'));
       return;
     }
     if (!isSensitiveAllowed(user)) {
-      Alert.alert(
-        'Verificación requerida',
-        'Para generar QR debes verificar tu correo desde Suscripciones.',
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Ir a Suscripciones', onPress: () => navigation.navigate('Subscriptions', { openVerifyEmail: true }) },
-        ]
-      );
+      Alert.alert(t('qr_gen.verify_required_title'), t('qr_gen.verify_required_body'), [
+        { text: t('btn.cancel'), style: 'cancel' },
+        {
+          text: t('qr_gen.go_subscriptions'),
+          onPress: () => navigation.navigate('Subscriptions', { openVerifyEmail: true }),
+        },
+      ]);
       return;
     }
     if (!canGenerateGuest || isWrongBranchForStaff) {
-      Alert.alert('Error', 'No tienes permiso para generar QR en esta sucursal.');
+      Alert.alert(t('msg.error'), t('qr_gen.error_no_permission_branch'));
       return;
     }
 
@@ -172,8 +177,10 @@ const QrGenerationScreen: React.FC = () => {
       setGeneratedQrs(prev => [newQr, ...prev]);
       setSelectedQr(newQr);
       Alert.alert(
-        'QR Generado',
-        `QR para comensales de ${currentBranch.name} generado correctamente.\nDuración: ${GUEST_DURATION_LABELS[guestDuration]}`
+        t('qr_gen.generated_title'),
+        t('qr_gen.generated_guest_body')
+          .replace('{branch}', currentBranch.name)
+          .replace('{duration}', guestDurationLabels[guestDuration])
       );
     } catch (error: any) {
       if (__DEV__) {
@@ -187,7 +194,7 @@ const QrGenerationScreen: React.FC = () => {
         });
       }
       console.error('Error generating guest QR:', error);
-      Alert.alert('Error', 'No se pudo generar el código QR para comensales');
+      Alert.alert(t('msg.error'), t('qr_gen.error_guest'));
     } finally {
       setLoading(false);
     }
@@ -195,22 +202,21 @@ const QrGenerationScreen: React.FC = () => {
 
   const handleGenerateAdminQr = async () => {
     if (!currentBranch || !user?.id) {
-      Alert.alert('Error', 'No hay sucursal seleccionada o usuario no autenticado');
+      Alert.alert(t('msg.error'), t('qr_gen.error_no_branch'));
       return;
     }
     if (!isSensitiveAllowed(user)) {
-      Alert.alert(
-        'Verificación requerida',
-        'Para generar QR de invitación debes verificar tu correo desde Suscripciones.',
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Ir a Suscripciones', onPress: () => navigation.navigate('Subscriptions', { openVerifyEmail: true }) },
-        ]
-      );
+      Alert.alert(t('qr_gen.verify_required_title'), t('qr_gen.verify_required_body'), [
+        { text: t('btn.cancel'), style: 'cancel' },
+        {
+          text: t('qr_gen.go_subscriptions'),
+          onPress: () => navigation.navigate('Subscriptions', { openVerifyEmail: true }),
+        },
+      ]);
       return;
     }
     if (!canGenerateAdmin || isWrongBranchForStaff) {
-      Alert.alert('Error', 'No tienes permiso para generar QR de invitación en esta sucursal.');
+      Alert.alert(t('msg.error'), t('qr_gen.error_no_permission_branch'));
       return;
     }
 
@@ -229,8 +235,8 @@ const QrGenerationScreen: React.FC = () => {
       setGeneratedQrs(prev => [newQr, ...prev]);
       setSelectedQr(newQr);
       Alert.alert(
-        'QR Generado',
-        `QR de invitación para ${currentBranch.name} generado.\n\n⚠️ IMPORTANTE:\nLos admins que usen este QR solo tendrán acceso a esta sucursal.\n\nUso único. Duración: 7 días`
+        t('qr_gen.generated_title'),
+        t('qr_gen.generated_admin_body').replace('{branch}', currentBranch.name)
       );
     } catch (error: any) {
       if (__DEV__) {
@@ -247,11 +253,11 @@ const QrGenerationScreen: React.FC = () => {
       console.error('Error generating admin QR:', error);
       if (user.role === 'sommelier' || user.role === 'supervisor' || user.role === 'personal') {
         Alert.alert(
-          'Permisos Insuficientes',
-          'No tienes los permisos suficientes para generar códigos QR de invitación de administradores.\n\nSolo los propietarios y gerentes pueden crear este tipo de códigos.'
+          t('qr_gen.insufficient_title'),
+          `${t('qr_gen.restricted_admin_body')}\n\n${t('qr_gen.restricted_admin_body2')}`
         );
       } else {
-        Alert.alert('Error', 'No se pudo generar el código QR de invitación');
+        Alert.alert(t('msg.error'), t('qr_gen.error_admin'));
       }
     } finally {
       setLoading(false);
@@ -270,13 +276,16 @@ const QrGenerationScreen: React.FC = () => {
 
   const getShareMessage = useCallback(() => {
     if (!selectedQr) return '';
-    const guestExpiryLabel = selectedQr.type === 'guest' && selectedQr.expiresAt
-      ? `Válido hasta ${new Date(selectedQr.expiresAt).toLocaleDateString('es-MX', { dateStyle: 'long' })}`
-      : 'Válido temporalmente';
+    const guestExpiryLabel =
+      selectedQr.type === 'guest' && selectedQr.expiresAt
+        ? `${t('qr_gen.valid_until')} ${new Date(selectedQr.expiresAt).toLocaleDateString(dateLocale, { dateStyle: 'long' })}`
+        : t('qr_gen.valid_temporarily');
     return selectedQr.type === 'guest'
-      ? `Escanea este código QR para acceder al catálogo de vinos de ${selectedQr.branchName}. ${guestExpiryLabel}.`
-      : `Código QR de invitación para ${selectedQr.branchName}. Válido por 7 días. Uso único.`;
-  }, [selectedQr]);
+      ? t('qr_gen.share_message_guest')
+          .replace('{branch}', selectedQr.branchName ?? '')
+          .replace('{expiry}', guestExpiryLabel)
+      : t('qr_gen.share_message_admin').replace('{branch}', selectedQr.branchName ?? '');
+  }, [selectedQr, t, dateLocale]);
 
   const handleShareAsImage = async () => {
     if (!selectedQr) return;
@@ -342,7 +351,7 @@ const QrGenerationScreen: React.FC = () => {
 
       await Sharing.shareAsync(fileUri, {
         mimeType: 'image/png',
-        dialogTitle: 'Compartir QR Cellarium',
+        dialogTitle: t('qr_gen.share_dialog_title'),
       });
 
       try {
@@ -368,9 +377,9 @@ const QrGenerationScreen: React.FC = () => {
       setQrUrlToShare(qrUrl);
       setShareModalVisible(true);
       Alert.alert(
-        'Compartir como enlace',
-        'No se pudo compartir la imagen. Se abrió la opción de copiar el enlace.',
-        [{ text: 'OK' }]
+        t('qr_gen.share_fallback_title'),
+        t('qr_gen.share_fallback_body'),
+        [{ text: t('subscription.alert_ok') }]
       );
     } finally {
       setSharingImage(false);
@@ -381,20 +390,20 @@ const QrGenerationScreen: React.FC = () => {
     if (!selectedQr) return;
     const url = getQrUrl();
     await Clipboard.setStringAsync(url);
-    Alert.alert('Enlace copiado', 'El enlace del QR se copió al portapapeles.');
+    Alert.alert(t('qr_gen.link_copied_title'), t('qr_gen.link_copied_body'));
   };
 
   const handleCopyMessage = async () => {
     if (!selectedQr) return;
     const msg = getShareMessage();
     await Clipboard.setStringAsync(msg);
-    Alert.alert('Mensaje copiado', 'El texto se copió al portapapeles.');
+    Alert.alert(t('qr_gen.message_copied_title'), t('qr_gen.message_copied_body'));
   };
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
       <CellariumHeader
-        title="Generación de QR"
+        title={t('qr_gen.title')}
         subtitle={currentBranch?.name?.trim() ? currentBranch.name : undefined}
         leftSlot={<IosHeaderBackSlot navigation={navigation} fallbackRoute="AdminDashboard" />}
       />
@@ -410,7 +419,7 @@ const QrGenerationScreen: React.FC = () => {
                 activeOpacity={0.85}
               >
                 <Text style={[styles.typeButtonText, qrType === 'guest' && styles.typeButtonTextActive]}>
-                  Comensales
+                  {t('qr_gen.tab_guest')}
                 </Text>
               </TouchableOpacity>
             )}
@@ -421,7 +430,7 @@ const QrGenerationScreen: React.FC = () => {
                 activeOpacity={0.85}
               >
                 <Text style={[styles.typeButtonText, qrType === 'admin' && styles.typeButtonTextActive]}>
-                  Invitación Admin
+                  {t('qr_gen.tab_admin')}
                 </Text>
               </TouchableOpacity>
             )}
@@ -433,7 +442,7 @@ const QrGenerationScreen: React.FC = () => {
           {qrType === 'guest' ? (
             <>
               <Text style={styles.infoText}>
-                Acceso temporal al catálogo de vinos de la sucursal
+                {t('qr_gen.guest_info')}
               </Text>
               {/* Selector de duración: 1w / 2w / 1m */}
               <View style={styles.durationSelector}>
@@ -450,24 +459,20 @@ const QrGenerationScreen: React.FC = () => {
                       styles.durationOptionText,
                       guestDuration === d && styles.durationOptionTextActive,
                     ]}>
-                      {GUEST_DURATION_LABELS[d]}
+                      {guestDurationLabels[d]}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
               {isWrongBranchForStaff ? (
                 <View style={styles.restrictedAccessCard}>
-                  <Text style={styles.restrictedAccessTitle}>Sucursal no asignada</Text>
-                  <Text style={styles.restrictedAccessText}>
-                    Solo puedes generar QR para tu sucursal asignada.
-                  </Text>
+                  <Text style={styles.restrictedAccessTitle}>{t('qr_gen.branch_not_assigned_title')}</Text>
+                  <Text style={styles.restrictedAccessText}>{t('qr_gen.branch_not_assigned_body')}</Text>
                 </View>
               ) : !canGenerateGuest ? (
                 <View style={styles.restrictedAccessCard}>
-                  <Text style={styles.restrictedAccessTitle}>Sin permiso</Text>
-                  <Text style={styles.restrictedAccessText}>
-                    Tu plan o rol no permite generar QR para comensales en esta sucursal.
-                  </Text>
+                  <Text style={styles.restrictedAccessTitle}>{t('qr_gen.no_permission_title')}</Text>
+                  <Text style={styles.restrictedAccessText}>{t('qr_gen.no_permission_guest_body')}</Text>
                 </View>
               ) : (
                 <TouchableOpacity
@@ -478,7 +483,7 @@ const QrGenerationScreen: React.FC = () => {
                   {loading ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.generateButtonText}>Generar QR para Comensales</Text>
+                    <Text style={styles.generateButtonText}>{t('qr_gen.generate_guest')}</Text>
                   )}
                 </TouchableOpacity>
               )}
@@ -486,16 +491,12 @@ const QrGenerationScreen: React.FC = () => {
           ) : (
             <>
               <Text style={styles.infoText}>
-                Invitación para nuevo staff{'\n'}
-                Uso único{'\n'}
-                Requiere aprobación de owner/gerente
+                {t('qr_gen.admin_info')}
               </Text>
               {isWrongBranchForStaff ? (
                 <View style={styles.restrictedAccessCard}>
-                  <Text style={styles.restrictedAccessTitle}>Sucursal no asignada</Text>
-                  <Text style={styles.restrictedAccessText}>
-                    Solo puedes generar QR para tu sucursal asignada.
-                  </Text>
+                  <Text style={styles.restrictedAccessTitle}>{t('qr_gen.branch_not_assigned_title')}</Text>
+                  <Text style={styles.restrictedAccessText}>{t('qr_gen.branch_not_assigned_body')}</Text>
                 </View>
               ) : canGenerateAdmin ? (
                 <TouchableOpacity
@@ -506,18 +507,14 @@ const QrGenerationScreen: React.FC = () => {
                   {loading ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.generateButtonText}>Generar QR de Invitación</Text>
+                    <Text style={styles.generateButtonText}>{t('qr_gen.generate_admin')}</Text>
                   )}
                 </TouchableOpacity>
               ) : (
                 <View style={styles.restrictedAccessCard}>
-                  <Text style={styles.restrictedAccessTitle}>Acceso restringido</Text>
-                  <Text style={styles.restrictedAccessText}>
-                    No tienes los permisos suficientes para generar códigos QR de invitación de administradores.
-                  </Text>
-                  <Text style={styles.restrictedAccessText}>
-                    Solo los propietarios y gerentes pueden crear este tipo de códigos.
-                  </Text>
+                  <Text style={styles.restrictedAccessTitle}>{t('qr_gen.restricted_title')}</Text>
+                  <Text style={styles.restrictedAccessText}>{t('qr_gen.restricted_admin_body')}</Text>
+                  <Text style={styles.restrictedAccessText}>{t('qr_gen.restricted_admin_body2')}</Text>
                 </View>
               )}
             </>
@@ -535,16 +532,16 @@ const QrGenerationScreen: React.FC = () => {
               <View style={styles.shareCardInner}>
                 <Text style={styles.shareCardTitle}>
                   {selectedQr.type === 'guest'
-                    ? 'Cellarium – Menú de vinos'
-                    : 'Cellarium – Invitación de staff'}
+                    ? t('qr_gen.share_title_guest')
+                    : t('qr_gen.share_title_admin')}
                 </Text>
                 <Text style={styles.shareCardSubtitle}>
-                  {selectedQr.branchName || 'Sucursal'}
+                  {selectedQr.branchName || t('qr_gen.branch_fallback')}
                 </Text>
                 <Text style={styles.shareCardExpiry}>
-                  Válido hasta{' '}
+                  {t('qr_gen.valid_until')}{' '}
                   {selectedQr.expiresAt
-                    ? new Date(selectedQr.expiresAt).toLocaleString('es-MX', {
+                    ? new Date(selectedQr.expiresAt).toLocaleString(dateLocale, {
                         year: 'numeric',
                         month: 'long',
                         day: 'numeric',
@@ -571,35 +568,35 @@ const QrGenerationScreen: React.FC = () => {
             </ViewShot>
 
             <Text style={styles.qrDisplayTitle}>
-              {selectedQr.type === 'guest' ? 'QR para Comensales' : 'QR Invitación Admin'}
+              {selectedQr.type === 'guest' ? t('qr_gen.display_guest') : t('qr_gen.display_admin')}
             </Text>
 
             <View style={styles.qrInfoContainer}>
-              <Text style={styles.qrInfoLabel}>Sucursal:</Text>
+              <Text style={styles.qrInfoLabel}>{t('qr_gen.label_branch')}</Text>
               <Text style={styles.qrInfoValue}>
-                {selectedQr.branchName || 'No especificada'}
+                {selectedQr.branchName || t('qr_gen.not_specified')}
               </Text>
             </View>
 
             <View style={styles.qrInfoContainer}>
-              <Text style={styles.qrInfoLabel}>Expira:</Text>
+              <Text style={styles.qrInfoLabel}>{t('qr_gen.label_expires')}</Text>
               <Text style={styles.qrInfoValue}>
                 {selectedQr.expiresAt 
-                  ? new Date(selectedQr.expiresAt).toLocaleString('es-MX', {
+                  ? new Date(selectedQr.expiresAt).toLocaleString(dateLocale, {
                       year: 'numeric',
                       month: 'long',
                       day: 'numeric',
                       hour: '2-digit',
                       minute: '2-digit'
                     })
-                  : 'No especificada'}
+                  : t('qr_gen.expires_not_specified')}
               </Text>
             </View>
             
             {selectedQr.type === 'admin_invite' && (
               <View style={styles.warningContainer}>
                 <Text style={styles.warningText}>
-                  Este admin solo tendrá acceso a {selectedQr.branchName}
+                  {t('qr_gen.admin_branch_warning').replace('{branch}', selectedQr.branchName ?? '')}
                 </Text>
               </View>
             )}
@@ -614,7 +611,7 @@ const QrGenerationScreen: React.FC = () => {
                 {sharingImage ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={styles.shareButtonText}>Compartir QR (imagen)</Text>
+                  <Text style={styles.shareButtonText}>{t('qr_gen.share_qr_image')}</Text>
                 )}
               </TouchableOpacity>
               <View style={styles.qrActionsRow}>
@@ -623,14 +620,14 @@ const QrGenerationScreen: React.FC = () => {
                   onPress={handleCopyLink}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.shareButtonTextSecondary}>Copiar link</Text>
+                  <Text style={styles.shareButtonTextSecondary}>{t('qr_gen.copy_link')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.shareButton, styles.shareButtonSecondary]}
                   onPress={handleCopyMessage}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.shareButtonTextSecondary}>Copiar mensaje</Text>
+                  <Text style={styles.shareButtonTextSecondary}>{t('qr_gen.copy_message')}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -640,7 +637,7 @@ const QrGenerationScreen: React.FC = () => {
         {/* Lista de QRs generados */}
         {generatedQrs.length > 0 && (
           <View style={styles.qrListCard}>
-            <Text style={styles.listTitle}>QRs generados ({generatedQrs.length})</Text>
+            <Text style={styles.listTitle}>{t('qr_gen.list_title')} ({generatedQrs.length})</Text>
             {generatedQrs.map((qr) => (
               <TouchableOpacity
                 key={qr.id}
@@ -652,15 +649,9 @@ const QrGenerationScreen: React.FC = () => {
                 activeOpacity={0.85}
               >
                 <View style={styles.qrListInfo}>
-                  <Text style={styles.qrListType}>
-                    {qr.type === 'guest'
-                      ? 'Comensales'
-                      : (qr.createdByRole
-                          ? qr.createdByRole.charAt(0).toUpperCase() + qr.createdByRole.slice(1)
-                          : 'Admin')}
-                  </Text>
+                  <Text style={styles.qrListType}>{qrListTypeLabel(qr)}</Text>
                   <Text style={styles.qrListDate}>
-                    {new Date(qr.createdAt).toLocaleString('es-MX')}
+                    {new Date(qr.createdAt).toLocaleString(dateLocale)}
                   </Text>
                   {qr.createdByName && (
                     <Text style={styles.qrListCreator}>
@@ -689,10 +680,8 @@ const QrGenerationScreen: React.FC = () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Compartir código QR</Text>
-            <Text style={styles.modalSubtitle}>
-              Copia el enlace y compártelo en cualquier aplicación
-            </Text>
+            <Text style={styles.modalTitle}>{t('qr_gen.share_modal_title')}</Text>
+            <Text style={styles.modalSubtitle}>{t('qr_gen.share_modal_subtitle')}</Text>
             
             <TextInput
               style={styles.modalInput}
@@ -707,17 +696,17 @@ const QrGenerationScreen: React.FC = () => {
                 style={[styles.modalButton, styles.modalButtonSecondary]}
                 onPress={() => setShareModalVisible(false)}
               >
-                <Text style={styles.modalButtonTextSecondary}>Cerrar</Text>
+                <Text style={styles.modalButtonTextSecondary}>{t('qr_gen.close')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonPrimary]}
                 onPress={async () => {
                   if (qrUrlToShare) await Clipboard.setStringAsync(qrUrlToShare);
                   setShareModalVisible(false);
-                  Alert.alert('Enlace copiado', 'El enlace se copió al portapapeles.');
+                  Alert.alert(t('qr_gen.link_copied_title'), t('qr_gen.link_copied_body'));
                 }}
               >
-                <Text style={styles.modalButtonTextPrimary}>Copiar enlace</Text>
+                <Text style={styles.modalButtonTextPrimary}>{t('qr_gen.copy_link_btn')}</Text>
               </TouchableOpacity>
             </View>
           </View>

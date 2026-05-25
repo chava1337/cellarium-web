@@ -970,7 +970,8 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     }, [route.params?.openVerifyEmail, needsEmailVerification])
   );
 
-  const dateLocale = language === 'en' ? 'en-US' : 'es-MX';
+  const dateLocale =
+    language === 'en' ? 'en-US' : language === 'pt-BR' ? 'pt-BR' : 'es-MX';
   const formatDate = useCallback(
     (iso?: string | null): string => {
       if (!iso) return t('common.na');
@@ -1320,7 +1321,8 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       return product.id ?? product.productId ?? '';
     };
 
-    const localeTag = language === 'en' ? 'en-US' : 'es-MX';
+    const localeTag =
+      language === 'en' ? 'en-US' : language === 'pt-BR' ? 'pt-BR' : 'es-MX';
     const displayPriceForProduct = (p: unknown): string | null => {
       const raw = extractDisplayPrice(p);
       if (raw != null && String(raw).trim().length > 0) return String(raw);
@@ -1417,7 +1419,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     const bistroStorePrice = iosStorePricesByPlan.bistro?.displayPrice;
     const trattoriaStorePrice = iosStorePricesByPlan.trattoria?.displayPrice;
     const grandStorePrice = iosStorePricesByPlan.grand_maison?.displayPrice;
-    const loadingStorePriceLabel = language === 'en' ? 'Loading price...' : 'Cargando precio...';
+    const loadingStorePriceLabel = t('subscription.loading_store_price');
     const bistroT = isIos
       ? bistroStorePrice
         ? { priceCardText: bistroStorePrice, priceDetailText: bistroStorePrice }
@@ -1623,12 +1625,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
     if (isIos && !canPurchaseSelectedPlanOnIos) {
-      Alert.alert(
-        t('msg.error'),
-        language === 'en'
-          ? 'We are still loading the official App Store price. Please wait a moment and try again.'
-          : 'Aun estamos cargando el precio oficial de App Store. Espera un momento e intenta de nuevo.'
-      );
+      Alert.alert(t('msg.error'), t('subscription.ios_price_wait'));
       return;
     }
     if (isAndroid && plan.id !== 'cafe') {
@@ -2616,8 +2613,14 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   );
 
   const formatMxn = useCallback((cents: number) => {
-    const locale = language === 'en' ? 'en-US' : 'es-MX';
-    return new Intl.NumberFormat(locale, { style: 'currency', currency: 'MXN', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(cents / 100);
+    const locale =
+      language === 'en' ? 'en-US' : language === 'pt-BR' ? 'pt-BR' : 'es-MX';
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'MXN',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(cents / 100);
   }, [language]);
 
   const handleSendVerifyCode = useCallback(async () => {
@@ -2630,12 +2633,18 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         return;
       }
       if (code) {
-        Alert.alert('Aviso', (error?.message ?? (data as any)?.message) ?? 'No se pudo enviar el código');
+        Alert.alert(
+          t('subscription.verify_notice_title'),
+          (error?.message ?? (data as any)?.message) ?? t('subscription.verify_send_fail')
+        );
         return;
       }
-      Alert.alert('Código enviado', 'Revisa tu correo. El código es válido 15 minutos.');
+      Alert.alert(
+        t('subscription.verify_code_sent_title'),
+        t('subscription.verify_code_sent_body')
+      );
     } catch (_) {
-      Alert.alert('Error', 'No se pudo enviar el código. Intenta de nuevo.');
+      Alert.alert(t('msg.error'), t('subscription.verify_send_error'));
     } finally {
       setSendingCode(false);
     }
@@ -2644,21 +2653,27 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   const handleVerifyEmailCode = useCallback(async () => {
     const codeTrimmed = verifyCode.trim();
     if (!/^\d{6}$/.test(codeTrimmed)) {
-      Alert.alert('Código inválido', 'Ingresa los 6 dígitos que recibiste por correo.');
+      Alert.alert(
+        t('subscription.verify_invalid_title'),
+        t('subscription.verify_invalid_body')
+      );
       return;
     }
     setVerifyingCode(true);
     try {
       const { data, error } = await invokeAuthedFunction('verify-owner-email', { code: codeTrimmed });
       if (error?.code) {
-        Alert.alert('Error', error.message ?? 'Código inválido o expirado');
+        Alert.alert(t('msg.error'), error.message ?? t('subscription.verify_fail'));
         return;
       }
       setVerifyCode('');
       await refreshUser?.();
-      Alert.alert('Correo verificado', 'Ya puedes usar suscripciones y generar QR.');
+      Alert.alert(
+        t('subscription.verify_success_title'),
+        t('subscription.verify_success_body')
+      );
     } catch (_) {
-      Alert.alert('Error', 'No se pudo verificar. Intenta de nuevo.');
+      Alert.alert(t('msg.error'), t('subscription.verify_error'));
     } finally {
       setVerifyingCode(false);
     }
@@ -2950,7 +2965,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         {profileReady && user?.role !== 'owner' && (
           <View style={[styles.card, styles.bannerFallback]}>
             <Text style={styles.bannerFallbackText}>
-              {t('subscription.owner_only') || 'Solo el owner puede administrar suscripciones.'}
+              {t('subscription.owner_only')}
             </Text>
           </View>
         )}
@@ -2958,9 +2973,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         <>
         {needsEmailVerification && (
           <View style={styles.verifyBlock} collapsable={false}>
-            <Text style={styles.verifyBlockTitle}>Verificar correo</Text>
+            <Text style={styles.verifyBlockTitle}>{t('subscription.verify_block_title')}</Text>
             <Text style={styles.verifyBlockSubtitle}>
-              Para activar suscripciones y generación de QR, verifica tu correo con el código que te enviamos.
+              {t('subscription.verify_block_subtitle')}
             </Text>
             <TouchableOpacity
               style={[styles.verifyButton, sendingCode && styles.verifyButtonDisabled]}
@@ -2970,10 +2985,10 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
               {sendingCode ? (
                 <ActivityIndicator size="small" color={CELLARIUM.card} />
               ) : (
-                <Text style={styles.verifyButtonText}>Enviar código</Text>
+                <Text style={styles.verifyButtonText}>{t('subscription.verify_send_code')}</Text>
               )}
             </TouchableOpacity>
-            <Text style={styles.verifyLabel}>Código de 6 dígitos</Text>
+            <Text style={styles.verifyLabel}>{t('subscription.verify_code_label')}</Text>
             <TextInput
               ref={verifyInputRef}
               style={styles.verifyInput}
@@ -2992,7 +3007,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
               {verifyingCode ? (
                 <ActivityIndicator size="small" color={CELLARIUM.card} />
               ) : (
-                <Text style={styles.verifyButtonText}>Verificar</Text>
+                <Text style={styles.verifyButtonText}>{t('subscription.verify_submit')}</Text>
               )}
             </TouchableOpacity>
           </View>
