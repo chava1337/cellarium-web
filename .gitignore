@@ -118,6 +118,9 @@ public
 tmp/
 temp/
 
+# Auditoría i18n local (generado por npm run audit:i18n)
+scripts/reports/
+
 # Supabase CLI (caché local; no versionar)
 supabase/.temp/
 

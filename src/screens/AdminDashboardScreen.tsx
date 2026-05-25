@@ -391,7 +391,15 @@ const AdminDashboardScreen: React.FC<Props> = ({ navigation, route }) => {
             <IosHeaderBackSlot navigation={navigation} fallbackRoute="WineCatalog" />
           </View>
           <View style={styles.headerTitleCenter}>
-            <Text style={styles.title}>{t('admin.title')}</Text>
+            <Text
+              style={styles.title}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.72}
+              ellipsizeMode="tail"
+            >
+              {t('admin.title')}
+            </Text>
           </View>
           <View style={[styles.headerTitleSide, { width: CELLARIUM_LAYOUT.headerSlotWidth }]} />
         </View>
@@ -556,12 +564,16 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    minWidth: 0,
+    paddingHorizontal: 4,
   },
   title: {
     fontSize: 20,
     fontWeight: '700',
     color: '#FFFFFF',
     letterSpacing: 0.3,
+    width: '100%',
+    textAlign: 'center',
   },
   // Selector de sucursal como field premium
   branchSelector: {

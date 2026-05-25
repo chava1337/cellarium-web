@@ -114,6 +114,14 @@ const translations: Record<Language, Record<string, string>> = {
     'catalog.not_available_glass': 'Este vino no está disponible por copa.',
     'catalog.branch_name_updated': 'Nombre actualizado',
     'catalog.branch_name_updated_message': 'El nombre del restaurante se actualizó correctamente.',
+    'catalog.onboarding_empty_title': 'Aún no tienes vinos en tu menú',
+    'catalog.onboarding_empty_subtitle': 'Agrégalos desde nuestro catálogo Cellarium',
+    'catalog.onboarding_add_from_catalog': 'Agregar desde catálogo',
+    'catalog.empty_search_wines': 'No se encontraron vinos',
+    'catalog.empty_search_cocktails': 'No se encontraron cócteles',
+    'catalog.empty_no_wines_in_branch': 'No hay vinos disponibles en esta sucursal',
+    'catalog.empty_no_cocktails_in_branch': 'No hay cócteles disponibles en esta sucursal',
+    'catalog.empty_select_branch_catalog': 'Selecciona una sucursal para ver el catálogo',
     
     // Vino
     'wine.name': 'Nombre',
@@ -969,6 +977,14 @@ const translations: Record<Language, Record<string, string>> = {
     'catalog.not_available_glass': 'This wine is not available by glass.',
     'catalog.branch_name_updated': 'Name updated',
     'catalog.branch_name_updated_message': 'The restaurant name was updated successfully.',
+    'catalog.onboarding_empty_title': 'You have no wines in your menu yet',
+    'catalog.onboarding_empty_subtitle': 'Add them from the Cellarium catalog',
+    'catalog.onboarding_add_from_catalog': 'Add from catalog',
+    'catalog.empty_search_wines': 'No wines found',
+    'catalog.empty_search_cocktails': 'No cocktails found',
+    'catalog.empty_no_wines_in_branch': 'No wines available at this branch',
+    'catalog.empty_no_cocktails_in_branch': 'No cocktails available at this branch',
+    'catalog.empty_select_branch_catalog': 'Select a branch to view the catalog',
     
     // Wine
     'wine.name': 'Name',
@@ -1826,6 +1842,14 @@ const translations: Record<Language, Record<string, string>> = {
     'catalog.not_available_glass': 'Este vinho não está disponível por taça.',
     'catalog.branch_name_updated': 'Nome atualizado',
     'catalog.branch_name_updated_message': 'O nome do restaurante foi atualizado com sucesso.',
+    'catalog.onboarding_empty_title': 'Você ainda não tem vinhos no seu menu',
+    'catalog.onboarding_empty_subtitle': 'Adicione-os pelo catálogo Cellarium',
+    'catalog.onboarding_add_from_catalog': 'Adicionar do catálogo',
+    'catalog.empty_search_wines': 'Nenhum vinho encontrado',
+    'catalog.empty_search_cocktails': 'Nenhum coquetel encontrado',
+    'catalog.empty_no_wines_in_branch': 'Nenhum vinho disponível nesta unidade',
+    'catalog.empty_no_cocktails_in_branch': 'Nenhum coquetel disponível nesta unidade',
+    'catalog.empty_select_branch_catalog': 'Selecione uma unidade para ver o catálogo',
 
     // Vinho (UI do catálogo)
     'wine.name': 'Nome',
@@ -2022,6 +2046,18 @@ const translations: Record<Language, Record<string, string>> = {
     'settings.delete_success': 'Sua conta foi excluída com sucesso.',
     'settings.delete_owner_title': '⚠️ Excluir Conta do Titular',
     'settings.delete_staff_title': '⚠️ Excluir Conta',
+    'settings.delete_confirm_owner':
+      '⚠️ AVISO CRÍTICO ⚠️\n\nExcluir sua conta como titular eliminará PERMANENTEMENTE:\n\n• Todas as suas informações pessoais\n• Todos os pagamentos e assinaturas\n• Todas as contas da equipe\n• Todos os exames de degustação criados\n• Todos os vinhos adicionados ao seu catálogo\n• Todas as unidades associadas\n• Todo o histórico de vendas e estoque\n\nEsta ação NÃO pode ser desfeita.\n\nPara confirmar, digite "CONFIRMAR" em maiúsculas:',
+    'settings.delete_confirm_staff':
+      '⚠️ AVISO ⚠️\n\nExcluir sua conta eliminará:\n\n• Suas informações pessoais\n• Seu acesso a esta unidade\n\nDepois de excluir sua conta, você precisará de um novo código QR de um administrador para acessar esta unidade novamente.\n\nEsta ação NÃO pode ser desfeita.\n\nPara confirmar, digite "CONFIRMAR" em maiúsculas:',
+    'settings.delete_blocked_subscription_google':
+      'Você tem uma assinatura ativa faturada no Google Play. Cancele na Play Store (Assinaturas) ou em Assinaturas no app e tente excluir a conta novamente.',
+    'settings.delete_blocked_subscription_apple':
+      'Você tem uma assinatura ativa na App Store. Cancele em Ajustes > Assinaturas (Apple ID) ou em Assinaturas no app e tente novamente.',
+    'settings.delete_blocked_subscription_stripe':
+      'Você tem uma assinatura ativa com cobrança web (Stripe). Abra em Gerenciar assinatura no app, cancele no portal e depois exclua a conta.',
+    'settings.delete_blocked_subscription_generic':
+      'Você tem uma assinatura ativa. Cancele primeiro em Assinaturas > Gerenciar e tente novamente.',
 
     // Assinaturas (título e bloqueios básicos)
     'subscription.screen_title': 'Assinaturas',

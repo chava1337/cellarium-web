@@ -1246,9 +1246,9 @@ export const mapColorToType = (
   
   const normalized = colorValue.toLowerCase();
   if (normalized.includes('red') || normalized.includes('rojo') || normalized.includes('tinto')) return 'red';
-  if (normalized.includes('white') || normalized.includes('blanc') || normalized.includes('blanco')) return 'white';
+  if (normalized.includes('white') || normalized.includes('blanc') || normalized.includes('blanco') || normalized.includes('branco')) return 'white';
   if (normalized.includes('rose') || normalized.includes('rosado') || normalized.includes('rosé')) return 'rose';
-  if (normalized.includes('sparkling') || normalized.includes('espumoso') || normalized.includes('champagne')) return 'sparkling';
+  if (normalized.includes('sparkling') || normalized.includes('espumoso') || normalized.includes('espumante') || normalized.includes('champagne')) return 'sparkling';
   if (normalized.includes('dessert') || normalized.includes('postre') || normalized.includes('dulce')) return 'dessert';
   if (normalized.includes('fortified') || normalized.includes('fortificado') || normalized.includes('generoso')) return 'fortified';
   

@@ -63,11 +63,23 @@ const CellariumHeader: React.FC<CellariumHeaderProps> = ({
           style={[styles.titleLayer, { paddingHorizontal: slotW }]}
           pointerEvents="none"
         >
-          <Text style={CELLARIUM_TEXT.headerTitle} numberOfLines={subtitle ? 2 : 1}>
+          <Text
+            style={[CELLARIUM_TEXT.headerTitle, styles.headerTitleFit]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.72}
+            ellipsizeMode="tail"
+          >
             {title}
           </Text>
           {subtitle ? (
-            <Text style={CELLARIUM_TEXT.headerSubtitle} numberOfLines={2}>
+            <Text
+              style={CELLARIUM_TEXT.headerSubtitle}
+              numberOfLines={2}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+              ellipsizeMode="tail"
+            >
               {subtitle}
             </Text>
           ) : null}
@@ -96,6 +108,10 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  headerTitleFit: {
+    width: '100%',
+    maxWidth: '100%',
   },
   slotRow: {
     flexDirection: 'row',

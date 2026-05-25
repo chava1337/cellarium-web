@@ -29,6 +29,7 @@ import {
   mapColorToType,
   getTasteProfileKeyOrderForWineType,
 } from '../services/GlobalWineCatalogService';
+import { getWineTypeDisplayLabel } from '../utils/wineTypeDisplay';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranch } from '../contexts/BranchContext';
@@ -759,15 +760,11 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  })()}
  </View>
  {(() => {
- const colorValue = typeof item.color === 'string'
-   ? item.color
-   : Array.isArray(item.color)
-   ? item.color[0]
-   : getBilingualValue(item.color as any, language);
- if (!colorValue) return null;
+ const colorLabel = getWineTypeDisplayLabel(item.color, t);
+ if (!colorLabel) return null;
  return (
  <View style={styles.cardColorTag}>
- <Text style={styles.cardColorText}>{colorValue}</Text>
+ <Text style={styles.cardColorText} numberOfLines={1}>{colorLabel}</Text>
  </View>
  );
  })()}
@@ -904,15 +901,11 @@ const GlobalWineCatalogScreen: React.FC<Props> = ({ navigation }) => {
  </View>
  )}
  {(() => {
- const colorValue = typeof selectedWine.color === 'string'
-   ? selectedWine.color
-   : Array.isArray(selectedWine.color)
-   ? selectedWine.color[0]
-   : getBilingualValue(selectedWine.color as any, language);
- if (!colorValue) return null;
+ const colorLabel = getWineTypeDisplayLabel(selectedWine.color, t);
+ if (!colorLabel) return null;
  return (
  <View style={styles.pill}>
- <Text style={styles.pillText}>{sanitizeText(colorValue)}</Text>
+ <Text style={styles.pillText}>{colorLabel}</Text>
  </View>
  );
  })()}

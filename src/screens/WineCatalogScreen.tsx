@@ -555,7 +555,7 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const handleStartEditingBranchName = useCallback(() => {
     if (!activeBranch) {
-      Alert.alert('Sin sucursal seleccionada', 'Selecciona una sucursal antes de editar el nombre.');
+      Alert.alert(t('catalog.branch_required'), t('catalog.branch_required_message'));
       return;
     }
     setBranchNameInput(branchDisplayName);
@@ -3030,12 +3030,12 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
               if (showOnboardingEmpty) {
                 return (
                   <View style={styles.noResults}>
-                    <Text style={styles.noResultsText}>Aún no tienes vinos en tu menú</Text>
+                    <Text style={styles.noResultsText}>{t('catalog.onboarding_empty_title')}</Text>
                     <Text style={styles.noResultsSubtext}>
-                      Agrégalos desde nuestro catálogo Cellarium
+                      {t('catalog.onboarding_empty_subtitle')}
                     </Text>
                     <CellariumPrimaryButton
-                      title="Agregar desde catálogo"
+                      title={t('catalog.onboarding_add_from_catalog')}
                       onPress={() => navigation.navigate('GlobalWineCatalog')}
                       style={{ marginTop: 14 }}
                     />
@@ -3046,15 +3046,14 @@ const WineCatalogScreen: React.FC<Props> = ({ navigation, route }) => {
               return (
                 <View style={styles.noResults}>
                   <Text style={styles.noResultsText}>
-                    {showCocktails ? 'No se encontraron cocteles' : 'No se encontraron vinos'}
+                    {showCocktails ? t('catalog.empty_search_cocktails') : t('catalog.empty_search_wines')}
                   </Text>
                   <Text style={styles.noResultsSubtext}>
-                    {activeBranch ? 
-                      (showCocktails
-                        ? `No hay cocteles disponibles en ${branchDisplayName || 'esta sucursal'}`
-                        : `No hay vinos disponibles en ${branchDisplayName || 'esta sucursal'}`) : 
-                      'Selecciona una sucursal para ver el catálogo'
-                    }
+                    {activeBranch
+                      ? (showCocktails
+                          ? `${t('catalog.empty_no_cocktails_in_branch')}${branchDisplayName ? ` (${branchDisplayName})` : ''}`
+                          : `${t('catalog.empty_no_wines_in_branch')}${branchDisplayName ? ` (${branchDisplayName})` : ''}`)
+                      : t('catalog.empty_select_branch_catalog')}
                   </Text>
                 </View>
               );
