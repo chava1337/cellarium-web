@@ -20,6 +20,7 @@ import { TastingExamService, TastingExam } from '../services/TastingExamService'
 import { canCreateTastingExam, canManageTastingExams } from '../utils/rolePermissions';
 import { getEffectivePlan, getOwnerEffectivePlan } from '../utils/effectivePlan';
 import { checkSubscriptionFeatureByPlan } from '../utils/subscriptionPermissions';
+import { getAppLocaleTag } from '../utils/appLocale';
 
 type TastingExamsListScreenNavigationProp = StackNavigationProp<RootStackParamList, 'TastingExamsList'>;
 
@@ -55,7 +56,7 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { currentBranch } = useBranch();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [subscriptionAllowed, setSubscriptionAllowed] = useState<'pending' | true | false>('pending');
   const alertedBlockedRef = useRef(false);
   const [exams, setExams] = useState<TastingExam[]>([]);
@@ -120,7 +121,7 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
       setExams(examsData);
     } catch (error: any) {
       console.error('Error loading exams:', error);
-      Alert.alert('Error', error.message || 'No se pudieron cargar los exámenes');
+      Alert.alert(t('common.error'), error.message || t('tasting.error_load'));
     } finally {
       setLoading(false);
     }
@@ -128,7 +129,7 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleCreateExam = () => {
     if (!canCreateExam) {
-      Alert.alert('Sin permisos', 'Solo owners, gerentes y sommeliers pueden crear exámenes');
+      Alert.alert(t('tasting.no_permission_title'), t('tasting.no_permission_create'));
       return;
     }
     navigation.navigate('CreateTastingExam');
@@ -163,21 +164,21 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
 
       if (actionType === 'disable') {
         await TastingExamService.disableExam({ examId: selectedExam.id, ownerId });
-        Alert.alert('Éxito', 'Examen deshabilitado correctamente');
+        Alert.alert(t('msg.success'), t('tasting.success_disabled'));
         setIsActionModalVisible(false);
         setSelectedExam(null);
         setActionType(null);
         loadExams();
       } else if (actionType === 'delete') {
         await TastingExamService.deleteExam({ examId: selectedExam.id, ownerId });
-        Alert.alert('Éxito', 'Examen eliminado correctamente');
+        Alert.alert(t('msg.success'), t('tasting.success_deleted'));
         setIsActionModalVisible(false);
         setSelectedExam(null);
         setActionType(null);
         loadExams();
       }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'No se pudo completar la acción');
+      Alert.alert(t('common.error'), error.message || t('tasting.error_action'));
       setIsActionModalVisible(false);
       setSelectedExam(null);
       setActionType(null);
@@ -190,19 +191,24 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
     try {
       const ownerId = user.owner_id || user.id;
       Alert.alert(
-        'Habilitar Examen',
-        `¿Estás seguro de que deseas habilitar el examen "${selectedExam.name}" por ${durationHours} hora(s)?`,
+        t('tasting.enable_title'),
+        t('tasting.enable_confirm')
+          .replace('{name}', selectedExam.name)
+          .replace('{hours}', String(durationHours)),
         [
-          { text: 'Cancelar', style: 'cancel' },
+          { text: t('btn.cancel'), style: 'cancel' },
           {
-            text: 'Habilitar',
+            text: t('tasting.enable'),
             onPress: async () => {
               await TastingExamService.enableExam({
                 examId: selectedExam.id,
                 ownerId,
                 durationHours,
               });
-              Alert.alert('Éxito', `Examen habilitado por ${durationHours} hora(s)`);
+              Alert.alert(
+                t('msg.success'),
+                t('tasting.success_enabled').replace('{hours}', String(durationHours))
+              );
               setDurationModalVisible(false);
               loadExams();
             },
@@ -210,7 +216,7 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
         ]
       );
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'No se pudo habilitar el examen');
+      Alert.alert(t('common.error'), error.message || t('tasting.error_enable'));
     }
   };
 
@@ -220,10 +226,7 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
     // Verificar si el examen está disponible
     const isAvailable = await TastingExamService.isExamAvailable(exam.id, user.id);
     if (!isAvailable) {
-      Alert.alert(
-        'Examen no disponible',
-        'Este examen no está habilitado, ya expiró, o ya lo completaste.'
-      );
+      Alert.alert(t('tasting.unavailable_title'), t('tasting.unavailable_body'));
       return;
     }
 
@@ -237,27 +240,30 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
 
   const getExamStatus = (exam: TastingExam): { text: string; color: string } => {
     if (exam.permanently_disabled) {
-      return { text: 'Deshabilitado permanentemente', color: '#b91c1c' };
+      return { text: t('tasting.status_permanent'), color: '#b91c1c' };
     }
     if (!exam.enabled) {
-      return { text: 'Deshabilitado', color: CELLARIUM.muted };
+      return { text: t('tasting.status_disabled'), color: CELLARIUM.muted };
     }
     if (exam.enabled_until) {
       const until = new Date(exam.enabled_until);
       const now = new Date();
       if (until < now) {
-        return { text: 'Expirado', color: '#b45309' };
+        return { text: t('tasting.status_expired'), color: '#b45309' };
       }
       const hoursLeft = Math.ceil((until.getTime() - now.getTime()) / (1000 * 60 * 60));
-      return { text: `Habilitado (${hoursLeft}h restantes)`, color: CELLARIUM.primary };
+      return {
+        text: t('tasting.status_enabled_hours').replace('{hours}', String(hoursLeft)),
+        color: CELLARIUM.primary,
+      };
     }
-    return { text: 'Habilitado', color: CELLARIUM.primary };
+    return { text: t('tasting.status_enabled'), color: CELLARIUM.primary };
   };
 
   const formatDate = (dateString?: string) => {
-    if (!dateString) return 'N/A';
+    if (!dateString) return t('common.na');
     const date = new Date(dateString);
-    return date.toLocaleDateString('es-ES', {
+    return date.toLocaleDateString(getAppLocaleTag(language), {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
@@ -265,6 +271,11 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
       minute: '2-digit',
     });
   };
+
+  const examSubtitle =
+    exams.length === 1
+      ? t('tasting.subtitle_one').replace('{count}', String(exams.length))
+      : t('tasting.subtitle_many').replace('{count}', String(exams.length));
 
   if (subscriptionAllowed === 'pending') {
     return (
@@ -283,13 +294,13 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
     return (
       <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
         <CellariumHeader
-          title="Catas y Degustaciones"
-          subtitle="Cargando exámenes..."
+          title={t('tasting.title')}
+          subtitle={t('tasting.loading')}
           leftSlot={<IosHeaderBackSlot navigation={navigation} fallbackRoute="AdminDashboard" />}
         />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={CELLARIUM.primary} />
-          <Text style={styles.loadingText}>Cargando exámenes...</Text>
+          <Text style={styles.loadingText}>{t('tasting.loading')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -298,8 +309,8 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
       <CellariumHeader
-        title="Catas y Degustaciones"
-        subtitle={`${exams.length} examen${exams.length !== 1 ? 'es' : ''} en esta sucursal`}
+        title={t('tasting.title')}
+        subtitle={examSubtitle}
         leftSlot={<IosHeaderBackSlot navigation={navigation} fallbackRoute="AdminDashboard" />}
       />
 
@@ -310,18 +321,16 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
       >
         {canCreateExam && (
           <TouchableOpacity style={styles.createButton} onPress={handleCreateExam} activeOpacity={0.85}>
-            <Text style={styles.createButtonText}>+ Crear Nuevo Examen</Text>
+            <Text style={styles.createButtonText}>{t('tasting.create_new')}</Text>
           </TouchableOpacity>
         )}
 
         {/* Lista de exámenes */}
         {exams.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No hay exámenes creados</Text>
+            <Text style={styles.emptyText}>{t('tasting.empty_title')}</Text>
             {canCreateExam && (
-              <Text style={styles.emptySubtext}>
-                Presiona "Crear Nuevo Examen" para comenzar
-              </Text>
+              <Text style={styles.emptySubtext}>{t('tasting.empty_subtitle')}</Text>
             )}
           </View>
         ) : (
@@ -348,14 +357,16 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
 
                 <View style={styles.examInfo}>
                   <Text style={styles.examInfoText}>
-                    {exam.wines_count || 0} vino{exam.wines_count !== 1 ? 's' : ''}
+                    {(exam.wines_count || 0) === 1
+                      ? t('tasting.wine_one').replace('{count}', String(exam.wines_count || 0))
+                      : t('tasting.wine_many').replace('{count}', String(exam.wines_count || 0))}
                   </Text>
                   <Text style={styles.examInfoText}>
-                    Creado: {formatDate(exam.created_at)}
+                    {t('tasting.created')} {formatDate(exam.created_at)}
                   </Text>
                   {exam.enabled_until && (
                     <Text style={styles.examInfoText}>
-                      Expira: {formatDate(exam.enabled_until)}
+                      {t('tasting.expires')} {formatDate(exam.enabled_until)}
                     </Text>
                   )}
                   {exam.permanently_disabled && exam.disabled_reason && (
@@ -372,7 +383,7 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
                       style={[styles.actionButton, styles.takeButton]}
                       onPress={() => handleTakeExam(exam)}
                     >
-                      <Text style={styles.actionButtonText}>Realizar Examen</Text>
+                      <Text style={styles.actionButtonText}>{t('tasting.take_exam')}</Text>
                     </TouchableOpacity>
                   )}
 
@@ -384,7 +395,7 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
                           style={[styles.actionButton, styles.enableButton]}
                           onPress={() => handleEnableExam(exam)}
                         >
-                          <Text style={styles.actionButtonText}>Habilitar</Text>
+                          <Text style={styles.actionButtonText}>{t('tasting.enable')}</Text>
                         </TouchableOpacity>
                       )}
                       {exam.enabled && !exam.permanently_disabled && (
@@ -392,20 +403,20 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
                           style={[styles.actionButton, styles.disableButton]}
                           onPress={() => handleDisableExam(exam)}
                         >
-                          <Text style={styles.actionButtonText}>Deshabilitar</Text>
+                          <Text style={styles.actionButtonText}>{t('tasting.disable')}</Text>
                         </TouchableOpacity>
                       )}
                       <TouchableOpacity
                         style={[styles.actionButton, styles.resultsButton]}
                         onPress={() => handleViewResults(exam)}
                       >
-                        <Text style={styles.actionButtonText}>Ver Resultados</Text>
+                        <Text style={styles.actionButtonText}>{t('tasting.view_results')}</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.actionButton, styles.deleteButton]}
                         onPress={() => handleDeleteExam(exam)}
                       >
-                        <Text style={styles.actionButtonText}>Eliminar</Text>
+                        <Text style={styles.actionButtonText}>{t('tasting.delete')}</Text>
                       </TouchableOpacity>
                     </>
                   )}
@@ -430,12 +441,12 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>
-              {actionType === 'delete' ? 'Eliminar Examen' : 'Deshabilitar Examen'}
+              {actionType === 'delete' ? t('tasting.modal_delete_title') : t('tasting.modal_disable_title')}
             </Text>
             <Text style={styles.modalSubtitle}>
               {actionType === 'delete'
-                ? `¿Estás seguro de que deseas eliminar permanentemente el examen "${selectedExam?.name}"? Esta acción no se puede deshacer.`
-                : `¿Estás seguro de que deseas deshabilitar el examen "${selectedExam?.name}"?`}
+                ? t('tasting.modal_delete_body').replace('{name}', selectedExam?.name ?? '')
+                : t('tasting.modal_disable_body').replace('{name}', selectedExam?.name ?? '')}
             </Text>
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -443,7 +454,7 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
                 onPress={confirmAction}
               >
                 <Text style={styles.modalButtonText}>
-                  {actionType === 'delete' ? 'Eliminar' : 'Deshabilitar'}
+                  {actionType === 'delete' ? t('tasting.delete') : t('tasting.disable')}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -454,7 +465,7 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
                   setActionType(null);
                 }}
               >
-                <Text style={[styles.modalButtonText, styles.cancelModalText]}>Cancelar</Text>
+                <Text style={[styles.modalButtonText, styles.cancelModalText]}>{t('btn.cancel')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -470,33 +481,31 @@ const TastingExamsListScreen: React.FC<Props> = ({ navigation }) => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Seleccionar Duración</Text>
-            <Text style={styles.modalSubtitle}>
-              ¿Por cuánto tiempo deseas habilitar este examen?
-            </Text>
+            <Text style={styles.modalTitle}>{t('tasting.duration_title')}</Text>
+            <Text style={styles.modalSubtitle}>{t('tasting.duration_subtitle')}</Text>
             <TouchableOpacity
               style={styles.durationOption}
               onPress={() => handleDurationSelect(1)}
             >
-              <Text style={styles.durationText}>1 hora</Text>
+              <Text style={styles.durationText}>{t('tasting.duration_1h')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.durationOption}
               onPress={() => handleDurationSelect(3)}
             >
-              <Text style={styles.durationText}>3 horas</Text>
+              <Text style={styles.durationText}>{t('tasting.duration_3h')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.durationOption}
               onPress={() => handleDurationSelect(6)}
             >
-              <Text style={styles.durationText}>6 horas</Text>
+              <Text style={styles.durationText}>{t('tasting.duration_6h')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.durationOption, styles.cancelOption]}
               onPress={() => setDurationModalVisible(false)}
             >
-              <Text style={[styles.durationText, styles.cancelText]}>Cancelar</Text>
+              <Text style={[styles.durationText, styles.cancelText]}>{t('btn.cancel')}</Text>
             </TouchableOpacity>
           </View>
         </View>

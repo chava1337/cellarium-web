@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { InventoryItem } from '../../services/InventoryService';
 import { CELLARIUM, CELLARIUM_LAYOUT } from '../../theme/cellariumTheme';
 import { isValidPrice, formatCurrencyMXN } from '../../utils/wineCatalogUtils';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 const THUMB = 96;
 const THUMB_R = 12;
@@ -27,6 +28,8 @@ const InventoryItemCard: React.FC<InventoryItemCardProps> = ({
   onEvent,
   onCount,
 }) => {
+  const { t } = useLanguage();
+
   if (!item.wines) return null;
 
   return (
@@ -52,10 +55,12 @@ const InventoryItemCard: React.FC<InventoryItemCardProps> = ({
             {[item.wines.region, item.wines.country].filter(Boolean).join(', ') || '—'}
           </Text>
           <Text style={styles.price} numberOfLines={1}>
-            Botella: {isValidPrice(item.price_by_bottle) ? formatCurrencyMXN(item.price_by_bottle) : '—'}
+            {t('inventory.bottle_label')}{' '}
+            {isValidPrice(item.price_by_bottle) ? formatCurrencyMXN(item.price_by_bottle) : '—'}
           </Text>
           <Text style={styles.priceCopa} numberOfLines={1}>
-            Copa: {isValidPrice(item.price_by_glass) ? formatCurrencyMXN(item.price_by_glass) : '—'}
+            {t('inventory.glass_label')}{' '}
+            {isValidPrice(item.price_by_glass) ? formatCurrencyMXN(item.price_by_glass) : '—'}
           </Text>
         </View>
         <View style={styles.actionsCol}>
@@ -77,14 +82,14 @@ const InventoryItemCard: React.FC<InventoryItemCardProps> = ({
       </View>
 
       <View style={styles.stockBlock}>
-        <Text style={styles.stockLabel}>Stock actual: </Text>
+        <Text style={styles.stockLabel}>{t('inventory.current_stock')} </Text>
         <Text style={styles.stockNum}>{item.stock_quantity}</Text>
       </View>
 
       <View style={styles.footer}>
         <View style={styles.divider} />
         <View style={styles.valueRow}>
-          <Text style={styles.valueLabel}>Valor en inventario</Text>
+          <Text style={styles.valueLabel}>{t('inventory.inventory_value')}</Text>
           <Text style={styles.valueAmt}>
             {isValidPrice(item.price_by_bottle)
               ? formatCurrencyMXN(item.stock_quantity * item.price_by_bottle)
@@ -95,10 +100,10 @@ const InventoryItemCard: React.FC<InventoryItemCardProps> = ({
 
       <View style={styles.bigActions}>
         <TouchableOpacity style={[styles.bigBtn, styles.bigBtnPri]} onPress={() => onEvent(item)}>
-          <Text style={styles.bigBtnPriText}>Registrar evento</Text>
+          <Text style={styles.bigBtnPriText}>{t('inventory.register_event')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.bigBtn, styles.bigBtnSec]} onPress={() => onCount(item)}>
-          <Text style={styles.bigBtnSecText}>Conteo físico</Text>
+          <Text style={styles.bigBtnSecText}>{t('inventory.physical_count')}</Text>
         </TouchableOpacity>
       </View>
     </View>

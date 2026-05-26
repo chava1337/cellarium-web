@@ -248,7 +248,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       }
     } catch (error) {
       if (__DEV__) console.error('❌ Error loading data:', error);
-      Alert.alert('Error', 'No se pudieron cargar los datos');
+      Alert.alert(t('common.error'), t('inventory.error_load'));
     } finally {
       setLoading(false);
     }
@@ -347,12 +347,12 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!eventItem || !user) return;
     const qty = parseInt(eventQty, 10);
     if (isNaN(qty) || qty <= 0) {
-      Alert.alert('Dato inválido', 'La cantidad debe ser mayor a 0.');
+      Alert.alert(t('inventory.invalid_data_title'), t('inventory.invalid_qty'));
       return;
     }
     const bid = (branchId || currentBranch?.id || '');
     if (!bid) {
-      Alert.alert('Error', 'No se pudo determinar la sucursal.');
+      Alert.alert(t('common.error'), t('inventory.error_branch'));
       return;
     }
     try {
@@ -368,12 +368,12 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
         reason: eventReason,
         notes: eventNotes.trim() || null,
       });
-      Alert.alert('Listo', 'Evento registrado correctamente.');
+      Alert.alert(t('msg.success'), t('inventory.event_success'));
       closeEventModal();
       loadData();
     } catch (err: any) {
       if (__DEV__) console.error('Error registering event:', err);
-      Alert.alert('Error', err?.message || 'No se pudo registrar el evento.');
+      Alert.alert(t('common.error'), err?.message || t('inventory.event_error'));
     } finally {
       setEventSubmitting(false);
     }
@@ -402,13 +402,13 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!countItem || !user) return;
     const counted = parseInt(countQuantity, 10);
     if (isNaN(counted) || counted < 0) {
-      Alert.alert('Dato inválido', 'El conteo actual debe ser un número mayor o igual a 0.');
+      Alert.alert(t('inventory.invalid_data_title'), t('inventory.count_invalid'));
       return;
     }
     const prev = countPrevStock;
     const bid = (branchId || currentBranch?.id || '');
     if (!bid) {
-      Alert.alert('Error', 'No se pudo determinar la sucursal.');
+      Alert.alert(t('common.error'), t('inventory.error_branch'));
       return;
     }
     try {
@@ -426,15 +426,19 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       const finalPrev = result?.previous_count ?? prev;
       const finalCount = result?.new_count ?? counted;
       const finalDelta = finalCount - finalPrev;
+      const finalDeltaStr = finalDelta >= 0 ? `+${finalDelta}` : String(finalDelta);
       Alert.alert(
-        'Conteo registrado',
-        `Se ajustó el stock a ${finalCount} botellas (antes: ${finalPrev}, ajuste: ${finalDelta >= 0 ? '+' : ''}${finalDelta}).`
+        t('inventory.count_success_title'),
+        t('inventory.count_success_body_detailed')
+          .replace('{next}', String(finalCount))
+          .replace('{prev}', String(finalPrev))
+          .replace('{delta}', finalDeltaStr)
       );
       closeCountModal();
       loadData();
     } catch (err: any) {
       if (__DEV__) console.error('Error registering count:', err);
-      Alert.alert('Error', err?.message || 'No se pudo registrar el conteo.');
+      Alert.alert(t('common.error'), err?.message || t('inventory.count_error'));
     } finally {
       setCountSubmitting(false);
     }
@@ -464,7 +468,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     try {
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
-        Alert.alert('Permiso requerido', 'Necesitamos acceso a la galería');
+        Alert.alert(t('inventory.permission_required'), t('inventory.permission_gallery'));
         return;
       }
 
@@ -551,7 +555,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       // No mostrar alert ni cerrar modal - el usuario puede seguir editando
     } catch (error) {
       if (__DEV__) console.error('Error uploading image:', error);
-      Alert.alert('Error', 'No se pudo actualizar la imagen');
+      Alert.alert(t('common.error'), t('inventory.error_image'));
     } finally {
       setUploadingImage(false);
     }
@@ -599,12 +603,12 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
         // No lanzamos error porque el vino ya se actualizó, solo logueamos
       }
 
-      Alert.alert('Éxito', 'Vino actualizado correctamente');
+      Alert.alert(t('msg.success'), t('inventory.success_update'));
       setEditModalVisible(false);
       loadData();
     } catch (error) {
       if (__DEV__) console.error('Error saving wine:', error);
-      Alert.alert('Error', 'No se pudo actualizar el vino');
+      Alert.alert(t('common.error'), t('inventory.error_update'));
     } finally {
       setSavingWine(false);
     }
@@ -614,12 +618,12 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!user || !item) return;
 
     Alert.alert(
-      'Eliminar Vino',
-      `¿Estás seguro de que deseas eliminar "${item.wines.name}" del catálogo?\n\nEsta acción eliminará el vino y todo su stock. Podrás volver a agregarlo desde el catálogo global.`,
+      t('inventory.delete_title'),
+      t('inventory.delete_body_extended').replace('{name}', item.wines.name),
       [
-        { text: 'Cancelar', style: 'cancel' },
+        { text: t('btn.cancel'), style: 'cancel' },
         {
-          text: 'Eliminar',
+          text: t('tasting.delete'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -627,7 +631,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
               const ownerId = user.owner_id || user.id;
               const bid = branchId || currentBranch?.id || '';
               if (!bid) {
-                Alert.alert('Error', 'No se pudo determinar la sucursal.');
+                Alert.alert(t('common.error'), t('inventory.error_branch'));
                 return;
               }
 
@@ -662,11 +666,11 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
                 await WineService.deleteWine(item.wine_id, ownerId);
               }
 
-              Alert.alert('Éxito', 'Vino eliminado correctamente del catálogo');
+              Alert.alert(t('msg.success'), t('inventory.delete_success'));
               loadData();
             } catch (error) {
               if (__DEV__) console.error('Error deleting wine:', error);
-              Alert.alert('Error', 'No se pudo eliminar el vino');
+              Alert.alert(t('common.error'), t('inventory.delete_error'));
             } finally {
               setDeletingWine(false);
             }
@@ -697,7 +701,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
         const ownerId = user.owner_id ?? user.id;
         const bid = (branchId || currentBranch?.id || '');
         if (!bid) {
-          Alert.alert('Error', 'No se pudo determinar la sucursal.');
+          Alert.alert(t('common.error'), t('inventory.error_branch'));
           return;
         }
         setGeneratingEstimatedPDF(true);
@@ -824,14 +828,14 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
             activeOpacity={0.7}
           >
             <Ionicons name="search" size={18} color="#666" style={styles.searchChipIcon} />
-            <Text style={styles.searchChipText}>Buscar vino</Text>
+            <Text style={styles.searchChipText}>{t('inventory.search_wine')}</Text>
           </TouchableOpacity>
         ) : (
           <View style={styles.searchWrapper}>
             <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Buscar vino..."
+              placeholder={t('inventory.search_placeholder')}
               value={searchQuery}
               onChangeText={setSearchQuery}
               placeholderTextColor="#999"
@@ -856,7 +860,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>📦</Text>
-              <Text style={styles.emptyTitle}>No hay vinos en el inventario</Text>
+              <Text style={styles.emptyTitle}>{t('inventory.empty_stock')}</Text>
             </View>
           }
         />
@@ -870,7 +874,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
   const renderSalesTab = () => {
     const salesPeriodSelector = (
       <View style={{ marginBottom: 16 }}>
-        <Text style={[styles.inputLabel, { marginBottom: 8 }]}>Periodo (ventas estimadas)</Text>
+        <Text style={[styles.inputLabel, { marginBottom: 8 }]}>{t('inventory.period_sales')}</Text>
         <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
           {([7, 30, 90] as const).map((days) => (
             <TouchableOpacity
@@ -889,7 +893,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
                   salesFromCountsDays === days && styles.filterButtonTextActive,
                 ]}
               >
-                {days} días
+                {t('inventory.days').replace('{count}', String(days))}
               </Text>
             </TouchableOpacity>
           ))}
@@ -905,8 +909,8 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
             {salesPeriodSelector}
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>📊</Text>
-              <Text style={styles.emptyTitle}>Necesitas 2 conteos físicos (corte inicial y final) para ventas estimadas</Text>
-              <Text style={styles.emptySubtitle}>Por cada vino: un conteo al inicio del periodo y otro al final. Las estimaciones se basan en cortes. Realiza conteos en la pestaña Stock.</Text>
+              <Text style={styles.emptyTitle}>{t('inventory.sales_empty_title')}</Text>
+              <Text style={styles.emptySubtitle}>{t('inventory.sales_empty_subtitle')}</Text>
             </View>
           </ScrollView>
         </View>
@@ -1095,7 +1099,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
                       estimatedReportPeriod === days && styles.filterButtonTextActive,
                     ]}
                   >
-                    {days} días
+                    {t('inventory.days').replace('{count}', String(days))}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -1164,7 +1168,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       return (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>🏢</Text>
-          <Text style={styles.emptyTitle}>No hay datos de comparación</Text>
+          <Text style={styles.emptyTitle}>{t('inventory.comparison_empty')}</Text>
         </View>
       );
     }
@@ -1179,7 +1183,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
         <ScrollView showsVerticalScrollIndicator={false}>
           {/* Periodo */}
           <View style={{ marginHorizontal: 16, marginTop: 16, marginBottom: 8 }}>
-            <Text style={[styles.inputLabel, { marginBottom: 8 }]}>Periodo</Text>
+            <Text style={[styles.inputLabel, { marginBottom: 8 }]}>{t('inventory.period')}</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {([7, 30, 90] as const).map((days) => (
                 <TouchableOpacity
@@ -1197,7 +1201,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
                       comparisonDays === days && styles.filterButtonTextActive,
                     ]}
                   >
-                    {days} días
+                    {t('inventory.days').replace('{count}', String(days))}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -1318,7 +1322,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={CELLARIUM.primary} />
-        <Text style={styles.loadingText}>Cargando datos...</Text>
+        <Text style={styles.loadingText}>{t('inventory.loading_data')}</Text>
       </View>
     );
   }
@@ -1326,7 +1330,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
   return (
     <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
       <CellariumHeader
-        title="Inventario y Análisis"
+        title={t('inventory.screen_title')}
         subtitle={currentBranch?.name || undefined}
         leftSlot={<IosHeaderBackSlot navigation={navigation} fallbackRoute="AdminDashboard" />}
         rightSlot={

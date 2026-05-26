@@ -9,6 +9,7 @@ import {
 import { CellariumModal } from '../cellarium';
 import { InventoryItem } from '../../services/InventoryService';
 import { inventoryModalSharedStyles as s } from './inventoryModalSharedStyles';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 export interface InventoryCountModalProps {
   visible: boolean;
@@ -37,20 +38,25 @@ const InventoryCountModal: React.FC<InventoryCountModalProps> = ({
   onChangeNotes,
   onConfirm,
 }) => {
+  const { t } = useLanguage();
+
   const preview =
     countQuantity.trim() !== ''
       ? (() => {
           const count = parseInt(countQuantity, 10);
           if (isNaN(count) || count < 0) return null;
           const delta = count - countPrevStock;
+          const deltaStr = delta > 0 ? `+${delta}` : delta < 0 ? `-${Math.abs(delta)}` : '0';
           return (
             <View style={s.previewBox}>
-              <Text style={s.previewLabel}>Vista previa</Text>
+              <Text style={s.previewLabel}>{t('inventory.preview')}</Text>
               <Text style={s.previewText}>
-                {countPrevStock} → {count} botellas
+                {t('inventory.preview_bottles')
+                  .replace('{prev}', String(countPrevStock))
+                  .replace('{next}', String(count))}
               </Text>
               <Text style={[s.previewText, { fontSize: 14, marginTop: 4 }]}>
-                Ajuste: {delta > 0 ? `+${delta}` : delta < 0 ? `-${Math.abs(delta)}` : '0'}
+                {t('inventory.adjustment')} {deltaStr}
               </Text>
             </View>
           );
@@ -69,8 +75,8 @@ const InventoryCountModal: React.FC<InventoryCountModalProps> = ({
     <CellariumModal
       visible={visible}
       onRequestClose={onRequestClose}
-      title="Conteo físico"
-      subtitle="Recomendado cada 15–30 días."
+      title={t('inventory.count_modal_title')}
+      subtitle={t('inventory.count_modal_subtitle')}
       animationType="slide"
       presentation="sheet"
       contentPaddingBottom={contentPaddingBottom}
@@ -78,14 +84,16 @@ const InventoryCountModal: React.FC<InventoryCountModalProps> = ({
       {countItem ? (
         <View style={s.wineInfoBox}>
           <Text style={s.wineName}>{countItem.wines.name}</Text>
-          <Text style={s.wineStock}>Stock actual en app: {countPrevStock} botellas</Text>
+          <Text style={s.wineStock}>
+            {t('inventory.current_stock_app')} {countPrevStock} {t('inventory.bottles')}
+          </Text>
         </View>
       ) : null}
 
-      <Text style={s.inputLabel}>Conteo físico ingresado</Text>
+      <Text style={s.inputLabel}>{t('inventory.count_input_label')}</Text>
       <TextInput
         style={s.input}
-        placeholder="Número de botellas contadas"
+        placeholder={t('inventory.count_input_ph')}
         placeholderTextColor="#999"
         keyboardType="number-pad"
         value={countQuantity}
@@ -94,10 +102,10 @@ const InventoryCountModal: React.FC<InventoryCountModalProps> = ({
 
       {preview}
 
-      <Text style={s.inputLabel}>Notas (opcional)</Text>
+      <Text style={s.inputLabel}>{t('inventory.notes_optional')}</Text>
       <TextInput
         style={[s.input, s.textArea]}
-        placeholder="Notas del conteo"
+        placeholder={t('inventory.count_notes_ph')}
         placeholderTextColor="#999"
         multiline
         numberOfLines={2}
@@ -111,7 +119,7 @@ const InventoryCountModal: React.FC<InventoryCountModalProps> = ({
           onPress={onRequestClose}
           disabled={countSubmitting}
         >
-          <Text style={s.cancelBtnText}>Cancelar</Text>
+          <Text style={s.cancelBtnText}>{t('btn.cancel')}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[s.modalButton, s.confirmBtn]}
@@ -121,7 +129,7 @@ const InventoryCountModal: React.FC<InventoryCountModalProps> = ({
           {countSubmitting ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={s.confirmBtnText}>Confirmar</Text>
+            <Text style={s.confirmBtnText}>{t('btn.confirm')}</Text>
           )}
         </TouchableOpacity>
       </View>

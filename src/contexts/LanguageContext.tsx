@@ -7,6 +7,11 @@ import {
   resolveLocaleString,
 } from '../utils/localeContent';
 import { ptBRP1Screens } from '../i18n/ptBRP1Screens';
+import {
+  inventoryTastingEs,
+  inventoryTastingEn,
+  inventoryTastingPtBR,
+} from '../i18n/inventoryTastingI18n';
 
 export type Language = UiLanguage;
 
@@ -1023,6 +1028,8 @@ const translations: Record<Language, Record<string, string>> = {
     'global_catalog.fizziness': 'Burbujas',
     'global_catalog.tannin': 'Taninos',
     'global_catalog.sweetness': 'Dulzor',
+
+    ...inventoryTastingEs,
   },
   en: {
     // Navigation and menu
@@ -2016,6 +2023,8 @@ const translations: Record<Language, Record<string, string>> = {
     'global_catalog.fizziness': 'Fizziness',
     'global_catalog.tannin': 'Tannin',
     'global_catalog.sweetness': 'Sweetness',
+
+    ...inventoryTastingEn,
   },
   /** UI pt-BR: strings propias cuando existan; t() hace fallback en → es → key. */
   'pt-BR': {
@@ -2341,6 +2350,7 @@ const translations: Record<Language, Record<string, string>> = {
 
     // P1/P2 — assinaturas, usuários, QR, entrada manual, coquetéis (ver ptBRP1Screens.ts)
     ...ptBRP1Screens,
+    ...inventoryTastingPtBR,
   },
 };
 

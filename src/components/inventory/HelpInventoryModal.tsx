@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Switch, StyleSheet, Modal } from 'react-native';
 import { CELLARIUM } from '../../theme/cellariumTheme';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 export interface HelpInventoryModalProps {
   visible: boolean;
@@ -14,60 +15,50 @@ const HelpInventoryModal: React.FC<HelpInventoryModalProps> = ({
   onRequestClose,
   dontShowHelpAgain,
   onDontShowChange,
-}) => (
-  <Modal visible={visible} transparent animationType="fade" onRequestClose={onRequestClose}>
-    <View style={styles.overlay}>
-      <View style={styles.content}>
-        <Text style={styles.title}>Cómo usar Inventario y Análisis</Text>
-        <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll}>
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>1. Registrar eventos de inventario</Text>
-            <Text style={styles.blockText}>
-              Cuando recibas o retires botellas usa:{'\n'}
-              • Entrada → Compra o cortesía proveedor{'\n'}
-              • Salida → Cortesía cliente o rotura
-            </Text>
-          </View>
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>2. Conteos físicos</Text>
-            <Text style={styles.blockText}>
-              Realiza conteos cada 15–30 días.{'\n'}
-              Estos cortes permiten estimar ventas y consumo.
-            </Text>
-          </View>
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>3. Ventas estimadas</Text>
-            <Text style={styles.blockText}>
-              El sistema calcula consumo con:{'\n'}
-              Stock inicio + Entradas − Salidas especiales − Stock final.
-            </Text>
-          </View>
-          <View style={styles.block}>
-            <Text style={styles.blockTitle}>4. Comparar sucursales</Text>
-            <Text style={styles.blockText}>
-              Si tienes varias sucursales puedes comparar su desempeño y ver qué vinos se venden más.
-            </Text>
-          </View>
-          <Text style={styles.note}>
-            Las ventas se estiman con base en conteos físicos y movimientos registrados.
-          </Text>
-          <View style={styles.checkRow}>
-            <Switch
-              value={dontShowHelpAgain}
-              onValueChange={onDontShowChange}
-              trackColor={{ false: '#ccc', true: CELLARIUM.primary }}
-              thumbColor="#fff"
-            />
-            <Text style={styles.checkLabel}>No mostrar de nuevo</Text>
-          </View>
-        </ScrollView>
-        <TouchableOpacity style={styles.closeBtn} onPress={onRequestClose}>
-          <Text style={styles.closeText}>Cerrar</Text>
-        </TouchableOpacity>
+}) => {
+  const { t } = useLanguage();
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onRequestClose}>
+      <View style={styles.overlay}>
+        <View style={styles.content}>
+          <Text style={styles.title}>{t('inventory.help_title')}</Text>
+          <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll}>
+            <View style={styles.block}>
+              <Text style={styles.blockTitle}>{t('inventory.help_block1_title')}</Text>
+              <Text style={styles.blockText}>{t('inventory.help_block1_body')}</Text>
+            </View>
+            <View style={styles.block}>
+              <Text style={styles.blockTitle}>{t('inventory.help_block2_title')}</Text>
+              <Text style={styles.blockText}>{t('inventory.help_block2_body')}</Text>
+            </View>
+            <View style={styles.block}>
+              <Text style={styles.blockTitle}>{t('inventory.help_block3_title')}</Text>
+              <Text style={styles.blockText}>{t('inventory.help_block3_body')}</Text>
+            </View>
+            <View style={styles.block}>
+              <Text style={styles.blockTitle}>{t('inventory.help_block4_title')}</Text>
+              <Text style={styles.blockText}>{t('inventory.help_block4_body')}</Text>
+            </View>
+            <Text style={styles.note}>{t('inventory.help_note')}</Text>
+            <View style={styles.checkRow}>
+              <Switch
+                value={dontShowHelpAgain}
+                onValueChange={onDontShowChange}
+                trackColor={{ false: '#ccc', true: CELLARIUM.primary }}
+                thumbColor="#fff"
+              />
+              <Text style={styles.checkLabel}>{t('inventory.help_dont_show')}</Text>
+            </View>
+          </ScrollView>
+          <TouchableOpacity style={styles.closeBtn} onPress={onRequestClose}>
+            <Text style={styles.closeText}>{t('btn.close')}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-    </View>
-  </Modal>
-);
+    </Modal>
+  );
+};
 
 const styles = StyleSheet.create({
   overlay: {

@@ -16,6 +16,7 @@ const ROOT = path.resolve(__dirname, '..');
 const SRC = path.join(ROOT, 'src');
 const LC_FILE = path.join(SRC, 'contexts', 'LanguageContext.tsx');
 const PT_P1_FILE = path.join(SRC, 'i18n', 'ptBRP1Screens.ts');
+const INV_TASTING_FILE = path.join(SRC, 'i18n', 'inventoryTastingI18n.ts');
 const OUT_DIR = path.join(__dirname, 'reports');
 const OUT_JSON = path.join(OUT_DIR, 'i18n-audit.json');
 
@@ -48,13 +49,24 @@ function parseTranslations() {
   const ptBlock = raw.match(/'pt-BR':\s*\{([\s\S]*?)\n\s*\},/m)?.[1] ?? '';
   const ptInline = extractLocaleKeys(ptBlock);
   let ptP1 = new Set();
+  let invEs = new Set();
+  let invEn = new Set();
   if (fs.existsSync(PT_P1_FILE)) {
     ptP1 = extractLocaleKeys(fs.readFileSync(PT_P1_FILE, 'utf8'));
   }
+  if (fs.existsSync(INV_TASTING_FILE)) {
+    const invRaw = fs.readFileSync(INV_TASTING_FILE, 'utf8');
+    const esSection = invRaw.match(/export const inventoryTastingEs[^=]*=\s*\{([\s\S]*?)\n\};/m)?.[1] ?? '';
+    const enSection = invRaw.match(/export const inventoryTastingEn[^=]*=\s*\{([\s\S]*?)\n\};/m)?.[1] ?? '';
+    const ptSection = invRaw.match(/export const inventoryTastingPtBR[^=]*=\s*\{([\s\S]*?)\n\};/m)?.[1] ?? '';
+    invEs = extractLocaleKeys(esSection);
+    invEn = extractLocaleKeys(enSection);
+    ptP1 = new Set([...ptP1, ...extractLocaleKeys(ptSection)]);
+  }
   const pt = new Set([...ptInline, ...ptP1]);
   return {
-    es: extractLocaleKeys(esBlock),
-    en: extractLocaleKeys(enBlock),
+    es: new Set([...extractLocaleKeys(esBlock), ...invEs]),
+    en: new Set([...extractLocaleKeys(enBlock), ...invEn]),
     pt,
   };
 }
