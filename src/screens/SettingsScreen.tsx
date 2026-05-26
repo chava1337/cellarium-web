@@ -139,7 +139,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const handleConfirmDelete = async () => {
     if (confirmText !== 'CONFIRMAR') {
-      Alert.alert(t('msg.error'), 'Debes escribir "CONFIRMAR" en mayúsculas para confirmar');
+      Alert.alert(t('msg.error'), t('settings.confirm_word_required'));
       return;
     }
 
@@ -197,7 +197,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
           const first200 = bodyText ? bodyText.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
           const devMessage = __DEV__
             ? `status: ${status ?? 'n/a'}\nbody: ${first200 || '(none)'}\nmessage: ${err?.message ?? 'n/a'}`
-            : `${err?.message ?? 'Error desconocido'}`;
+            : `${err?.message ?? t('settings.unknown_error')}`;
 
           if (status === 409) {
             const bp = user?.billing_provider;
@@ -210,18 +210,18 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
                     ? t('settings.delete_blocked_subscription_stripe')
                     : t('settings.delete_blocked_subscription_generic');
             Alert.alert(
-              'No se puede eliminar la cuenta',
+              t('settings.delete_blocked_title'),
               deleteBlockedMsg,
               [
                 {
-                  text: 'OK',
+                  text: t('common.ok'),
                   onPress: () => {
                     setIsDeleting(false);
                     setIsDeleteModalVisible(false);
                   },
                 },
                 {
-                  text: 'Ir a Suscripciones',
+                  text: t('settings.go_subscriptions'),
                   onPress: () => {
                     setIsDeleting(false);
                     setIsDeleteModalVisible(false);
@@ -234,9 +234,15 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
           }
 
           if (__DEV__) {
-            Alert.alert(t('msg.error'), `Error eliminando cuenta:\n${devMessage}`);
+            Alert.alert(t('msg.error'), t('settings.delete_error_dev').replace('{details}', devMessage));
           } else {
-            Alert.alert(t('msg.error'), `Error eliminando cuenta: ${err?.message ?? 'Error desconocido'}`);
+            Alert.alert(
+              t('msg.error'),
+              t('settings.delete_error_message').replace(
+                '{message}',
+                String(err?.message ?? t('settings.unknown_error'))
+              )
+            );
           }
 
           setIsDeleting(false);
@@ -251,7 +257,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
             data.message || t('settings.delete_success'),
             [
               {
-                text: 'OK',
+                text: t('common.ok'),
                 onPress: async () => {
                   await signOut();
                   navigation.reset({
@@ -265,13 +271,13 @@ const SettingsScreen: React.FC<Props> = ({ navigation, route }) => {
         } else {
           Alert.alert(
             t('msg.error'),
-            data?.message || 'Error desconocido'
+            data?.message || t('settings.unknown_error')
           );
           setIsDeleting(false);
         }
       } catch (e) {
         if (__DEV__) console.log('[delete-user-account] caught exception:', e);
-        Alert.alert(t('msg.error'), 'Error inesperado');
+        Alert.alert(t('msg.error'), t('settings.unexpected_error'));
         setIsDeleting(false);
       }
     } catch (error: any) {

@@ -26,6 +26,7 @@ import { useAutoCapture } from './hooks/useAutoCapture';
 import { warpUtils } from './lib/warp';
 import { geometryUtils } from './lib/geometry';
 import CameraOverlay from './ui/Overlay';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -40,6 +41,7 @@ export const ProWineCamera: React.FC<ProWineCameraProps> = ({
   config = DEFAULT_CONFIG,
   style,
 }) => {
+  const { t } = useLanguage();
   // Estado de la cámara
   const [cameraState, setCameraState] = useState<CameraState>({
     isInitialized: false,
@@ -91,22 +93,22 @@ export const ProWineCamera: React.FC<ProWineCameraProps> = ({
       setCameraState(prev => ({
         ...prev,
         hasPermission: permission === 'granted',
-        error: permission === 'denied' ? 'Permisos de cámara denegados' : null,
+        error: permission === 'denied' ? 'camera.permission_denied' : null,
       }));
       
       if (permission === 'denied') {
-        onError?.('Permisos de cámara requeridos');
+        onError?.(t('camera.permission_required'));
       }
       
     } catch (error) {
       console.error('Error solicitando permisos:', error);
       setCameraState(prev => ({
         ...prev,
-        error: 'Error solicitando permisos',
+        error: 'camera.permission_request_error',
       }));
-      onError?.('Error solicitando permisos de cámara');
+      onError?.(t('camera.permission_request_error_detail'));
     }
-  }, [onError]);
+  }, [onError, t]);
   
   /**
    * Inicializa la cámara
@@ -135,20 +137,20 @@ export const ProWineCamera: React.FC<ProWineCameraProps> = ({
         console.error('❌ No se encontró dispositivo de cámara');
         setCameraState(prev => ({
           ...prev,
-          error: 'No se encontró dispositivo de cámara',
+          error: 'camera.device_not_found',
         }));
-        onError?.('No se encontró dispositivo de cámara');
+        onError?.(t('camera.device_not_found'));
       }
       
     } catch (error) {
       console.error('Error inicializando cámara:', error);
       setCameraState(prev => ({
         ...prev,
-        error: 'Error inicializando cámara',
+        error: 'camera.init_error',
       }));
-      onError?.('Error inicializando cámara');
+      onError?.(t('camera.init_error'));
     }
-  }, [device, cameraState.cameraPosition, requestCameraPermission, onError]);
+  }, [device, cameraState.cameraPosition, requestCameraPermission, onError, t]);
   
   /**
    * Procesador de frames para detección de rectángulos
@@ -239,7 +241,7 @@ export const ProWineCamera: React.FC<ProWineCameraProps> = ({
       
     } catch (error) {
       console.error('Error capturando foto:', error);
-      setCameraState(prev => ({ ...prev, error: 'Error capturando foto' }));
+      setCameraState(prev => ({ ...prev, error: 'camera.capture_error' }));
       onError?.('Error capturando foto');
     } finally {
       setCameraState(prev => ({ ...prev, isShooting: false }));
@@ -316,9 +318,9 @@ export const ProWineCamera: React.FC<ProWineCameraProps> = ({
   if (cameraState.error) {
     return (
       <View style={[styles.container, styles.errorContainer, style]}>
-        <Text style={styles.errorText}>{cameraState.error}</Text>
+        <Text style={styles.errorText}>{t(cameraState.error)}</Text>
         <TouchableOpacity style={styles.retryButton} onPress={initializeCamera}>
-          <Text style={styles.retryButtonText}>Reintentar</Text>
+          <Text style={styles.retryButtonText}>{t('common.retry')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -330,7 +332,7 @@ export const ProWineCamera: React.FC<ProWineCameraProps> = ({
       <View style={[styles.container, styles.loadingContainer, style]}>
         <ActivityIndicator size="large" color="#007AFF" />
         <Text style={styles.loadingText}>
-          {!cameraState.hasPermission ? 'Solicitando permisos...' : 'Inicializando cámara...'}
+          {!cameraState.hasPermission ? t('camera.requesting_permissions') : t('camera.initializing')}
         </Text>
       </View>
     );
@@ -340,7 +342,7 @@ export const ProWineCamera: React.FC<ProWineCameraProps> = ({
   if (!device) {
     return (
       <View style={[styles.container, styles.errorContainer, style]}>
-        <Text style={styles.errorText}>No se encontró dispositivo de cámara</Text>
+        <Text style={styles.errorText}>{t('camera.device_not_found')}</Text>
       </View>
     );
   }
@@ -407,7 +409,7 @@ export const ProWineCamera: React.FC<ProWineCameraProps> = ({
         <View style={styles.processingOverlay}>
           <ActivityIndicator size="large" color="white" />
           <Text style={styles.processingText}>
-            {cameraState.isShooting ? 'Capturando...' : 'Procesando...'}
+            {cameraState.isShooting ? t('camera.capturing') : t('camera.processing')}
           </Text>
         </View>
       )}

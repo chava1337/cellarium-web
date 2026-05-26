@@ -9,6 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
 
 type WelcomeScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Welcome'>;
 
@@ -19,6 +20,8 @@ interface Props {
 const PRIMARY_COLOR = '#924048';
 
 const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
+  const { t } = useLanguage();
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       {/* Contenido central */}
@@ -39,14 +42,14 @@ const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
           style={styles.primaryButton}
           onPress={() => navigation.navigate('AppAuth' as any, { mode: 'register' as const })}
         >
-          <Text style={styles.primaryButtonText}>Crear cuenta como Owner</Text>
+          <Text style={styles.primaryButtonText}>{t('welcome.create_owner')}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.secondaryButton}
           onPress={() => navigation.navigate('AppAuth' as any, { mode: 'login' as const })}
         >
-          <Text style={styles.secondaryButtonText}>Iniciar sesión</Text>
+          <Text style={styles.secondaryButtonText}>{t('welcome.login')}</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

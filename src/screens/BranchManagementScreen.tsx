@@ -186,7 +186,10 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
         );
         setAllBranches(updatedBranches);
         setAvailableBranches(updatedBranches.filter(b => b.is_locked !== true));
-        Alert.alert('Éxito', `Sucursal ${normalizedName} actualizada correctamente`);
+        Alert.alert(
+          t('msg.success'),
+          t('branches.branch_updated').replace('{name}', normalizedName)
+        );
         setIsEditModalVisible(false);
         setEditingBranch(null);
         setFormData({ name: '', address: '', phone: '', email: '' });
@@ -424,7 +427,7 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
               <Text style={styles.branchName}>
                 {branch.name}
                 {(branch as Branch & { is_main?: boolean }).is_main && (
-                  <Text style={styles.mainBadge}> {' ⭐ Principal'}</Text>
+                  <Text style={styles.mainBadge}> {`⭐ ${t('branches.main')}`}</Text>
                 )}
                 {branch.is_locked && (
                   <Text style={styles.lockedHint}> — {t('branches.locked_by_subscription')}</Text>
@@ -439,7 +442,7 @@ const BranchManagementScreen: React.FC<Props> = ({ navigation, route }) => {
                 style={styles.editButton}
                 onPress={() => handleEditBranch(branch)}
               >
-                <Text style={styles.editButtonText}>✏️ Editar</Text>
+                <Text style={styles.editButtonText}>{`✏️ ${t('btn.edit')}`}</Text>
               </TouchableOpacity>
               {!(branch as Branch & { is_main?: boolean }).is_main && (
                 <TouchableOpacity
