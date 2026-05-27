@@ -10,6 +10,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
+import InlineLanguageSelector from '../components/InlineLanguageSelector';
+import { CELLARIUM, CELLARIUM_LAYOUT } from '../theme/cellariumTheme';
 
 type WelcomeScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Welcome'>;
 
@@ -17,16 +19,12 @@ interface Props {
   navigation: WelcomeScreenNavigationProp;
 }
 
-const PRIMARY_COLOR = '#924048';
-
 const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
   const { t } = useLanguage();
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      {/* Contenido central */}
       <View style={styles.contentContainer}>
-        {/* Logo */}
         <View style={styles.logoSection}>
           <Image
             source={require('../../assets/images/cellarium-logo.png')}
@@ -36,7 +34,6 @@ const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
         </View>
       </View>
 
-      {/* Botones en la parte inferior */}
       <View style={styles.buttonsContainer}>
         <TouchableOpacity
           style={styles.primaryButton}
@@ -51,6 +48,10 @@ const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
         >
           <Text style={styles.secondaryButtonText}>{t('welcome.login')}</Text>
         </TouchableOpacity>
+
+        <View style={styles.languageRow}>
+          <InlineLanguageSelector size="compact" showLabels={false} />
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -59,13 +60,13 @@ const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: CELLARIUM.card,
   },
   contentContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: CELLARIUM_LAYOUT.screenPadding + 8,
   },
   logoSection: {
     alignItems: 'center',
@@ -76,13 +77,13 @@ const styles = StyleSheet.create({
     height: 240,
   },
   buttonsContainer: {
-    paddingHorizontal: 24,
+    paddingHorizontal: CELLARIUM_LAYOUT.screenPadding + 8,
     paddingBottom: 40,
     width: '100%',
   },
   primaryButton: {
-    backgroundColor: PRIMARY_COLOR,
-    borderRadius: 24,
+    backgroundColor: CELLARIUM.primary,
+    borderRadius: CELLARIUM_LAYOUT.buttonRadius + 8,
     paddingVertical: 16,
     paddingHorizontal: 24,
     alignItems: 'center',
@@ -90,25 +91,28 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   primaryButtonText: {
-    color: '#ffffff',
+    color: CELLARIUM.card,
     fontSize: 16,
     fontWeight: '600',
   },
   secondaryButton: {
-    backgroundColor: '#ffffff',
-    borderRadius: 24,
+    backgroundColor: CELLARIUM.card,
+    borderRadius: CELLARIUM_LAYOUT.buttonRadius + 8,
     paddingVertical: 16,
     paddingHorizontal: 24,
     alignItems: 'center',
-    marginBottom: 16,
     borderWidth: 1,
-    borderColor: PRIMARY_COLOR,
+    borderColor: CELLARIUM.primary,
     width: '100%',
   },
   secondaryButtonText: {
-    color: PRIMARY_COLOR,
+    color: CELLARIUM.primary,
     fontSize: 16,
     fontWeight: '600',
+  },
+  languageRow: {
+    marginTop: 16,
+    alignItems: 'center',
   },
 });
 

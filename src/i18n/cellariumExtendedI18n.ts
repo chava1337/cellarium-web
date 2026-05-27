@@ -60,6 +60,11 @@ export const cellariumExtendedEs: Record<string, string> = {
   'welcome.create_owner': 'Crear cuenta como Owner',
   'welcome.login': 'Iniciar sesión',
 
+  'language.spanish': 'Español',
+  'language.english': 'English',
+  'language.portuguese': 'Português',
+  'language.select': 'Seleccionar idioma',
+
   'settings.delete_blocked_title': 'No se puede eliminar la cuenta',
   'settings.go_subscriptions': 'Ir a Suscripciones',
   'settings.confirm_word_required': 'Debes escribir "CONFIRMAR" en mayúsculas para confirmar',
@@ -236,6 +241,11 @@ export const cellariumExtendedEn: Record<string, string> = {
   'welcome.create_owner': 'Create Owner account',
   'welcome.login': 'Sign in',
 
+  'language.spanish': 'Español',
+  'language.english': 'English',
+  'language.portuguese': 'Português',
+  'language.select': 'Select language',
+
   'settings.delete_blocked_title': 'Cannot delete account',
   'settings.go_subscriptions': 'Go to Subscriptions',
   'settings.confirm_word_required': 'You must type "CONFIRMAR" in uppercase to confirm',
@@ -411,6 +421,11 @@ export const cellariumExtendedPtBR: Record<string, string> = {
 
   'welcome.create_owner': 'Criar conta como Owner',
   'welcome.login': 'Entrar',
+
+  'language.spanish': 'Español',
+  'language.english': 'English',
+  'language.portuguese': 'Português',
+  'language.select': 'Selecionar idioma',
 
   'settings.delete_blocked_title': 'Não é possível excluir a conta',
   'settings.go_subscriptions': 'Ir para Assinaturas',
