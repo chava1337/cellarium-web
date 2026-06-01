@@ -72,6 +72,75 @@ function normalizePurchaseResult(
   return Array.isArray(result) ? result[0] ?? null : result;
 }
 
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return '[GooglePlay] JSON.stringify failed for product payload';
+  }
+}
+
+function getFetchedProductId(product: ProductSubscription): string {
+  const row = product as { id?: string; productId?: string };
+  return (row.productId ?? row.id ?? '').trim();
+}
+
+const BASE_PLAN_RAW_LOG_LABELS: Record<string, string> = {
+  [GOOGLE_PLAY_PRODUCT_IDS.bistro]: 'BISTRO_RAW',
+  [GOOGLE_PLAY_PRODUCT_IDS.trattoria]: 'TRATTORIA_RAW',
+  [GOOGLE_PLAY_PRODUCT_IDS.grandMaison]: 'GRAND_MAISON_RAW',
+};
+
+/** Instrumentación: JSON crudo devuelto por Play para planes base (solo logs, sin lógica). */
+function logGooglePlayRawBaseSubscriptionProducts(products: ProductSubscription[]): void {
+  for (const product of products) {
+    const productId = getFetchedProductId(product);
+    const planLabel = BASE_PLAN_RAW_LOG_LABELS[productId];
+    if (!planLabel) continue;
+
+    const row = product as Record<string, unknown>;
+
+    console.log('[GooglePlay][RAW_PRODUCT]', safeJsonStringify(product));
+    console.log(`[GooglePlay][${planLabel}]`, safeJsonStringify(product));
+
+    console.log('[GooglePlay][RAW_PRODUCT_FIELDS]', {
+      productId,
+      id: row.id ?? null,
+      subscriptionOfferDetailsAndroid: row.subscriptionOfferDetailsAndroid ?? null,
+      subscriptionOffers: row.subscriptionOffers ?? null,
+      oneTimePurchaseOfferDetailsAndroid: row.oneTimePurchaseOfferDetailsAndroid ?? null,
+    });
+
+    const legacyOffers = row.subscriptionOfferDetailsAndroid;
+    if (Array.isArray(legacyOffers)) {
+      legacyOffers.forEach((offer, index) => {
+        const o = offer as Record<string, unknown>;
+        console.log(`[GooglePlay][${planLabel}][subscriptionOfferDetailsAndroid][${index}]`, {
+          offerTags: o.offerTags ?? null,
+          offerToken: o.offerToken ?? null,
+          basePlanId: o.basePlanId ?? null,
+          offerId: o.offerId ?? null,
+          pricingPhases: o.pricingPhases ?? null,
+        });
+      });
+    }
+
+    const normalizedOffers = row.subscriptionOffers;
+    if (Array.isArray(normalizedOffers)) {
+      normalizedOffers.forEach((offer, index) => {
+        const o = offer as Record<string, unknown>;
+        console.log(`[GooglePlay][${planLabel}][subscriptionOffers][${index}]`, {
+          offerTagsAndroid: o.offerTagsAndroid ?? null,
+          offerTokenAndroid: o.offerTokenAndroid ?? null,
+          basePlanIdAndroid: o.basePlanIdAndroid ?? null,
+          id: o.id ?? null,
+          pricingPhasesAndroid: o.pricingPhasesAndroid ?? null,
+        });
+      });
+    }
+  }
+}
+
 function waitForPurchaseFromListener(expectedSku: string, signal: AbortSignal): Promise<Purchase> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -232,7 +301,9 @@ export async function loadSubscriptions(): Promise<ProductSubscription[]> {
     skus: [...GOOGLE_PLAY_ALL_SUBSCRIPTION_SKUS],
     type: 'subs',
   });
-  return (result ?? []) as ProductSubscription[];
+  const list = (result ?? []) as ProductSubscription[];
+  logGooglePlayRawBaseSubscriptionProducts(list);
+  return list;
 }
 
 export async function purchaseGoogleSubscription(plan: GooglePlanUiId): Promise<{ purchase: Purchase }> {
