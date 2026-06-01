@@ -15,6 +15,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { supabase } from '../lib/supabase';
 
 type NavProp = StackNavigationProp<RootStackParamList, 'OwnerEmailVerification'>;
@@ -28,6 +29,7 @@ interface Props {
 const PRIMARY = '#8B0000';
 
 const OwnerEmailVerificationScreen: React.FC<Props> = ({ navigation }) => {
+  const { t } = useLanguage();
   const { user, refreshUser } = useAuth();
   const [code, setCode] = useState('');
   const [sending, setSending] = useState(false);
@@ -49,19 +51,19 @@ const OwnerEmailVerificationScreen: React.FC<Props> = ({ navigation }) => {
       });
       if (error) throw error;
       if (data?.code === 'ALREADY_VERIFIED') {
-        Alert.alert('Listo', 'Tu correo ya está verificado.');
+        Alert.alert(t('auth.verify_success_title'), t('auth.verify_already_done'));
         await refreshUser?.();
         navigation.goBack();
         return;
       }
       if (data?.code) {
-        Alert.alert('Aviso', data.message ?? 'No se pudo enviar el código');
+        Alert.alert(t('auth.warning'), data.message ?? t('auth.verify_send_failed'));
         return;
       }
-      Alert.alert('Código enviado', 'Revisa tu correo. El código es válido 15 minutos.');
+      Alert.alert(t('auth.verify_code_sent_title'), t('auth.verify_code_sent_body'));
     } catch (e: unknown) {
-      const msg = (e as Error)?.message ?? 'Error al enviar';
-      Alert.alert('Error', msg);
+      const msg = (e as Error)?.message ?? t('auth.verify_send_failed');
+      Alert.alert(t('common.error'), msg);
     } finally {
       setSending(false);
     }
@@ -70,7 +72,7 @@ const OwnerEmailVerificationScreen: React.FC<Props> = ({ navigation }) => {
   const handleVerify = async () => {
     const trimmed = code.trim();
     if (!/^\d{6}$/.test(trimmed)) {
-      Alert.alert('Código inválido', 'Ingresa los 6 dígitos que recibiste por correo.');
+      Alert.alert(t('auth.verify_invalid_code_title'), t('auth.verify_invalid_code_body'));
       return;
     }
     setVerifying(true);
@@ -82,15 +84,15 @@ const OwnerEmailVerificationScreen: React.FC<Props> = ({ navigation }) => {
       });
       if (error) throw error;
       if (data?.code) {
-        Alert.alert('Error', data.message ?? 'Código inválido o expirado');
+        Alert.alert(t('common.error'), data.message ?? t('auth.verify_invalid_or_expired'));
         return;
       }
-      Alert.alert('Correo verificado', 'Ya puedes usar suscripciones y generar QR.');
+      Alert.alert(t('auth.verify_success_title'), t('auth.verify_success_body'));
       await refreshUser?.();
       navigation.goBack();
     } catch (e: unknown) {
-      const msg = (e as Error)?.message ?? 'Error al verificar';
-      Alert.alert('Error', msg);
+      const msg = (e as Error)?.message ?? t('auth.verify_invalid_or_expired');
+      Alert.alert(t('common.error'), msg);
     } finally {
       setVerifying(false);
     }
@@ -99,9 +101,9 @@ const OwnerEmailVerificationScreen: React.FC<Props> = ({ navigation }) => {
   if (user?.role !== 'owner') {
     return (
       <SafeAreaView style={styles.container}>
-        <Text style={styles.message}>Esta pantalla es solo para propietarios.</Text>
+        <Text style={styles.message}>{t('auth.verify_owners_only')}</Text>
         <TouchableOpacity style={styles.button} onPress={() => navigation.goBack()}>
-          <Text style={styles.buttonText}>Volver</Text>
+          <Text style={styles.buttonText}>{t('auth.verify_back')}</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
@@ -113,9 +115,9 @@ const OwnerEmailVerificationScreen: React.FC<Props> = ({ navigation }) => {
         style={styles.inner}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <Text style={styles.title}>Verificar correo</Text>
+        <Text style={styles.title}>{t('auth.verify_email_title')}</Text>
         <Text style={styles.subtitle}>
-          Para activar suscripciones y generación de QR, verifica tu correo con el código que te enviamos.
+          {t('auth.verify_email_subtitle')}
         </Text>
 
         <TouchableOpacity
@@ -126,16 +128,16 @@ const OwnerEmailVerificationScreen: React.FC<Props> = ({ navigation }) => {
           {sending ? (
             <ActivityIndicator size="small" color="#fff" />
           ) : (
-            <Text style={styles.buttonText}>Enviar código al correo</Text>
+            <Text style={styles.buttonText}>{t('auth.verify_send_code')}</Text>
           )}
         </TouchableOpacity>
 
-        <Text style={styles.label}>Código de 6 dígitos</Text>
+        <Text style={styles.label}>{t('auth.verify_code_label')}</Text>
         <TextInput
           style={styles.input}
           value={code}
           onChangeText={setCode}
-          placeholder="000000"
+          placeholder={t('auth.verify_code_placeholder')}
           placeholderTextColor="#999"
           keyboardType="number-pad"
           maxLength={6}
@@ -149,7 +151,7 @@ const OwnerEmailVerificationScreen: React.FC<Props> = ({ navigation }) => {
           {verifying ? (
             <ActivityIndicator size="small" color="#fff" />
           ) : (
-            <Text style={styles.buttonText}>Verificar</Text>
+            <Text style={styles.buttonText}>{t('auth.verify_button')}</Text>
           )}
         </TouchableOpacity>
       </KeyboardAvoidingView>

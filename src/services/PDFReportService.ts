@@ -5,6 +5,13 @@ import { InventoryItem, InventoryStats, EstimatedSalesRow, SalesFromCountsRow, S
 import { WineMetrics, BranchMetrics } from './AnalyticsService';
 import { isValidPrice, formatCurrencyMXN } from '../utils/wineCatalogUtils';
 import { captureCriticalError, sentryFlowBreadcrumb } from '../utils/sentryContext';
+import { getReportPdfLabelsForLanguage, type ReportPdfLabels } from '../i18n/pdfReportI18n';
+import { formatReportDate, formatReportDateTime, type ReportPdfContext } from '../utils/reportPdfContext';
+
+const defaultPdfCtx = (): ReportPdfContext => ({
+  localeTag: 'es-MX',
+  labels: getReportPdfLabelsForLanguage('es'),
+});
 
 /**
  * CSS compartido para PDF vía expo-print (WebKit). Objetivos: A4, KPIs estables, tablas legibles.
@@ -163,6 +170,16 @@ const REPORT_PRINT_CSS = `
   }
 `;
 
+export type { ReportPdfContext, ReportPdfLabels };
+
+function fmtWineMovement(labels: ReportPdfLabels, name: string, count: number): string {
+  return labels.wine_movement_fmt.replace('{name}', name).replace('{count}', String(count));
+}
+
+function shareDialogTitle(labels: ReportPdfLabels, name: string): string {
+  return labels.share_dialog.replace('{name}', name);
+}
+
 /**
  * Reportes: HTML como plantilla → PDF binario vía expo-print → compartir con expo-sharing.
  */
@@ -173,13 +190,11 @@ export class PDFReportService {
   static async generateInventoryReport(
     branchName: string,
     inventory: InventoryItem[],
-    stats: InventoryStats | null
+    stats: InventoryStats | null,
+    ctx: ReportPdfContext = defaultPdfCtx()
   ): Promise<string> {
-    const date = new Date().toLocaleDateString('es-ES', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
+    const L = ctx.labels;
+    const date = formatReportDate(ctx.localeTag);
 
     const html = `
       <!DOCTYPE html>
@@ -192,50 +207,51 @@ export class PDFReportService {
       <body>
         <div class="doc-topbar"></div>
         <div class="report-header">
-          <h1>Reporte de inventario</h1>
-          <p class="meta"><strong>Sucursal:</strong> ${branchName}</p>
-          <p class="meta"><strong>Fecha:</strong> ${date}</p>
+          <h1>${L.title_inventory}</h1>
+          <p class="meta"><strong>${L.branch}:</strong> ${branchName}</p>
+          <p class="meta"><strong>${L.date}:</strong> ${date}</p>
         </div>
 
         ${stats ? `
         <div class="kpi-block">
-          <h2>Resumen general</h2>
+          <h2>${L.summary_general}</h2>
           <div class="kpi-row">
             <div class="kpi">
               <div class="stat-value">${stats.totalWines}</div>
-              <div class="stat-label">Vinos en catálogo</div>
+              <div class="stat-label">${L.wines_in_catalog}</div>
             </div>
             <div class="kpi">
               <div class="stat-value">${stats.totalBottles}</div>
-              <div class="stat-label">Botellas totales</div>
+              <div class="stat-label">${L.total_bottles}</div>
             </div>
             <div class="kpi">
               <div class="stat-value">${stats.totalValue > 0 ? `$${stats.totalValue.toFixed(2)}` : '—'}</div>
-              <div class="stat-label">Valor total</div>
+              <div class="stat-label">${L.total_value}</div>
             </div>
           </div>
         </div>
         ` : ''}
 
-        <h2 class="section-title">Detalle de inventario</h2>
+        <h2 class="section-title">${L.inventory_detail}</h2>
         <table class="report-table">
           <thead>
             <tr>
-              <th>Vino</th>
-              <th>País</th>
-              <th>Stock</th>
-              <th>Precio copa</th>
-              <th>Precio botella</th>
-              <th>Valor total</th>
+              <th>${L.col_wine}</th>
+              <th>${L.col_country}</th>
+              <th>${L.col_stock}</th>
+              <th>${L.col_glass_price}</th>
+              <th>${L.col_bottle_price}</th>
+              <th>${L.col_total_value}</th>
             </tr>
           </thead>
           <tbody>
             ${inventory.map(item => {
               const bottlePrice = item.price_by_bottle;
               const glassPrice = item.price_by_glass;
-              const bottleDisplay = isValidPrice(bottlePrice) ? `$${Number(bottlePrice).toFixed(2)}` : 'N/A';
-              const glassDisplay = isValidPrice(glassPrice) ? `$${Number(glassPrice).toFixed(2)}` : 'N/A';
+              const bottleDisplay = isValidPrice(bottlePrice) ? `$${Number(bottlePrice).toFixed(2)}` : L.na;
+              const glassDisplay = isValidPrice(glassPrice) ? `$${Number(glassPrice).toFixed(2)}` : L.na;
               const valueDisplay = isValidPrice(bottlePrice) ? `$${(item.stock_quantity * bottlePrice).toFixed(2)}` : '—';
+              const lowSuffix = item.stock_quantity < 5 ? L.low_stock : '';
               return `
               <tr>
                 <td>
@@ -244,7 +260,7 @@ export class PDFReportService {
                 </td>
                 <td>${item.wines.country}</td>
                 <td ${item.stock_quantity < 5 ? 'class="low-stock"' : ''}>
-                  ${item.stock_quantity} botellas${item.stock_quantity < 5 ? ' (bajo)' : ''}
+                  ${item.stock_quantity} ${L.bottles_suffix}${lowSuffix}
                 </td>
                 <td>${glassDisplay}</td>
                 <td>${bottleDisplay}</td>
@@ -256,8 +272,8 @@ export class PDFReportService {
         </table>
 
         <div class="doc-footer">
-          <p>Cellarium · Sistema de gestión de vinos</p>
-          <p>${new Date().toLocaleString('es-ES')}</p>
+          <p>${L.footer_brand}</p>
+          <p>${formatReportDateTime(ctx.localeTag)}</p>
         </div>
       </body>
       </html>
@@ -272,13 +288,11 @@ export class PDFReportService {
   static async generateSalesReport(
     branchName: string,
     metrics: BranchMetrics,
-    wineMetrics: WineMetrics[]
+    wineMetrics: WineMetrics[],
+    ctx: ReportPdfContext = defaultPdfCtx()
   ): Promise<string> {
-    const date = new Date().toLocaleDateString('es-ES', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
+    const L = ctx.labels;
+    const date = formatReportDate(ctx.localeTag);
 
     const topWines = wineMetrics
       .sort((a, b) => b.total_sales - a.total_sales)
@@ -295,39 +309,39 @@ export class PDFReportService {
       <body>
         <div class="doc-topbar"></div>
         <div class="report-header">
-          <h1>Análisis de ventas</h1>
-          <p class="meta"><strong>Sucursal:</strong> ${branchName}</p>
-          <p class="meta"><strong>Fecha:</strong> ${date}</p>
+          <h1>${L.title_sales_analysis}</h1>
+          <p class="meta"><strong>${L.branch}:</strong> ${branchName}</p>
+          <p class="meta"><strong>${L.date}:</strong> ${date}</p>
         </div>
 
         <div class="kpi-block">
-          <h2>Métricas generales</h2>
+          <h2>${L.general_metrics}</h2>
           <div class="kpi-row">
             <div class="kpi">
               <div class="stat-value">$${metrics.total_revenue.toFixed(2)}</div>
-              <div class="stat-label">Ingresos totales</div>
+              <div class="stat-label">${L.total_revenue}</div>
             </div>
             <div class="kpi">
               <div class="stat-value">${metrics.total_sales}</div>
-              <div class="stat-label">Ventas totales</div>
+              <div class="stat-label">${L.total_sales}</div>
             </div>
             <div class="kpi">
               <div class="stat-value">${metrics.unique_wines_sold}</div>
-              <div class="stat-label">Vinos vendidos</div>
+              <div class="stat-label">${L.wines_sold}</div>
             </div>
           </div>
         </div>
 
-        <h2 class="section-title">Top 10 vinos más vendidos</h2>
+        <h2 class="section-title">${L.top10_sold}</h2>
         <table class="report-table">
           <thead>
             <tr>
               <th>#</th>
-              <th>Vino</th>
-              <th>País</th>
-              <th>Ventas</th>
-              <th>Ingresos</th>
-              <th>Precio prom.</th>
+              <th>${L.col_wine}</th>
+              <th>${L.col_country}</th>
+              <th>${L.col_sales}</th>
+              <th>${L.col_revenue}</th>
+              <th>${L.col_avg_price}</th>
             </tr>
           </thead>
           <tbody>
@@ -339,7 +353,7 @@ export class PDFReportService {
                   <span class="wine-sub">${wine.grape_variety ?? ''}</span>
                 </td>
                 <td>${wine.country}</td>
-                <td>${wine.total_sales} u.</td>
+                <td>${wine.total_sales} ${L.units_abbr}</td>
                 <td>$${wine.total_revenue.toFixed(2)}</td>
                 <td>$${wine.avg_price.toFixed(2)}</td>
               </tr>
@@ -348,8 +362,8 @@ export class PDFReportService {
         </table>
 
         <div class="doc-footer">
-          <p>Cellarium · Sistema de gestión de vinos</p>
-          <p>${new Date().toLocaleString('es-ES')}</p>
+          <p>${L.footer_brand}</p>
+          <p>${formatReportDateTime(ctx.localeTag)}</p>
         </div>
       </body>
       </html>
@@ -361,7 +375,12 @@ export class PDFReportService {
   /**
    * Renderiza HTML a PDF con expo-print y comparte el archivo (mismo HTML que los generadores).
    */
-  static async printHtmlAndSharePdf(html: string, filenameBase: string): Promise<void> {
+  static async printHtmlAndSharePdf(
+    html: string,
+    filenameBase: string,
+    ctx: ReportPdfContext = defaultPdfCtx()
+  ): Promise<void> {
+    const L = ctx.labels;
     sentryFlowBreadcrumb('pdf_export_start', { filename_base: filenameBase });
     try {
       const { uri } = await Print.printToFileAsync({
@@ -391,12 +410,12 @@ export class PDFReportService {
 
       const canShare = await Sharing.isAvailableAsync();
       if (!canShare) {
-        throw new Error('Compartir no está disponible en este dispositivo');
+        throw new Error(L.share_unavailable);
       }
 
       await Sharing.shareAsync(shareUri, {
         mimeType: 'application/pdf',
-        dialogTitle: `Compartir reporte · ${truncated}`,
+        dialogTitle: shareDialogTitle(L, truncated),
         UTI: 'com.adobe.pdf',
       });
     } catch (error) {
@@ -417,12 +436,14 @@ export class PDFReportService {
   static async exportInventoryReport(
     branchName: string,
     inventory: InventoryItem[],
-    stats: InventoryStats | null
+    stats: InventoryStats | null,
+    ctx?: ReportPdfContext
   ): Promise<void> {
+    const pdfCtx = ctx ?? defaultPdfCtx();
     try {
-      const html = await this.generateInventoryReport(branchName, inventory, stats);
+      const html = await this.generateInventoryReport(branchName, inventory, stats, pdfCtx);
       const filename = `inventario_${branchName.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`;
-      await this.printHtmlAndSharePdf(html, filename);
+      await this.printHtmlAndSharePdf(html, filename, pdfCtx);
     } catch (error) {
       if (__DEV__) console.error('Error exporting inventory report:', error);
       throw error;
@@ -436,13 +457,11 @@ export class PDFReportService {
     branchName: string,
     period: { from: string; to: string; label: string },
     rows: EstimatedSalesRow[],
-    summary: { total_sold_estimated: number; total_revenue_estimated: number | null; total_received: number }
+    summary: { total_sold_estimated: number; total_revenue_estimated: number | null; total_received: number },
+    ctx: ReportPdfContext = defaultPdfCtx()
   ): string {
-    const date = new Date().toLocaleDateString('es-ES', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
+    const L = ctx.labels;
+    const date = formatReportDate(ctx.localeTag);
     const html = `
       <!DOCTYPE html>
       <html>
@@ -454,37 +473,37 @@ export class PDFReportService {
       <body>
         <div class="doc-topbar"></div>
         <div class="report-header">
-          <h1>Ventas estimadas</h1>
-          <p class="meta"><strong>Sucursal:</strong> ${branchName}</p>
-          <p class="meta"><strong>Periodo:</strong> ${period.label}</p>
-          <p class="meta"><strong>Generado:</strong> ${date}</p>
+          <h1>${L.title_estimated_sales}</h1>
+          <p class="meta"><strong>${L.branch}:</strong> ${branchName}</p>
+          <p class="meta"><strong>${L.period}:</strong> ${period.label}</p>
+          <p class="meta"><strong>${L.generated}:</strong> ${date}</p>
         </div>
         <div class="kpi-block">
-          <h2>Resumen</h2>
+          <h2>${L.summary}</h2>
           <div class="kpi-row">
             <div class="kpi">
               <div class="stat-value">${summary.total_sold_estimated}</div>
-              <div class="stat-label">Botellas vendidas (est.)</div>
+              <div class="stat-label">${L.bottles_sold_est}</div>
             </div>
             <div class="kpi">
               <div class="stat-value">${summary.total_revenue_estimated != null ? `$${summary.total_revenue_estimated.toFixed(2)}` : '—'}</div>
-              <div class="stat-label">Ingresos estimados</div>
+              <div class="stat-label">${L.estimated_revenue}</div>
             </div>
             <div class="kpi">
               <div class="stat-value">${summary.total_received}</div>
-              <div class="stat-label">Botellas recibidas</div>
+              <div class="stat-label">${L.bottles_received}</div>
             </div>
           </div>
         </div>
-        <h2 class="section-title">Detalle por vino</h2>
+        <h2 class="section-title">${L.detail_by_wine}</h2>
         <table class="report-table">
           <thead>
             <tr>
-              <th>Vino</th>
-              <th>Vendidas (est.)</th>
-              <th>Recibidas</th>
-              <th>Último conteo</th>
-              <th>Ingresos est.</th>
+              <th>${L.col_wine}</th>
+              <th>${L.col_sold_est}</th>
+              <th>${L.col_received}</th>
+              <th>${L.col_last_count}</th>
+              <th>${L.col_revenue_est}</th>
             </tr>
           </thead>
           <tbody>
@@ -493,14 +512,14 @@ export class PDFReportService {
                 <td>${r.wine_name}</td>
                 <td>${r.sold_estimated_total}</td>
                 <td>${r.received_total}</td>
-                <td>${r.last_count_at ? new Date(r.last_count_at).toLocaleDateString('es-ES') : '—'}</td>
+                <td>${r.last_count_at ? formatReportDate(ctx.localeTag, new Date(r.last_count_at)) : '—'}</td>
                 <td>${r.revenue_estimated != null ? `$${r.revenue_estimated.toFixed(2)}` : '—'}</td>
               </tr>
             `).join('')}
           </tbody>
         </table>
         <div class="doc-footer">
-          <p>Cellarium · Ventas estimadas a partir de conteos físicos</p>
+          <p>${L.footer_estimated}</p>
         </div>
       </body>
       </html>
@@ -515,12 +534,14 @@ export class PDFReportService {
     branchName: string,
     period: { from: string; to: string; label: string },
     rows: EstimatedSalesRow[],
-    summary: { total_sold_estimated: number; total_revenue_estimated: number | null; total_received: number }
+    summary: { total_sold_estimated: number; total_revenue_estimated: number | null; total_received: number },
+    ctx?: ReportPdfContext
   ): Promise<void> {
+    const pdfCtx = ctx ?? defaultPdfCtx();
     try {
-      const html = this.generateEstimatedSalesReport(branchName, period, rows, summary);
+      const html = this.generateEstimatedSalesReport(branchName, period, rows, summary, pdfCtx);
       const filename = `ventas_estimadas_${branchName.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`;
-      await this.printHtmlAndSharePdf(html, filename);
+      await this.printHtmlAndSharePdf(html, filename, pdfCtx);
     } catch (error) {
       if (__DEV__) console.error('Error exporting estimated sales report:', error);
       throw error;
@@ -535,11 +556,13 @@ export class PDFReportService {
     branchName: string,
     period: { from: string; to: string; label: string },
     rows: SalesFromCountsRow[],
-    summary: SalesFromCountsSummary
+    summary: SalesFromCountsSummary,
+    ctx: ReportPdfContext = defaultPdfCtx()
   ): string {
-    const date = new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' });
-    const startAt = summary.count_start_at ? new Date(summary.count_start_at).toLocaleDateString('es-ES') : '—';
-    const endAt = summary.count_end_at ? new Date(summary.count_end_at).toLocaleDateString('es-ES') : '—';
+    const L = ctx.labels;
+    const date = formatReportDate(ctx.localeTag);
+    const startAt = summary.count_start_at ? formatReportDate(ctx.localeTag, new Date(summary.count_start_at)) : '—';
+    const endAt = summary.count_end_at ? formatReportDate(ctx.localeTag, new Date(summary.count_end_at)) : '—';
     const revenueStr = summary.total_revenue_estimated != null && isValidPrice(summary.total_revenue_estimated)
       ? formatCurrencyMXN(summary.total_revenue_estimated)
       : '—';
@@ -556,58 +579,58 @@ export class PDFReportService {
       <body>
         <div class="doc-topbar"></div>
         <div class="report-header">
-          <h1>Ventas estimadas (cortes)</h1>
-          <p class="meta"><strong>Sucursal:</strong> ${branchName}</p>
-          <p class="meta"><strong>Periodo:</strong> ${period.label}</p>
-          <p class="meta"><strong>Conteo inicial:</strong> ${startAt} · <strong>Conteo final:</strong> ${endAt}</p>
-          <p class="header-note">Estimado con base en cortes físicos y movimientos registrados.</p>
-          <p class="meta"><strong>Generado:</strong> ${date}</p>
+          <h1>${L.title_sales_from_counts}</h1>
+          <p class="meta"><strong>${L.branch}:</strong> ${branchName}</p>
+          <p class="meta"><strong>${L.period}:</strong> ${period.label}</p>
+          <p class="meta"><strong>${L.count_start}:</strong> ${startAt} · <strong>${L.count_end}:</strong> ${endAt}</p>
+          <p class="header-note">${L.header_note_counts}</p>
+          <p class="meta"><strong>${L.generated}:</strong> ${date}</p>
         </div>
         <div class="kpi-block">
-          <h2>Resumen</h2>
+          <h2>${L.summary}</h2>
           <div class="kpi-row kpi-row-4">
             <div class="kpi">
               <div class="stat-value">${summary.total_sold_estimated}</div>
-              <div class="stat-label">Consumo estimado</div>
+              <div class="stat-label">${L.estimated_consumption}</div>
             </div>
             <div class="kpi">
               <div class="stat-value">${revenueStr}</div>
-              <div class="stat-label">Ingresos estimados</div>
+              <div class="stat-label">${L.estimated_revenue}</div>
             </div>
             <div class="kpi">
               <div class="stat-value">${summary.total_entries}</div>
-              <div class="stat-label">Entradas</div>
+              <div class="stat-label">${L.entries}</div>
             </div>
             <div class="kpi">
               <div class="stat-value">${summary.total_special_outs}</div>
-              <div class="stat-label">Salidas especiales</div>
+              <div class="stat-label">${L.special_outs}</div>
             </div>
           </div>
           ${unpricedTotal > 0 || unpricedCount > 0 ? `
           <p class="note-inline">
-            <strong>Consumo sin precio:</strong> ${unpricedTotal} botellas
-            ${unpricedCount > 0 ? ` · <strong>Vinos sin precio:</strong> ${unpricedCount}` : ''}
+            <strong>${L.unpriced_consumption}:</strong> ${unpricedTotal} ${L.bottles_suffix}
+            ${unpricedCount > 0 ? ` · <strong>${L.wines_without_price}:</strong> ${unpricedCount}` : ''}
           </p>
           ` : ''}
         </div>
-        <h2 class="section-title">Detalle por vino</h2>
+        <h2 class="section-title">${L.detail_by_wine}</h2>
         <table class="report-table table-tight">
           <thead>
             <tr>
-              <th>Vino</th>
-              <th>St. ini.</th>
-              <th>Entr.</th>
-              <th>Sal. esp.</th>
-              <th>St. fin</th>
-              <th>Consumo</th>
-              <th>Ingresos</th>
+              <th>${L.col_wine}</th>
+              <th>${L.col_st_start}</th>
+              <th>${L.col_entries}</th>
+              <th>${L.col_special_out}</th>
+              <th>${L.col_st_end}</th>
+              <th>${L.col_consumption}</th>
+              <th>${L.col_revenue}</th>
             </tr>
           </thead>
           <tbody>
             ${rows.map((r) => {
               const hasPrice = r.revenue_estimated != null && isValidPrice(r.revenue_estimated);
               const revStr = hasPrice ? formatCurrencyMXN(r.revenue_estimated!) : '—';
-              const revCell = hasPrice ? revStr : (r.sold_estimated > 0 ? '— (s/p)' : '—');
+              const revCell = hasPrice ? revStr : (r.sold_estimated > 0 ? L.no_price_abbr : '—');
               return `
               <tr>
                 <td>${r.wine_name}</td>
@@ -623,7 +646,7 @@ export class PDFReportService {
           </tbody>
         </table>
         <div class="doc-footer">
-          <p>Cellarium · Ventas estimadas (cortes físicos)</p>
+          <p>${L.footer_sales_counts}</p>
         </div>
       </body>
       </html>
@@ -635,12 +658,14 @@ export class PDFReportService {
     branchName: string,
     period: { from: string; to: string; label: string },
     rows: SalesFromCountsRow[],
-    summary: SalesFromCountsSummary
+    summary: SalesFromCountsSummary,
+    ctx?: ReportPdfContext
   ): Promise<void> {
+    const pdfCtx = ctx ?? defaultPdfCtx();
     try {
-      const html = this.generateSalesFromCountsReport(branchName, period, rows, summary);
+      const html = this.generateSalesFromCountsReport(branchName, period, rows, summary, pdfCtx);
       const filename = `ventas_cortes_${branchName.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`;
-      await this.printHtmlAndSharePdf(html, filename);
+      await this.printHtmlAndSharePdf(html, filename, pdfCtx);
     } catch (error) {
       if (__DEV__) console.error('Error exporting sales from counts report:', error);
       throw error;
@@ -653,9 +678,11 @@ export class PDFReportService {
   static generateBranchComparisonReport(
     period: { from: string; to: string; label: string },
     branches: BranchComparisonRow[],
-    summary: BranchComparisonSummary
+    summary: BranchComparisonSummary,
+    ctx: ReportPdfContext = defaultPdfCtx()
   ): string {
-    const date = new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' });
+    const L = ctx.labels;
+    const date = formatReportDate(ctx.localeTag);
     const totalRevenue = summary.total_revenue_estimated ?? 0;
     const revenueStr = totalRevenue > 0 ? formatCurrencyMXN(totalRevenue) : '—';
     const sortedBranches = [...branches].sort((a, b) => (b.total_revenue_estimated ?? 0) - (a.total_revenue_estimated ?? 0));
@@ -666,9 +693,9 @@ export class PDFReportService {
       const contributionPct = totalRevenue > 0 && (branch.total_revenue_estimated ?? 0) >= 0
         ? ((branch.total_revenue_estimated ?? 0) / totalRevenue) * 100
         : 0;
-      const status = hasData ? '' : 'Datos insuficientes';
-      const topWine = branch.top_wine ? `${branch.top_wine.wine_name} (${branch.top_wine.sold_estimated} bot.)` : '—';
-      const bottomWine = branch.bottom_wine ? `${branch.bottom_wine.wine_name} (${branch.bottom_wine.sold_estimated} bot.)` : '—';
+      const status = hasData ? '' : L.insufficient_data;
+      const topWine = branch.top_wine ? fmtWineMovement(L, branch.top_wine.wine_name, branch.top_wine.sold_estimated) : '—';
+      const bottomWine = branch.bottom_wine ? fmtWineMovement(L, branch.bottom_wine.wine_name, branch.bottom_wine.sold_estimated) : '—';
       return `
         <tr>
           <td>${index + 1}</td>
@@ -694,44 +721,44 @@ export class PDFReportService {
       <body>
         <div class="doc-topbar"></div>
         <div class="report-header">
-          <h1>Comparativo entre sucursales</h1>
-          <p class="meta"><strong>Periodo:</strong> ${period.label}</p>
-          <p class="header-note">Estimado con base en cortes físicos y movimientos registrados.</p>
-          <p class="meta"><strong>Generado:</strong> ${date}</p>
+          <h1>${L.title_branch_comparison}</h1>
+          <p class="meta"><strong>${L.period}:</strong> ${period.label}</p>
+          <p class="header-note">${L.header_note_counts}</p>
+          <p class="meta"><strong>${L.generated}:</strong> ${date}</p>
         </div>
         <div class="kpi-block">
-          <h2>Resumen</h2>
+          <h2>${L.summary}</h2>
           <div class="kpi-row kpi-stack">
             <div class="kpi">
-              <span class="stat-label">Mejor sucursal</span>
+              <span class="stat-label">${L.best_branch}</span>
               <div class="stat-value">${summary.best_branch}</div>
             </div>
             <div class="kpi">
-              <span class="stat-label">A mejorar</span>
+              <span class="stat-label">${L.needs_improvement}</span>
               <div class="stat-value">${summary.worst_branch}</div>
             </div>
             <div class="kpi">
-              <span class="stat-label">Ingresos estimados totales</span>
+              <span class="stat-label">${L.total_estimated_revenue}</span>
               <div class="stat-value emphasis">${revenueStr}</div>
             </div>
             <div class="kpi">
-              <span class="stat-label">Consumo estimado total</span>
+              <span class="stat-label">${L.total_estimated_consumption}</span>
               <div class="stat-value emphasis">${summary.total_consumption_estimated}</div>
             </div>
           </div>
         </div>
-        <h2 class="section-title">Detalle por sucursal</h2>
+        <h2 class="section-title">${L.detail_by_branch}</h2>
         <table class="report-table table-tight">
           <thead>
             <tr>
               <th>#</th>
-              <th>Sucursal</th>
-              <th>Ing. est.</th>
-              <th>Cons.</th>
-              <th>%</th>
-              <th>Más movido</th>
-              <th>Menos movido</th>
-              <th>Notas</th>
+              <th>${L.col_branch}</th>
+              <th>${L.col_rev_est}</th>
+              <th>${L.col_cons}</th>
+              <th>${L.col_pct}</th>
+              <th>${L.col_most_moved}</th>
+              <th>${L.col_least_moved}</th>
+              <th>${L.col_notes}</th>
             </tr>
           </thead>
           <tbody>
@@ -739,7 +766,7 @@ export class PDFReportService {
           </tbody>
         </table>
         <div class="doc-footer">
-          <p>Cellarium · Comparativo (cortes físicos)</p>
+          <p>${L.footer_comparison}</p>
         </div>
       </body>
       </html>
@@ -750,12 +777,14 @@ export class PDFReportService {
   static async exportBranchComparisonReport(
     period: { from: string; to: string; label: string },
     branches: BranchComparisonRow[],
-    summary: BranchComparisonSummary
+    summary: BranchComparisonSummary,
+    ctx?: ReportPdfContext
   ): Promise<void> {
+    const pdfCtx = ctx ?? defaultPdfCtx();
     try {
-      const html = this.generateBranchComparisonReport(period, branches, summary);
+      const html = this.generateBranchComparisonReport(period, branches, summary, pdfCtx);
       const filename = `comparativo_sucursales_${Date.now()}`;
-      await this.printHtmlAndSharePdf(html, filename);
+      await this.printHtmlAndSharePdf(html, filename, pdfCtx);
     } catch (error) {
       if (__DEV__) console.error('Error exporting branch comparison report:', error);
       throw error;
@@ -768,19 +797,17 @@ export class PDFReportService {
   static async exportSalesReport(
     branchName: string,
     metrics: BranchMetrics,
-    wineMetrics: WineMetrics[]
+    wineMetrics: WineMetrics[],
+    ctx?: ReportPdfContext
   ): Promise<void> {
+    const pdfCtx = ctx ?? defaultPdfCtx();
     try {
-      const html = await this.generateSalesReport(branchName, metrics, wineMetrics);
+      const html = await this.generateSalesReport(branchName, metrics, wineMetrics, pdfCtx);
       const filename = `ventas_${branchName.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`;
-      await this.printHtmlAndSharePdf(html, filename);
+      await this.printHtmlAndSharePdf(html, filename, pdfCtx);
     } catch (error) {
       if (__DEV__) console.error('Error exporting sales report:', error);
       throw error;
     }
   }
 }
-
-
-
-

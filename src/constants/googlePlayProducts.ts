@@ -30,3 +30,6 @@ export const GOOGLE_PLAY_ALL_SUBSCRIPTION_SKUS = [
 ] as const;
 
 export type GooglePlanUiId = 'bistro' | 'trattoria' | 'grand_maison';
+
+/** Tag de oferta en Play Console (prueba gratuita 1 mes, clientes nuevos). */
+export const FREE_MONTH_OFFER_TAG = 'free-month' as const;

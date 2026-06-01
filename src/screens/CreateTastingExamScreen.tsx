@@ -16,6 +16,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList, Wine } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranch } from '../contexts/BranchContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { TastingExamService } from '../services/TastingExamService';
 import { canCreateTastingExam } from '../utils/rolePermissions';
 
@@ -59,17 +60,16 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { currentBranch } = useBranch();
+  const { t } = useLanguage();
   const [name, setName] = useState('');
 
   if (user && !canCreateTastingExam(user.role as 'owner' | 'gerente' | 'sommelier' | 'supervisor' | 'personal')) {
     return (
       <View style={styles.guardContainer}>
-        <Text style={styles.guardTitle}>Sin permiso</Text>
-        <Text style={styles.guardSubtitle}>
-          Solo propietarios, gerentes y sommeliers pueden crear exámenes de cata.
-        </Text>
+        <Text style={styles.guardTitle}>{t('tasting.no_permission_title')}</Text>
+        <Text style={styles.guardSubtitle}>{t('tasting.no_permission_create')}</Text>
         <TouchableOpacity style={styles.guardButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.guardButtonText}>Volver</Text>
+          <Text style={styles.guardButtonText}>{t('tasting.back')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -94,7 +94,7 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
       setAvailableWines(wines);
     } catch (error: any) {
       console.error('Error loading wines:', error);
-      Alert.alert('Error', error.message || 'No se pudieron cargar los vinos');
+      Alert.alert(t('common.error'), error.message || t('tasting.error_load_wines'));
     } finally {
       setLoading(false);
     }
@@ -112,17 +112,17 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleSubmit = async () => {
     if (!name.trim()) {
-      Alert.alert('Error', 'El nombre del examen es requerido');
+      Alert.alert(t('common.error'), t('tasting.error_name_required'));
       return;
     }
 
     if (selectedWineIds.size === 0) {
-      Alert.alert('Error', 'Debes seleccionar al menos un vino para el examen');
+      Alert.alert(t('common.error'), t('tasting.error_select_wine'));
       return;
     }
 
     if (!currentBranch || !user) {
-      Alert.alert('Error', 'No hay sucursal o usuario seleccionado');
+      Alert.alert(t('common.error'), t('tasting.error_no_branch_user'));
       return;
     }
 
@@ -139,15 +139,15 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
         wineIds: Array.from(selectedWineIds),
       });
 
-      Alert.alert('Éxito', 'Examen creado correctamente', [
+      Alert.alert(t('msg.success'), t('tasting.success_created'), [
         {
-          text: 'OK',
+          text: t('common.ok'),
           onPress: () => navigation.goBack(),
         },
       ]);
     } catch (error: any) {
       console.error('Error creating exam:', error);
-      Alert.alert('Error', error.message || 'No se pudo crear el examen');
+      Alert.alert(t('common.error'), error.message || t('tasting.error_create'));
     } finally {
       setSubmitting(false);
     }
@@ -163,13 +163,13 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
           style={styles.headerGradient}
         >
           <View style={styles.headerCenter}>
-            <Text style={styles.headerTitle}>Crear Examen de Cata</Text>
-            <Text style={styles.headerSubtitle}>Cargando vinos...</Text>
+            <Text style={styles.headerTitle}>{t('tasting.create_title')}</Text>
+            <Text style={styles.headerSubtitle}>{t('tasting.loading_wines')}</Text>
           </View>
         </LinearGradient>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={CELLARIUM.primary} />
-          <Text style={styles.loadingText}>Cargando vinos...</Text>
+          <Text style={styles.loadingText}>{t('tasting.loading_wines')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -184,10 +184,8 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
         style={styles.headerGradient}
       >
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Crear Examen de Cata</Text>
-          <Text style={styles.headerSubtitle}>
-            Selecciona los vinos que formarán parte de este examen
-          </Text>
+          <Text style={styles.headerTitle}>{t('tasting.create_title')}</Text>
+          <Text style={styles.headerSubtitle}>{t('tasting.create_subtitle')}</Text>
         </View>
       </LinearGradient>
 
@@ -197,20 +195,20 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.formSection}>
-          <Text style={styles.label}>Nombre del Examen *</Text>
+          <Text style={styles.label}>{t('tasting.name_label')}</Text>
           <TextInput
             style={styles.input}
-            placeholder="Ej: Examen de Cata - Vinos Tintos"
+            placeholder={t('tasting.name_placeholder')}
             placeholderTextColor={CELLARIUM.muted}
             value={name}
             onChangeText={setName}
             maxLength={100}
           />
 
-          <Text style={styles.label}>Descripción (opcional)</Text>
+          <Text style={styles.label}>{t('tasting.description_label')}</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
-            placeholder="Descripción del examen..."
+            placeholder={t('tasting.description_placeholder')}
             placeholderTextColor={CELLARIUM.muted}
             value={description}
             onChangeText={setDescription}
@@ -222,18 +220,16 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
 
         <View style={styles.winesSection}>
           <Text style={styles.sectionTitle}>
-            Vinos del Catálogo ({selectedWineIds.size} seleccionado{selectedWineIds.size !== 1 ? 's' : ''})
+            {selectedWineIds.size === 1
+              ? t('tasting.catalog_wines_one').replace('{count}', String(selectedWineIds.size))
+              : t('tasting.catalog_wines_many').replace('{count}', String(selectedWineIds.size))}
           </Text>
-          <Text style={styles.sectionSubtitle}>
-            Selecciona los vinos que formarán parte de este examen
-          </Text>
+          <Text style={styles.sectionSubtitle}>{t('tasting.create_subtitle')}</Text>
 
           {availableWines.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>No hay vinos disponibles en el catálogo</Text>
-              <Text style={styles.emptySubtext}>
-                Agrega vinos al catálogo desde "Catálogo Cellarium" o "Escanear botella"
-              </Text>
+              <Text style={styles.emptyText}>{t('tasting.empty_no_wines')}</Text>
+              <Text style={styles.emptySubtext}>{t('tasting.empty_add_wines_hint')}</Text>
             </View>
           ) : (
             availableWines.map((wine) => {
@@ -262,7 +258,9 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
                       <Text style={styles.wineWinery}>{wine.winery}</Text>
                     )}
                     {wine.vintage && (
-                      <Text style={styles.wineMeta}>Añada: {wine.vintage}</Text>
+                      <Text style={styles.wineMeta}>
+                        {t('tasting.vintage_label').replace('{vintage}', String(wine.vintage))}
+                      </Text>
                     )}
                     {wine.type && (
                       <Text style={styles.wineMeta}>
@@ -286,7 +284,7 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
             disabled={submitting}
             activeOpacity={0.85}
           >
-            <Text style={styles.cancelButtonText}>Cancelar</Text>
+            <Text style={styles.cancelButtonText}>{t('tasting.cancel')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.button, styles.submitButton, submitting && styles.buttonDisabled]}
@@ -297,7 +295,7 @@ const CreateTastingExamScreen: React.FC<Props> = ({ navigation }) => {
             {submitting ? (
               <ActivityIndicator color="#fff" size="small" />
             ) : (
-              <Text style={styles.submitButtonText}>Crear Examen</Text>
+              <Text style={styles.submitButtonText}>{t('tasting.create_button')}</Text>
             )}
           </TouchableOpacity>
         </View>

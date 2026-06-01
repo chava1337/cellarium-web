@@ -13,6 +13,7 @@ import {
 import { Wine } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranch } from '../contexts/BranchContext';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface WineGlassSaleConfigProps {
   wine: Wine;
@@ -29,13 +30,14 @@ const WineGlassSaleConfig: React.FC<WineGlassSaleConfigProps> = ({
 }) => {
   const { user } = useAuth();
   const { currentBranch } = useBranch();
+  const { t } = useLanguage();
   
   const [glassSaleEnabled, setGlassSaleEnabled] = useState(wine.available_by_glass || false);
   const [glassPrice, setGlassPrice] = useState(wine.price_per_glass?.toString() || '');
 
   const handleSave = () => {
     if (glassSaleEnabled && (!glassPrice || isNaN(Number(glassPrice)) || Number(glassPrice) <= 0)) {
-      Alert.alert('Error', 'Por favor ingresa un precio válido para la copa');
+      Alert.alert(t('common.error'), t('wine.config_glass_sale_error'));
       return;
     }
 
@@ -60,7 +62,7 @@ const WineGlassSaleConfig: React.FC<WineGlassSaleConfigProps> = ({
       <View style={styles.modalOverlay}>
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Configurar Venta por Copa</Text>
+            <Text style={styles.modalTitle}>{t('wine.config_glass_sale')}</Text>
             <Text style={styles.wineName}>{wine.name}</Text>
           </View>
 
@@ -68,9 +70,9 @@ const WineGlassSaleConfig: React.FC<WineGlassSaleConfigProps> = ({
             <View style={styles.configSection}>
               <View style={styles.switchRow}>
                 <View style={styles.switchLabel}>
-                  <Text style={styles.switchTitle}>Venta por Copa</Text>
+                  <Text style={styles.switchTitle}>{t('wine.glass_sale')}</Text>
                   <Text style={styles.switchDescription}>
-                    Habilitar la venta de este vino por copa
+                    {t('wine.enable_glass_sale')}
                   </Text>
                 </View>
                 <Switch
@@ -83,7 +85,7 @@ const WineGlassSaleConfig: React.FC<WineGlassSaleConfigProps> = ({
 
               {glassSaleEnabled && (
                 <View style={styles.priceSection}>
-                  <Text style={styles.priceLabel}>Precio por Copa</Text>
+                  <Text style={styles.priceLabel}>{t('wine.price_glass')}</Text>
                   <View style={styles.priceInputContainer}>
                     <Text style={styles.currencySymbol}>$</Text>
                     <TextInput
@@ -96,7 +98,10 @@ const WineGlassSaleConfig: React.FC<WineGlassSaleConfigProps> = ({
                     />
                   </View>
                   <Text style={styles.priceHint}>
-                    Precio sugerido: ${((wine.price || 0) / 5).toFixed(2)} (1/5 del precio de botella)
+                    {t('wine.glass_price_hint').replace(
+                      '{price}',
+                      ((wine.price || 0) / 5).toFixed(2)
+                    )}
                   </Text>
                 </View>
               )}
@@ -108,13 +113,13 @@ const WineGlassSaleConfig: React.FC<WineGlassSaleConfigProps> = ({
               style={[styles.button, styles.cancelButton]}
               onPress={handleCancel}
             >
-              <Text style={styles.cancelButtonText}>Cancelar</Text>
+              <Text style={styles.cancelButtonText}>{t('btn.cancel')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.button, styles.saveButton]}
               onPress={handleSave}
             >
-              <Text style={styles.saveButtonText}>Guardar</Text>
+              <Text style={styles.saveButtonText}>{t('btn.save')}</Text>
             </TouchableOpacity>
           </View>
         </View>

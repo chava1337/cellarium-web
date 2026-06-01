@@ -19,6 +19,7 @@ import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-g
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { useSharedValue, useAnimatedStyle } from 'react-native-reanimated';
 import { CELLARIUM } from '../theme/cellariumTheme';
+import { useLanguage } from '../contexts/LanguageContext';
 
 const FRAME_WIDTH_RATIO = 0.88;
 const FRAME_MAX_WIDTH = 320;
@@ -40,6 +41,7 @@ export const CropImageModal: React.FC<CropImageModalProps> = ({
   onCancel,
   onConfirm,
 }) => {
+  const { t } = useLanguage();
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const [cropAreaSize, setCropAreaSize] = useState<{ w: number; h: number } | null>(null);
   const [isCropping, setIsCropping] = useState(false);
@@ -65,7 +67,7 @@ export const CropImageModal: React.FC<CropImageModalProps> = ({
     Image.getSize(
       imageUri,
       (w, h) => setImageSize({ width: w, height: h }),
-      () => setError('No se pudo cargar la imagen')
+      () => setError(t('crop.load_error'))
     );
     scale.value = 1;
     translateX.value = 0;
@@ -174,9 +176,9 @@ export const CropImageModal: React.FC<CropImageModalProps> = ({
         <View style={[styles.overlay, { paddingTop: insets.top, paddingBottom: bottomPad }]}>
           <View style={styles.header}>
             <TouchableOpacity onPress={onCancel} style={styles.headerBtn}>
-              <Text style={styles.cancelText}>Cancelar</Text>
+              <Text style={styles.cancelText}>{t('btn.cancel')}</Text>
             </TouchableOpacity>
-            <Text style={styles.title}>Recortar</Text>
+            <Text style={styles.title}>{t('crop.title')}</Text>
             <TouchableOpacity
               onPress={handleConfirm}
               disabled={!imageSize || !hasCropArea || isCropping}
@@ -185,7 +187,7 @@ export const CropImageModal: React.FC<CropImageModalProps> = ({
               {isCropping ? (
                 <ActivityIndicator size="small" color={CELLARIUM.primary} />
               ) : (
-                <Text style={styles.useText}>Usar foto</Text>
+                <Text style={styles.useText}>{t('crop.use_photo')}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -207,7 +209,7 @@ export const CropImageModal: React.FC<CropImageModalProps> = ({
               ) : (
                 <>
                   <Text style={styles.hintText} pointerEvents="none">
-                    Mueve y acerca/aleja para encuadrar
+                    {t('crop.hint')}
                   </Text>
                   {/* Overlay oscuro fuera del marco */}
                   <View style={[styles.overlayStrip, { left: 0, top: 0, width: containerW, height: cropY }]} pointerEvents="none" />

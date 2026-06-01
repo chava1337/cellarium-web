@@ -19,6 +19,7 @@ import { consumePendingQrPayload } from '../utils/pendingQrPayload';
 import { StatusBar } from 'expo-status-bar';
 import CellariumLoader from '../components/CellariumLoader';
 import { captureCriticalError } from '../utils/sentryContext';
+import { useLanguage } from '../contexts/LanguageContext';
 
 /** Overlay de diagnóstico QR: desactivado; el comensal solo ve la copa y "Abriendo menú...". Para depurar usar logs en consola (__DEV__). */
 const QR_DEBUG_OVERLAY = false;
@@ -96,8 +97,9 @@ function maskToken(token: string): string {
 }
 
 const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
+  const { t } = useLanguage();
   const [status, setStatus] = useState<'validating' | 'success' | 'error'>('validating');
-  const [message, setMessage] = useState('Validando código QR...');
+  const [message, setMessage] = useState(t('auth.qr.validating'));
   const [deepLinkUrl, setDeepLinkUrl] = useState<string | null>(null);
   const deepLinkUrlRef = useRef<string | null>(null);
   const processedRef = useRef(false);
@@ -271,7 +273,7 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         setDebug({ currentStep: 'error', finalError: 'sin payload' });
         if (__DEV__) console.log('[QrProcessor] fuente final: none — sin payload (params, pending, URL, retry, storage)');
         setStatus('error');
-        setMessage('Código QR inválido. Por favor, escanea de nuevo.');
+        setMessage(t('auth.qr.invalid_rescan'));
         setTimeout(() => navigation.navigate('Welcome'), 3000);
         return;
       }
@@ -328,7 +330,7 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
           if (__DEV__) console.log('[QrProcessor] request resuelto (staff) → AdminRegistration');
           setDebug({ currentStep: 'navigating', navigationTriggered: 'triggered' });
           setStatus('success');
-          setMessage('Invitación de administrador validada');
+          setMessage(t('auth.qr.admin_invite_validated'));
           setTimeout(() => {
             navigation.replace('AdminRegistration', {
               qrToken: tokenToValidate,
@@ -344,15 +346,15 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         const errCode = code ?? (statusCode === 404 ? 'TOKEN_NOT_FOUND' : statusCode === 410 ? 'TOKEN_EXPIRED' : statusCode === 409 ? 'TOKEN_USED' : null);
         setDebug({ currentStep: 'error', finalError: errCode ?? resolveError?.message ?? 'staff fail' });
         if (errCode === 'TOKEN_USED' || resolveData?.code === 'TOKEN_USED') {
-          Alert.alert('Código ya utilizado', 'Este código de invitación ya fue utilizado. Solicita uno nuevo al administrador.');
+          Alert.alert(t('auth.qr.token_used_title'), t('auth.qr.token_used_body'));
         } else if (errCode === 'TOKEN_EXPIRED' || resolveData?.code === 'TOKEN_EXPIRED') {
-          Alert.alert('Código expirado', 'Este código de invitación ha expirado. Solicita uno nuevo al administrador.');
+          Alert.alert(t('auth.qr.token_expired_title'), t('auth.qr.token_expired_body'));
         } else if (errCode === 'TOKEN_NOT_FOUND' || resolveData?.code === 'TOKEN_NOT_FOUND') {
-          Alert.alert('Código inválido', 'No se encontró este código de invitación. Verifica el código o solicita uno nuevo.');
+          Alert.alert(t('auth.qr.token_not_found_title'), t('auth.qr.token_not_found_body'));
         } else if (resolveData?.code === 'TOKEN_LIMIT_REACHED') {
-          Alert.alert('Límite alcanzado', 'Este código alcanzó su límite de usos. Solicita uno nuevo.');
+          Alert.alert(t('auth.qr.token_limit_title'), t('auth.qr.token_limit_body'));
         } else {
-          setMessage(resolveData?.code || resolveError?.message || 'Error al validar invitación');
+          setMessage(resolveData?.code || resolveError?.message || t('auth.qr.process_error'));
         }
         setStatus('error');
         setTimeout(() => navigation.navigate('Welcome'), 3000);
@@ -366,9 +368,9 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         if (trimmed.length < 4) {
           setDebug({ currentStep: 'error', finalError: 'token corto' });
           if (__DEV__) console.log('[QrProcessor] error real: token guest demasiado corto');
-          Alert.alert('Código inválido', 'El código es demasiado corto. Escanea el QR de nuevo.');
+          Alert.alert(t('auth.qr.invalid_code_title'), t('auth.qr.invalid_short_body'));
           setStatus('error');
-          setMessage('Código inválido');
+          setMessage(t('auth.qr.invalid'));
           setTimeout(() => navigation.navigate('Welcome'), 3000);
           return;
         }
@@ -388,12 +390,12 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         setDebug({ currentStep: 'response', requestStarted: 'done', httpStatus: guestMenuStatus, responseSummary: guestMenuOk ? 'ok' : 'error', navigationTriggered: guestMenuOk ? 'triggered' : undefined });
         if (!guestMenuOk) {
           setStatus('error');
-          setMessage('Código expirado o inválido');
+          setMessage(t('auth.qr.expired_invalid'));
           setTimeout(() => navigation.navigate('Welcome'), 3000);
           return;
         }
         setStatus('success');
-        setMessage('Cargando menú...');
+        setMessage(t('auth.qr.loading_menu'));
         const guestParams = { isGuest: true as const, guestToken: trimmed };
         if (__DEV__) console.log('[QrProcessor] NAV antes replace(WineCatalog)', { guestTokenLen: trimmed.length });
         setTimeout(() => {
@@ -407,7 +409,7 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
       const trimmed = tokenToValidate.trim();
       if (trimmed.length < 4) {
         setStatus('error');
-        setMessage('Código inválido');
+        setMessage(t('auth.qr.invalid'));
         setTimeout(() => navigation.navigate('Welcome'), 3000);
         return;
       }
@@ -433,7 +435,7 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         if (__DEV__) console.log('[QrProcessor] request resuelto (legacy public-menu) → WineCatalog');
         setDebug({ navigationTriggered: 'triggered', currentStep: 'navigating' });
         setStatus('success');
-        setMessage('Cargando menú...');
+        setMessage(t('auth.qr.loading_menu'));
         const legacyGuestParams = { isGuest: true as const, guestToken: trimmed };
         if (__DEV__) console.log('[QrProcessor] NAV antes replace(WineCatalog) legacy', { guestTokenLen: trimmed.length });
         setTimeout(() => {
@@ -472,7 +474,7 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         if (__DEV__) console.log('[QrProcessor] request resuelto (legacy resolve-qr staff) → AdminRegistration');
         setDebug({ currentStep: 'navigating', navigationTriggered: 'triggered' });
         setStatus('success');
-        setMessage('Invitación de administrador validada');
+        setMessage(t('auth.qr.admin_invite_validated'));
         setTimeout(() => {
           navigation.replace('AdminRegistration', {
             qrToken: trimmed,
@@ -490,21 +492,21 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
       const errCode = code ?? (statusCode === 404 ? 'TOKEN_NOT_FOUND' : statusCode === 410 ? 'TOKEN_EXPIRED' : statusCode === 409 ? 'TOKEN_USED' : null);
 
       if (errCode === 'TOKEN_USED' || resolveData?.code === 'TOKEN_USED') {
-        Alert.alert('Código ya utilizado', 'Este código de invitación ya fue utilizado. Solicita uno nuevo al administrador.');
+        Alert.alert(t('auth.qr.token_used_title'), t('auth.qr.token_used_body'));
       } else if (errCode === 'TOKEN_EXPIRED' || resolveData?.code === 'TOKEN_EXPIRED') {
-        Alert.alert('Código expirado', 'Este código de invitación ha expirado. Solicita uno nuevo al administrador.');
+        Alert.alert(t('auth.qr.token_expired_title'), t('auth.qr.token_expired_body'));
       } else if (errCode === 'TOKEN_NOT_FOUND' || resolveData?.code === 'TOKEN_NOT_FOUND') {
-        Alert.alert('Código inválido', 'No se encontró este código de invitación. Verifica el código o solicita uno nuevo.');
+        Alert.alert(t('auth.qr.token_not_found_title'), t('auth.qr.token_not_found_body'));
       } else if (resolveData?.code === 'TOKEN_LIMIT_REACHED') {
-        Alert.alert('Límite alcanzado', 'Este código alcanzó su límite de usos. Solicita uno nuevo.');
+        Alert.alert(t('auth.qr.token_limit_title'), t('auth.qr.token_limit_body'));
       } else if (resolveData?.code === 'TOKEN_TYPE_NOT_ALLOWED') {
-        Alert.alert('Tipo no permitido', 'Este código no puede usarse para esta acción. Solicita uno nuevo.');
+        Alert.alert(t('auth.qr.token_type_title'), t('auth.qr.token_type_body'));
       } else {
-        Alert.alert('Código no válido', 'Este QR expiró o ya no es válido. Solicita uno nuevo.');
+        Alert.alert(t('auth.qr.invalid_qr_title'), t('auth.qr.invalid_qr_body'));
       }
       setDebug({ currentStep: 'error', finalError: resolveData?.code ?? (resolveError as Error)?.message ?? 'invalid' });
       setStatus('error');
-      setMessage('Código no válido');
+      setMessage(t('auth.qr.invalid_qr_title'));
       setTimeout(() => navigation.navigate('Welcome'), 3000);
     } catch (error) {
       captureCriticalError(error, {
@@ -515,10 +517,10 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
       setDebug({ currentStep: 'error', finalError: trunc((error as Error)?.message, 30) });
       if (__DEV__) console.warn('[QrProcessor] error real: processQrCode exception', error);
       setStatus('error');
-      setMessage('Error al procesar el código QR');
+      setMessage(t('auth.qr.process_error'));
       setTimeout(() => navigation.navigate('Welcome'), 3000);
     }
-  }, [navigation, route.params?.qrData, route.params?.token, setDebug]);
+  }, [navigation, route.params?.qrData, route.params?.token, setDebug, t]);
 
   // Timeout defensivo: si sigue en validating tras 15s, mostrar error y permitir reintentar
   const VALIDATING_TIMEOUT_MS = 15000;
@@ -527,11 +529,11 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
     const t = setTimeout(() => {
       setDebug({ currentStep: 'error', finalError: 'timeout 15s' });
       setStatus('error');
-      setMessage('Tardó demasiado. Reintenta o escanea de nuevo.');
+      setMessage(t('auth.qr.timeout'));
       if (__DEV__) console.log('[QrProcessor] timeout defensivo: 15s en validating');
     }, VALIDATING_TIMEOUT_MS);
     return () => clearTimeout(t);
-  }, [status, setDebug]);
+  }, [status, setDebug, t]);
 
   // Run on mount (delay to allow initial URL to be set)
   useEffect(() => {
@@ -555,7 +557,7 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         <View style={styles.transitionWrap}>
           <CellariumLoader
             size={220}
-            label="Abriendo menú..."
+            label={t('auth.qr.opening_menu')}
             loop={true}
             speed={1}
           />
@@ -566,17 +568,17 @@ const QrProcessorScreen: React.FC<Props> = ({ navigation, route }) => {
         <View style={styles.content}>
           <Text style={styles.errorIcon}>⚠️</Text>
           <Text style={styles.errorMessage}>{message}</Text>
-          <Text style={styles.submessage}>Volviendo al inicio...</Text>
+          <Text style={styles.submessage}>{t('auth.qr.returning_home')}</Text>
           <TouchableOpacity
             style={styles.retryButton}
             onPress={() => {
               processedRef.current = false;
               setStatus('validating');
-              setMessage('Validando código QR...');
+              setMessage(t('auth.qr.validating'));
               setTimeout(() => processQrCode(), 200);
             }}
           >
-            <Text style={styles.retryButtonText}>Reintentar</Text>
+            <Text style={styles.retryButtonText}>{t('auth.qr.retry')}</Text>
           </TouchableOpacity>
         </View>
       )}

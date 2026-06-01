@@ -15,6 +15,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
 import { supabase } from '../lib/supabase';
+import { useLanguage } from '../contexts/LanguageContext';
 
 type AdminRegistrationScreenNavigationProp = StackNavigationProp<RootStackParamList, 'AdminRegistration'>;
 type AdminRegistrationScreenRouteProp = RouteProp<RootStackParamList, 'AdminRegistration'>;
@@ -25,6 +26,7 @@ interface Props {
 }
 
 const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
+  const { t } = useLanguage();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -45,14 +47,13 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
     }
 
     if (!username || !password || !confirmPassword) {
-      Alert.alert('Error', 'Por favor completa todos los campos');
+      Alert.alert(t('common.error'), t('auth.fill_all_fields'));
       return;
     }
 
-    // Validar username: mínimo 6 caracteres, solo letras, números y guiones bajos
     const usernameRegex = /^[a-zA-Z0-9_]{6,}$/;
     if (!usernameRegex.test(username)) {
-      Alert.alert('Error', 'El nombre de usuario debe tener al menos 6 caracteres y solo puede contener letras, números y guiones bajos (_)');
+      Alert.alert(t('common.error'), t('auth.admin_reg.username_rules'));
       return;
     }
 
@@ -61,12 +62,12 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
     const normalizedConfirmPassword = confirmPassword.trim();
 
     if (normalizedPassword !== normalizedConfirmPassword) {
-      Alert.alert('Error', 'Las contraseñas no coinciden');
+      Alert.alert(t('common.error'), t('auth.password_mismatch'));
       return;
     }
 
     if (normalizedPassword.length < 6) {
-      Alert.alert('Error', 'La contraseña debe tener al menos 6 caracteres');
+      Alert.alert(t('common.error'), t('auth.password_min_length'));
       return;
     }
 
@@ -80,7 +81,7 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
 
       const ownerId = ownerIdFromParams;
       if (!ownerId) {
-        Alert.alert('Error', 'Datos de invitación incompletos. Escanea el código QR de invitación de nuevo.');
+        Alert.alert(t('common.error'), t('auth.admin_reg.incomplete_invite'));
         setLoading(false);
         return;
       }
@@ -127,8 +128,8 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
         
         console.error('❌ Rate limit excedido para registro');
         Alert.alert(
-          'Límite alcanzado',
-          `Has intentado registrarte demasiadas veces. Por seguridad, debes esperar ${resetMinutes} minutos antes de intentar nuevamente.`
+          t('auth.admin_reg.rate_limit_title'),
+          t('auth.admin_reg.rate_limit_body').replace('{minutes}', String(resetMinutes))
         );
         setLoading(false);
         return;
@@ -288,8 +289,8 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
             }
             
             Alert.alert(
-              'Advertencia',
-              'Tu cuenta fue creada pero hubo un problema al completar el perfil. Contacta al administrador.'
+              t('auth.warning'),
+              t('auth.admin_reg.profile_warning_body')
             );
           } else {
             console.log('✅ Usuario staff creado via Edge Function:', functionData);
@@ -440,8 +441,8 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
         } catch (directError) {
           console.error('❌ Error creando usuario via RPC:', directError);
           Alert.alert(
-            'Advertencia',
-            'Tu cuenta fue creada en el sistema de autenticación. El administrador completará tu perfil manualmente.'
+            t('auth.warning'),
+            t('auth.admin_reg.profile_manual_body')
           );
         }
       }
@@ -449,11 +450,11 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
       console.log('📝 ==================== FIN REGISTRO CON QR ====================');
 
       Alert.alert(
-        '✅ Registro Exitoso', 
-        `Tu cuenta ha sido creada.\n\nSucursal: ${branchName || 'Sin especificar'}\n\n⚠️ Tu cuenta está pendiente de aprobación.\n\nEl owner de la sucursal debe aprobar tu solicitud y asignarte un rol antes de que puedas acceder al catálogo.`,
+        t('auth.admin_reg.success_title'),
+        t('auth.admin_reg.success_body').replace('{branch}', branchName || '—'),
         [
           {
-            text: 'Entendido',
+            text: t('auth.understood'),
             onPress: () => {
               navigation.navigate('Welcome');
             }
@@ -461,7 +462,7 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
         ]
       );
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Error al registrar administrador');
+      Alert.alert(t('common.error'), error.message || t('auth.admin_reg.register_error'));
     } finally {
       setLoading(false);
     }
@@ -486,7 +487,7 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
 
       if (__DEV__) console.log('[OAUTH] data.url exists:', !!data?.url);
       if (error) {
-        Alert.alert('Error', error.message);
+        Alert.alert(t('common.error'), error.message);
         return;
       }
 
@@ -519,14 +520,14 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
         parsedUrl = new URL(result.url);
       } catch {
         if (__DEV__) console.log('[OAuth] invalid callback url');
-        Alert.alert('Error', 'No se pudo procesar la respuesta de inicio de sesión.');
+        Alert.alert(t('common.error'), t('auth.google_process_error'));
         setGoogleLoading(false);
         return;
       }
 
       const errorParam = parsedUrl.searchParams.get('error');
       if (errorParam) {
-        Alert.alert('Error', 'No se pudo completar el inicio de sesión con Google. Intenta de nuevo.');
+        Alert.alert(t('common.error'), t('auth.google_complete_error'));
         setGoogleLoading(false);
         return;
       }
@@ -537,7 +538,7 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
         const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
         if (__DEV__) console.log('[OAuth] exchangeCodeForSession', { hasSession: !!exchangeData?.session, error: exchangeError?.message ?? null });
         if (exchangeError) {
-          Alert.alert('Error', 'No se pudo completar el inicio de sesión con Google. Intenta de nuevo.');
+          Alert.alert(t('common.error'), t('auth.google_complete_error'));
           setGoogleLoading(false);
           return;
         }
@@ -559,7 +560,7 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
         });
         if (sessionError) {
           if (__DEV__) console.log('[OAuth] setSession error:', sessionError.message);
-          Alert.alert('Error', 'No se pudo completar el inicio de sesión con Google. Intenta de nuevo.');
+          Alert.alert(t('common.error'), t('auth.google_complete_error'));
           setGoogleLoading(false);
           return;
         }
@@ -569,12 +570,12 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
       }
 
       if (__DEV__) console.log('[OAuth] callback missing tokens and code', result.url);
-      Alert.alert('Error', 'No se pudo completar el inicio de sesión con Google. Intenta de nuevo.');
+      Alert.alert(t('common.error'), t('auth.google_complete_error'));
       setGoogleLoading(false);
       return;
     } catch (error: any) {
       if (__DEV__) console.log('[OAUTH ERROR]', error?.message);
-      Alert.alert('Error', error.message || 'Error iniciando sesión con Google');
+      Alert.alert(t('common.error'), error.message || t('auth.google_login_error'));
     } finally {
       setGoogleLoading(false);
     }
@@ -587,7 +588,7 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
     >
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         <View style={styles.header}>
-          <Text style={styles.title}>Registro de Administrador</Text>
+          <Text style={styles.title}>{t('auth.admin_reg.title')}</Text>
           {branchName && (
             <View style={styles.branchBadge}>
               <Text style={styles.branchBadgeText}>🏢 {branchName}</Text>
@@ -597,15 +598,15 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
 
         <View style={styles.infoContainer}>
           <Text style={styles.infoText}>
-            📋 Has sido invitado como administrador mediante código QR.
+            {t('auth.admin_reg.invited_info')}
           </Text>
           <Text style={styles.infoSubtext}>
-            Completa el registro y espera la aprobación del administrador.
+            {t('auth.admin_reg.invited_sub')}
           </Text>
         </View>
 
         <View style={styles.formContainer}>
-          <Text style={styles.formTitle}>Registrarse como Staff</Text>
+          <Text style={styles.formTitle}>{t('auth.admin_reg.form_title')}</Text>
           
           {/* Botón Google OAuth */}
           <TouchableOpacity
@@ -614,38 +615,38 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
             disabled={googleLoading}
           >
             <Text style={styles.googleButtonText}>
-              {googleLoading ? 'Conectando...' : '🌐 Continuar con Google'}
+              {googleLoading ? t('auth.admin_reg.google_connecting') : t('auth.admin_reg.google_continue')}
             </Text>
           </TouchableOpacity>
 
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>O</Text>
+            <Text style={styles.dividerText}>{t('auth.divider_or')}</Text>
             <View style={styles.dividerLine} />
           </View>
 
           {/* Formulario Username/Password */}
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Nombre de usuario *</Text>
+            <Text style={styles.label}>{t('auth.admin_reg.username_label')}</Text>
             <TextInput
               style={styles.input}
               value={username}
               onChangeText={setUsername}
-              placeholder="Mínimo 6 caracteres (letras, números, _)"
+              placeholder={t('auth.admin_reg.username_placeholder')}
               autoCapitalize="none"
               autoCorrect={false}
               maxLength={20}
             />
-            <Text style={styles.inputHint}>Solo letras, números y guiones bajos (_)</Text>
+            <Text style={styles.inputHint}>{t('auth.admin_reg.username_hint')}</Text>
           </View>
           
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Contraseña *</Text>
+            <Text style={styles.label}>{t('auth.password')} *</Text>
             <TextInput
               style={styles.input}
               value={password}
               onChangeText={setPassword}
-              placeholder="Mínimo 6 caracteres"
+              placeholder={t('auth.password_placeholder')}
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
@@ -653,12 +654,12 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Confirmar Contraseña *</Text>
+            <Text style={styles.label}>{t('auth.admin_reg.confirm_password_label')}</Text>
             <TextInput
               style={styles.input}
               value={confirmPassword}
               onChangeText={setConfirmPassword}
-              placeholder="Repite tu contraseña"
+              placeholder={t('auth.repeat_password_placeholder')}
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
@@ -671,7 +672,7 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
             disabled={loading}
           >
             <Text style={styles.registerButtonText}>
-              {loading ? 'Registrando...' : '✓ Registrar con Usuario'}
+              {loading ? t('auth.admin_reg.registering') : t('auth.admin_reg.register_button')}
             </Text>
           </TouchableOpacity>
 
@@ -679,13 +680,13 @@ const AdminRegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
             style={styles.cancelButton}
             onPress={() => navigation.navigate('Welcome')}
           >
-            <Text style={styles.cancelButtonText}>Cancelar</Text>
+            <Text style={styles.cancelButtonText}>{t('auth.admin_reg.cancel')}</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.warningContainer}>
           <Text style={styles.warningText}>
-            ⚠️ Tu cuenta quedará en estado "pendiente" hasta que un administrador con permisos la apruebe y asigne un rol.
+            {t('auth.admin_reg.warning_footer')}
           </Text>
         </View>
       </ScrollView>

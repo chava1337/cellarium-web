@@ -16,7 +16,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList, Wine } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { TastingExamService, TastingExam, TastingWineResponse } from '../services/TastingExamService';
+import {
+  TASTING_AROMA_OPTIONS,
+  TASTING_FIRST_IMPACT_OPTIONS,
+  TASTING_FLAVOR_OPTIONS,
+  tastingDisplayValue,
+} from '../utils/tastingDisplay';
 
 type TakeTastingExamScreenNavigationProp = StackNavigationProp<RootStackParamList, 'TakeTastingExam'>;
 
@@ -56,6 +63,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
   const { examId } = route.params;
   const { user } = useAuth();
+  const { t } = useLanguage();
   const [exam, setExam] = useState<TastingExam | null>(null);
   const [currentWineIndex, setCurrentWineIndex] = useState(0);
   const [currentPhase, setCurrentPhase] = useState<Phase>('visual');
@@ -78,8 +86,8 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
       const examData = await TastingExamService.getExamById(examId, ownerId);
       
       if (!examData) {
-        Alert.alert('Error', 'Examen no encontrado', [
-          { text: 'OK', onPress: () => navigation.goBack() },
+        Alert.alert(t('common.error'), t('tasting.error_not_found'), [
+          { text: t('common.ok'), onPress: () => navigation.goBack() },
         ]);
         return;
       }
@@ -88,9 +96,9 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
       const isAvailable = await TastingExamService.isExamAvailable(examId, user.id);
       if (!isAvailable) {
         Alert.alert(
-          'Examen no disponible',
-          'Este examen no está habilitado, ya expiró, o ya lo completaste.',
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
+          t('tasting.unavailable_title'),
+          t('tasting.unavailable_body'),
+          [{ text: t('common.ok'), onPress: () => navigation.goBack() }]
         );
         return;
       }
@@ -109,7 +117,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
       setResponses(initialResponses);
     } catch (error: any) {
       console.error('Error loading exam:', error);
-      Alert.alert('Error', error.message || 'No se pudo cargar el examen');
+      Alert.alert(t('common.error'), error.message || t('tasting.error_load_exam'));
     } finally {
       setLoading(false);
     }
@@ -174,9 +182,9 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
   const handleNextPhase = () => {
     if (!validateCurrentPhase()) {
       Alert.alert(
-        'Campos incompletos',
-        'Por favor completa todas las preguntas de esta fase antes de continuar.',
-        [{ text: 'Entendido' }]
+        t('tasting.incomplete_fields_title'),
+        t('tasting.incomplete_fields_body'),
+        [{ text: t('tasting.understood') }]
       );
       return;
     }
@@ -202,9 +210,9 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
     // Validar que la fase gustativa esté completa antes de avanzar
     if (currentPhase !== 'gustative') {
       Alert.alert(
-        'Fase incompleta',
-        'Debes completar todas las fases (Visual, Olfativa y Gustativa) antes de avanzar al siguiente vino.',
-        [{ text: 'Entendido' }]
+        t('tasting.incomplete_phase_title'),
+        t('tasting.incomplete_phase_body'),
+        [{ text: t('tasting.understood') }]
       );
       return;
     }
@@ -212,9 +220,9 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
     // Validar que la fase gustativa esté completa
     if (!validateCurrentPhase()) {
       Alert.alert(
-        'Campos incompletos',
-        'Por favor completa todas las preguntas de la fase gustativa antes de continuar.',
-        [{ text: 'Entendido' }]
+        t('tasting.incomplete_fields_title'),
+        t('tasting.incomplete_gustative_body'),
+        [{ text: t('tasting.understood') }]
       );
       return;
     }
@@ -225,12 +233,12 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
     } else {
       // Último vino, mostrar confirmación para terminar
       Alert.alert(
-        'Finalizar Examen',
-        'Has completado todos los vinos. ¿Deseas terminar el examen?',
+        t('tasting.finish_title'),
+        t('tasting.finish_body'),
         [
-          { text: 'Revisar', style: 'cancel' },
+          { text: t('tasting.review'), style: 'cancel' },
           {
-            text: 'Terminar',
+            text: t('tasting.finish'),
             onPress: handleSubmitExam,
           },
         ]
@@ -251,7 +259,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
     // Validar que todas las respuestas estén completas
     const allResponses = Array.from(responses.values());
     if (allResponses.length !== exam.wines?.length) {
-      Alert.alert('Error', 'Debes completar todos los vinos del examen');
+      Alert.alert(t('common.error'), t('tasting.error_complete_all_wines'));
       return;
     }
 
@@ -266,18 +274,18 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
       });
 
       Alert.alert(
-        'Examen Completado',
-        'Tu examen ha sido guardado correctamente.',
+        t('tasting.completed_title'),
+        t('tasting.completed_body'),
         [
           {
-            text: 'OK',
+            text: t('common.ok'),
             onPress: () => navigation.goBack(),
           },
         ]
       );
     } catch (error: any) {
       console.error('Error submitting exam:', error);
-      Alert.alert('Error', error.message || 'No se pudo guardar el examen');
+      Alert.alert(t('common.error'), error.message || t('tasting.error_save'));
     } finally {
       setSubmitting(false);
     }
@@ -290,36 +298,26 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
       <View style={styles.phaseContentInner}>
         {/* Guía de claridad y limpieza */}
         <View style={styles.guideSection}>
-          <Text style={styles.guideTitle}>Limpieza y Transparencia</Text>
-          <Text style={styles.guideText}>
-            Lo primero que observamos en la copa es la claridad y limpieza del vino. 
-            Un vino de calidad debe ser cristalino y brillante, sin aspecto turbio.
-          </Text>
+          <Text style={styles.guideTitle}>{t('tasting.guide_clarity_title')}</Text>
+          <Text style={styles.guideText}>{t('tasting.guide_clarity_body')}</Text>
         </View>
 
         {/* Guía de brillo */}
         <View style={styles.guideSection}>
-          <Text style={styles.guideTitle}>El Brillo del Vino</Text>
-          <Text style={styles.guideText}>
-            Para evaluar el brillo, inclina la copa sobre un fondo blanco y bien iluminado. 
-            La brillantez del vino es indicativa de su acidez y frescura.
-          </Text>
+          <Text style={styles.guideTitle}>{t('tasting.guide_shine_title')}</Text>
+          <Text style={styles.guideText}>{t('tasting.guide_shine_body')}</Text>
         </View>
 
         {/* Guía de color */}
         <View style={styles.guideSection}>
-          <Text style={styles.guideTitle}>El Color y su Evolución</Text>
-          <Text style={styles.guideText}>
-            1️⃣ Inclina la copa a 45° sobre un fondo blanco.{'\n'}
-            2️⃣ Observa la parte central para detectar su color principal.{'\n'}
-            3️⃣ Fíjate en el ribete (zona más delgada) para notar su evolución.
-          </Text>
+          <Text style={styles.guideTitle}>{t('tasting.guide_color_title')}</Text>
+          <Text style={styles.guideText}>{t('tasting.guide_color_body')}</Text>
         </View>
 
         {/* Preguntas según tipo de vino */}
         {wineType === 'red' && (
           <View style={styles.questionSection}>
-            <Text style={styles.questionLabel}>Intensidad del cuerpo (1-5)</Text>
+            <Text style={styles.questionLabel}>{t('tasting.q_body_intensity')}</Text>
             <View style={styles.scaleContainer}>
               {[1, 2, 3, 4, 5].map((value) => (
                 <TouchableOpacity
@@ -346,7 +344,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
 
         {(wineType === 'white' || wineType === 'rose') && (
           <View style={styles.questionSection}>
-            <Text style={styles.questionLabel}>Claridad (1-5)</Text>
+            <Text style={styles.questionLabel}>{t('tasting.q_clarity')}</Text>
             <View style={styles.scaleContainer}>
               {[1, 2, 3, 4, 5].map((value) => (
                 <TouchableOpacity
@@ -374,7 +372,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
         {wineType === 'sparkling' && (
           <>
             <View style={styles.questionSection}>
-              <Text style={styles.questionLabel}>Claridad (1-5)</Text>
+              <Text style={styles.questionLabel}>{t('tasting.q_clarity')}</Text>
               <View style={styles.scaleContainer}>
                 {[1, 2, 3, 4, 5].map((value) => (
                   <TouchableOpacity
@@ -398,7 +396,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
               </View>
             </View>
             <View style={styles.questionSection}>
-              <Text style={styles.questionLabel}>Efervescencia (1-5)</Text>
+              <Text style={styles.questionLabel}>{t('tasting.q_effervescence')}</Text>
               <View style={styles.scaleContainer}>
                 {[1, 2, 3, 4, 5].map((value) => (
                   <TouchableOpacity
@@ -427,11 +425,8 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
         {/* Grado alcohólico */}
         <View style={styles.questionSection}>
           <Text style={styles.questionLabel}>
-            Grado Alcohólico (1-10){'\n'}
-            <Text style={styles.questionHint}>
-              Observa las lágrimas o piernas del vino en las paredes de la copa. 
-              Si son densas y caen lentamente, indican un alto contenido alcohólico.
-            </Text>
+            {t('tasting.q_alcohol_level')}{'\n'}
+            <Text style={styles.questionHint}>{t('tasting.q_alcohol_level_hint')}</Text>
           </Text>
           <View style={styles.scaleContainer}>
             {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((value) => (
@@ -464,49 +459,34 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
   const renderOlfativePhase = () => {
     if (!currentWine || !currentWineResponse) return null;
 
-    const aromaOptions = [
-      'Frutales',
-      'Florales',
-      'Vegetales',
-      'Balsámicos',
-      'Tostados o especiados',
-      'Minerales',
-    ];
-
     return (
       <View style={styles.phaseContentInner}>
         <View style={styles.guideSection}>
-          <Text style={styles.guideTitle}>Primera Olfacción (copa parada)</Text>
-          <Text style={styles.guideText}>
-            Acerca la copa a la nariz sin moverla para percibir los aromas primarios más volátiles. 
-            Estos aromas provienen directamente de la uva y pueden ser frutales, florales o herbales.
-          </Text>
+          <Text style={styles.guideTitle}>{t('tasting.guide_first_nose_title')}</Text>
+          <Text style={styles.guideText}>{t('tasting.guide_first_nose_body')}</Text>
         </View>
 
         {/* Guía segunda olfacción */}
         <View style={styles.guideSection}>
-          <Text style={styles.guideTitle}>Segunda Olfacción (copa agitada)</Text>
-          <Text style={styles.guideText}>
-            Agita la copa en círculos para oxigenar el vino, lo que libera compuestos aromáticos más complejos. 
-            Aquí se aprecian los aromas secundarios (fermentación) y terciarios (envejecimiento).
-          </Text>
+          <Text style={styles.guideTitle}>{t('tasting.guide_second_nose_title')}</Text>
+          <Text style={styles.guideText}>{t('tasting.guide_second_nose_body')}</Text>
         </View>
 
         {/* Aromas detectados */}
         <View style={styles.questionSection}>
-          <Text style={styles.questionLabel}>Aromas Detectados</Text>
+          <Text style={styles.questionLabel}>{t('tasting.q_detected_aromas')}</Text>
           <View style={styles.optionsContainer}>
-            {aromaOptions.map((aroma) => {
-              const selected = currentWineResponse.detected_aromas?.includes(aroma) || false;
+            {TASTING_AROMA_OPTIONS.map((opt) => {
+              const selected = currentWineResponse.detected_aromas?.includes(opt.store) || false;
               return (
                 <TouchableOpacity
-                  key={aroma}
+                  key={opt.store}
                   style={[styles.optionButton, selected && styles.optionButtonSelected]}
                   onPress={() => {
                     const current = currentWineResponse.detected_aromas || [];
                     const updated = selected
-                      ? current.filter((a) => a !== aroma)
-                      : [...current, aroma];
+                      ? current.filter((a) => a !== opt.store)
+                      : [...current, opt.store];
                     updateResponse('detected_aromas', updated);
                   }}
                 >
@@ -516,7 +496,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
                       selected && styles.optionButtonTextSelected,
                     ]}
                   >
-                    {aroma}
+                    {t(opt.labelKey)}
                   </Text>
                 </TouchableOpacity>
               );
@@ -524,7 +504,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
           <TextInput
             style={styles.textInput}
-            placeholder="Otros aromas detectados..."
+            placeholder={t('tasting.other_aromas_placeholder')}
             value={currentWineResponse.other_aromas || ''}
             onChangeText={(text) => updateResponse('other_aromas', text)}
             multiline
@@ -533,7 +513,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
 
         {/* Intensidad */}
         <View style={styles.questionSection}>
-          <Text style={styles.questionLabel}>Intensidad</Text>
+          <Text style={styles.questionLabel}>{t('tasting.q_intensity')}</Text>
           <View style={styles.optionsContainer}>
             {['fuertes', 'sutiles'].map((option) => (
               <TouchableOpacity
@@ -550,7 +530,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
                     currentWineResponse.aroma_intensity === option && styles.optionButtonTextSelected,
                   ]}
                 >
-                  {option === 'fuertes' ? 'Fuertes' : 'Sutiles'}
+                  {tastingDisplayValue(t, option)}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -559,7 +539,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
 
         {/* Calidad */}
         <View style={styles.questionSection}>
-          <Text style={styles.questionLabel}>Calidad</Text>
+          <Text style={styles.questionLabel}>{t('tasting.q_quality')}</Text>
           <View style={styles.optionsContainer}>
             {['agradables', 'desagradables'].map((option) => (
               <TouchableOpacity
@@ -576,7 +556,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
                     currentWineResponse.aroma_quality === option && styles.optionButtonTextSelected,
                   ]}
                 >
-                  {option === 'agradables' ? 'Agradables' : 'Desagradables'}
+                  {tastingDisplayValue(t, option)}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -585,7 +565,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
 
         {/* Complejidad */}
         <View style={styles.questionSection}>
-          <Text style={styles.questionLabel}>Complejidad</Text>
+          <Text style={styles.questionLabel}>{t('tasting.q_complexity')}</Text>
           <View style={styles.optionsContainer}>
             {['varios_mezclados', 'uno_destacado'].map((option) => (
               <TouchableOpacity
@@ -602,9 +582,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
                     currentWineResponse.aroma_complexity === option && styles.optionButtonTextSelected,
                   ]}
                 >
-                  {option === 'varios_mezclados'
-                    ? 'Varios aromas mezclados'
-                    : 'Un aroma destacado'}
+                  {tastingDisplayValue(t, option)}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -617,39 +595,33 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
   const renderGustativePhase = () => {
     if (!currentWine || !currentWineResponse) return null;
 
-    const firstImpactOptions = ['suave', 'vibrante', 'dulce', 'ácido', 'cálido', 'otra'];
-    const flavorOptions = ['madera', 'especias', 'flores', 'minerales', 'frutos rojos', 'citricos', 'otro'];
-
     return (
       <View style={styles.phaseContentInner}>
         <View style={styles.guideSection}>
-          <Text style={styles.guideTitle}>Fase Gustativa</Text>
-          <Text style={styles.guideText}>
-            Toma un sorbo generoso y muévelo por toda la boca para percibir todos los sabores 
-            (dulce, ácido, amargo, salado) y sensaciones táctiles (cuerpo, acidez, taninos, alcohol).
-          </Text>
+          <Text style={styles.guideTitle}>{t('tasting.guide_gustative_title')}</Text>
+          <Text style={styles.guideText}>{t('tasting.guide_gustative_body')}</Text>
         </View>
 
         {/* Primer impacto */}
         <View style={styles.questionSection}>
-          <Text style={styles.questionLabel}>Primer Impacto del Vino</Text>
+          <Text style={styles.questionLabel}>{t('tasting.q_first_impact')}</Text>
           <View style={styles.optionsContainer}>
-            {firstImpactOptions.map((option) => (
+            {TASTING_FIRST_IMPACT_OPTIONS.map((opt) => (
               <TouchableOpacity
-                key={option}
+                key={opt.store}
                 style={[
                   styles.optionButton,
-                  currentWineResponse.first_impact === option && styles.optionButtonSelected,
+                  currentWineResponse.first_impact === opt.store && styles.optionButtonSelected,
                 ]}
-                onPress={() => updateResponse('first_impact', option)}
+                onPress={() => updateResponse('first_impact', opt.store)}
               >
                 <Text
                   style={[
                     styles.optionButtonText,
-                    currentWineResponse.first_impact === option && styles.optionButtonTextSelected,
+                    currentWineResponse.first_impact === opt.store && styles.optionButtonTextSelected,
                   ]}
                 >
-                  {option.charAt(0).toUpperCase() + option.slice(1)}
+                  {t(opt.labelKey)}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -657,7 +629,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
           {currentWineResponse.first_impact === 'otra' && (
             <TextInput
               style={styles.textInput}
-              placeholder="Describe el primer impacto..."
+              placeholder={t('tasting.other_first_impact_placeholder')}
               value={currentWineResponse.other_first_impact || ''}
               onChangeText={(text) => updateResponse('other_first_impact', text)}
             />
@@ -666,19 +638,19 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
 
         {/* Sabores reconocidos */}
         <View style={styles.questionSection}>
-          <Text style={styles.questionLabel}>Sabores Reconocidos</Text>
+          <Text style={styles.questionLabel}>{t('tasting.q_recognized_flavors')}</Text>
           <View style={styles.optionsContainer}>
-            {flavorOptions.map((flavor) => {
-              const selected = currentWineResponse.recognized_flavors?.includes(flavor) || false;
+            {TASTING_FLAVOR_OPTIONS.map((opt) => {
+              const selected = currentWineResponse.recognized_flavors?.includes(opt.store) || false;
               return (
                 <TouchableOpacity
-                  key={flavor}
+                  key={opt.store}
                   style={[styles.optionButton, selected && styles.optionButtonSelected]}
                   onPress={() => {
                     const current = currentWineResponse.recognized_flavors || [];
                     const updated = selected
-                      ? current.filter((f) => f !== flavor)
-                      : [...current, flavor];
+                      ? current.filter((f) => f !== opt.store)
+                      : [...current, opt.store];
                     updateResponse('recognized_flavors', updated);
                   }}
                 >
@@ -688,7 +660,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
                       selected && styles.optionButtonTextSelected,
                     ]}
                   >
-                    {flavor.charAt(0).toUpperCase() + flavor.slice(1)}
+                    {t(opt.labelKey)}
                   </Text>
                 </TouchableOpacity>
               );
@@ -697,7 +669,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
           {currentWineResponse.recognized_flavors?.includes('otro') && (
             <TextInput
               style={styles.textInput}
-              placeholder="Otros sabores detectados..."
+              placeholder={t('tasting.other_flavors_placeholder')}
               value={currentWineResponse.other_flavors || ''}
               onChangeText={(text) => updateResponse('other_flavors', text)}
             />
@@ -706,7 +678,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
 
         {/* Acidez */}
         <View style={styles.questionSection}>
-          <Text style={styles.questionLabel}>Acidez (1-10)</Text>
+          <Text style={styles.questionLabel}>{t('tasting.q_acidity')}</Text>
           <View style={styles.scaleContainer}>
             {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((value) => (
               <TouchableOpacity
@@ -735,7 +707,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
         {/* Tanicidad (solo tintos) */}
         {wineType === 'red' && (
           <View style={styles.questionSection}>
-            <Text style={styles.questionLabel}>Tanicidad (1-10)</Text>
+            <Text style={styles.questionLabel}>{t('tasting.q_tannin')}</Text>
             <View style={styles.scaleContainer}>
               {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((value) => (
                 <TouchableOpacity
@@ -764,7 +736,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
 
         {/* Nivel de alcohol */}
         <View style={styles.questionSection}>
-          <Text style={styles.questionLabel}>Nivel de Alcohol: Sensación de Calidez (1-5)</Text>
+          <Text style={styles.questionLabel}>{t('tasting.q_alcohol_warmth')}</Text>
           <View style={styles.scaleContainer}>
             {[1, 2, 3, 4, 5].map((value) => (
               <TouchableOpacity
@@ -790,7 +762,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
 
         {/* Cuerpo */}
         <View style={styles.questionSection}>
-          <Text style={styles.questionLabel}>Cuerpo del Vino</Text>
+          <Text style={styles.questionLabel}>{t('tasting.q_body')}</Text>
           <View style={styles.optionsContainer}>
             {['ligero', 'medio', 'robusto'].map((option) => (
               <TouchableOpacity
@@ -807,7 +779,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
                     currentWineResponse.body === option && styles.optionButtonTextSelected,
                   ]}
                 >
-                  {option.charAt(0).toUpperCase() + option.slice(1)}
+                  {tastingDisplayValue(t, option)}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -816,7 +788,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
 
         {/* Persistencia */}
         <View style={styles.questionSection}>
-          <Text style={styles.questionLabel}>Persistencia o Retrogusto</Text>
+          <Text style={styles.questionLabel}>{t('tasting.q_persistence')}</Text>
           <View style={styles.optionsContainer}>
             {['baja', 'media', 'alta'].map((option) => (
               <TouchableOpacity
@@ -833,7 +805,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
                     currentWineResponse.persistence === option && styles.optionButtonTextSelected,
                   ]}
                 >
-                  {option.charAt(0).toUpperCase() + option.slice(1)}
+                  {tastingDisplayValue(t, option)}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -842,10 +814,10 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
 
         {/* Sabores detectados (texto libre) */}
         <View style={styles.questionSection}>
-          <Text style={styles.questionLabel}>Sabores Detectados (texto libre)</Text>
+          <Text style={styles.questionLabel}>{t('tasting.q_detected_tastes')}</Text>
           <TextInput
             style={[styles.textInput, styles.textArea]}
-            placeholder="Describe los sabores que detectaste..."
+            placeholder={t('tasting.detected_tastes_placeholder')}
             value={currentWineResponse.detected_tastes || ''}
             onChangeText={(text) => updateResponse('detected_tastes', text)}
             multiline
@@ -861,7 +833,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={CELLARIUM.primary} />
-          <Text style={styles.loadingText}>Cargando examen...</Text>
+          <Text style={styles.loadingText}>{t('tasting.loading_exam')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -871,16 +843,16 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>No se pudo cargar el examen</Text>
+          <Text style={styles.errorText}>{t('tasting.error_load_exam')}</Text>
         </View>
       </SafeAreaView>
     );
   }
 
   const phaseTitles = {
-    visual: 'Fase Visual',
-    olfative: 'Fase Olfativa',
-    gustative: 'Fase Gustativa',
+    visual: t('tasting.phase_visual'),
+    olfative: t('tasting.phase_olfative'),
+    gustative: t('tasting.phase_gustative'),
   };
 
   return (
@@ -894,7 +866,10 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle} numberOfLines={1}>{exam.name}</Text>
           <Text style={styles.headerSubtitle}>
-            Vino {currentWineIndex + 1} de {exam.wines?.length || 0} — {phaseTitles[currentPhase]}
+            {t('tasting.wine_progress')
+              .replace('{current}', String(currentWineIndex + 1))
+              .replace('{total}', String(exam.wines?.length || 0))
+              .replace('{phase}', phaseTitles[currentPhase])}
           </Text>
         </View>
       </LinearGradient>
@@ -932,7 +907,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
                 onPress={handlePreviousPhase}
                 activeOpacity={0.85}
               >
-                <Text style={styles.navButtonText}>← Fase Anterior</Text>
+                <Text style={styles.navButtonText}>{t('tasting.prev_phase')}</Text>
               </TouchableOpacity>
             )}
             {currentPhase !== 'gustative' && (
@@ -941,7 +916,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
                 onPress={handleNextPhase}
                 activeOpacity={0.85}
               >
-                <Text style={[styles.navButtonText, styles.navButtonTextPrimary]}>Siguiente Fase →</Text>
+                <Text style={[styles.navButtonText, styles.navButtonTextPrimary]}>{t('tasting.next_phase')}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -953,7 +928,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
                 onPress={handlePreviousWine}
                 activeOpacity={0.85}
               >
-                <Text style={styles.navButtonText}>← Vino Anterior</Text>
+                <Text style={styles.navButtonText}>{t('tasting.prev_wine')}</Text>
               </TouchableOpacity>
             )}
             {currentPhase === 'gustative' && (
@@ -964,8 +939,8 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
               >
                 <Text style={[styles.navButtonText, styles.navButtonTextPrimary]}>
                   {currentWineIndex < (exam.wines?.length || 0) - 1
-                    ? 'Siguiente Vino →'
-                    : 'Terminar Examen'}
+                    ? t('tasting.next_wine')
+                    : t('tasting.finish_exam_button')}
                 </Text>
               </TouchableOpacity>
             )}
@@ -978,7 +953,7 @@ const TakeTastingExamScreen: React.FC<Props> = ({ navigation, route }) => {
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <ActivityIndicator size="large" color={CELLARIUM.primary} />
-              <Text style={styles.modalText}>Guardando examen...</Text>
+              <Text style={styles.modalText}>{t('tasting.saving_exam')}</Text>
             </View>
           </View>
         </Modal>

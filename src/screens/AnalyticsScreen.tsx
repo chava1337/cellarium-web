@@ -17,6 +17,7 @@ import { RootStackParamList } from '../types';
 import { AnalyticsService, WineMetrics, BranchMetrics, ComparisonMetrics } from '../services/AnalyticsService';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranch } from '../contexts/BranchContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
 
 const { width } = Dimensions.get('window');
@@ -35,6 +36,7 @@ type SortBy = 'sales' | 'revenue' | 'rotation';
 const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
   const { user } = useAuth();
   const { currentBranch, availableBranches } = useBranch();
+  const { t } = useLanguage();
   const branchId = route.params?.branchId || currentBranch?.id || '';
   
   const isOwner = user?.role === 'owner';
@@ -73,7 +75,7 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       }
     } catch (error) {
       console.error('Error loading analytics:', error);
-      Alert.alert('Error', 'No se pudieron cargar las métricas');
+      Alert.alert(t('common.error'), t('analytics.load_error'));
     } finally {
       setLoading(false);
     }
@@ -98,7 +100,7 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!branchMetrics) {
       return (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No hay datos disponibles</Text>
+          <Text style={styles.emptyText}>{t('analytics.no_data')}</Text>
         </View>
       );
     }
@@ -137,41 +139,41 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           <View style={styles.statCard}>
             <Text style={styles.statIcon}>🍷</Text>
             <Text style={styles.statValue}>{branchMetrics.total_wines}</Text>
-            <Text style={styles.statLabel}>Vinos</Text>
+            <Text style={styles.statLabel}>{t('analytics.stat_wines')}</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statIcon}>📦</Text>
             <Text style={styles.statValue}>{branchMetrics.total_stock}</Text>
-            <Text style={styles.statLabel}>Stock Total</Text>
+            <Text style={styles.statLabel}>{t('analytics.stat_total_stock')}</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statIcon}>💰</Text>
             <Text style={styles.statValue}>${branchMetrics.total_revenue.toFixed(0)}</Text>
-            <Text style={styles.statLabel}>Ingresos</Text>
+            <Text style={styles.statLabel}>{t('analytics.stat_revenue')}</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statIcon}>📈</Text>
             <Text style={styles.statValue}>{branchMetrics.total_sales}</Text>
-            <Text style={styles.statLabel}>Ventas</Text>
+            <Text style={styles.statLabel}>{t('analytics.stat_sales')}</Text>
           </View>
         </View>
 
         {/* Información Adicional */}
         <View style={styles.infoSection}>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Ticket Promedio:</Text>
+            <Text style={styles.infoLabel}>{t('analytics.avg_ticket')}</Text>
             <Text style={styles.infoValue}>${branchMetrics.avg_ticket.toFixed(2)}</Text>
           </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Valor de Inventario:</Text>
+            <Text style={styles.infoLabel}>{t('analytics.inventory_value')}</Text>
             <Text style={styles.infoValue}>${branchMetrics.total_inventory_value.toFixed(2)}</Text>
           </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Más Vendido:</Text>
+            <Text style={styles.infoLabel}>{t('analytics.top_selling')}</Text>
             <Text style={styles.infoValue}>{branchMetrics.top_selling_wine}</Text>
           </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Mayor Ingreso:</Text>
+            <Text style={styles.infoLabel}>{t('analytics.top_revenue')}</Text>
             <Text style={styles.infoValue}>{branchMetrics.top_revenue_wine}</Text>
           </View>
         </View>
@@ -179,14 +181,14 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
         {/* Alertas */}
         {(branchMetrics.low_stock_count > 0 || branchMetrics.out_of_stock_count > 0) && (
           <View style={styles.alertsSection}>
-            <Text style={styles.sectionTitle}>⚠️ Alertas</Text>
+            <Text style={styles.sectionTitle}>⚠️ {t('analytics.alerts_title')}</Text>
             {branchMetrics.low_stock_count > 0 && (
               <View style={styles.alertCard}>
                 <Text style={styles.alertIcon}>📉</Text>
                 <View style={styles.alertContent}>
-                  <Text style={styles.alertTitle}>Stock Bajo</Text>
+                  <Text style={styles.alertTitle}>{t('analytics.low_stock_title')}</Text>
                   <Text style={styles.alertText}>
-                    {branchMetrics.low_stock_count} vino{branchMetrics.low_stock_count > 1 ? 's' : ''} con stock bajo
+                    {t('analytics.low_stock_message').replace('{count}', String(branchMetrics.low_stock_count))}
                   </Text>
                 </View>
               </View>
@@ -195,9 +197,9 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
               <View style={[styles.alertCard, styles.alertCardDanger]}>
                 <Text style={styles.alertIcon}>❌</Text>
                 <View style={styles.alertContent}>
-                  <Text style={styles.alertTitle}>Sin Stock</Text>
+                  <Text style={styles.alertTitle}>{t('analytics.out_of_stock_title')}</Text>
                   <Text style={styles.alertText}>
-                    {branchMetrics.out_of_stock_count} vino{branchMetrics.out_of_stock_count > 1 ? 's' : ''} agotado{branchMetrics.out_of_stock_count > 1 ? 's' : ''}
+                    {t('analytics.out_of_stock_message').replace('{count}', String(branchMetrics.out_of_stock_count))}
                   </Text>
                 </View>
               </View>
@@ -208,7 +210,7 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
         {/* Gráfica de Pastel - Top 5 Ingresos */}
         {pieData.length > 0 && (
           <View style={styles.chartSection}>
-            <Text style={styles.sectionTitle}>💰 Top 5 Vinos por Ingresos</Text>
+            <Text style={styles.sectionTitle}>💰 {t('analytics.chart_top5_revenue')}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <PieChart
                 data={pieData}
@@ -229,7 +231,7 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
         {/* Gráfica de Barras - Top Ventas */}
         {barData.labels.length > 0 && (
           <View style={styles.chartSection}>
-            <Text style={styles.sectionTitle}>📊 Top Vinos por Cantidad Vendida</Text>
+            <Text style={styles.sectionTitle}>📊 {t('analytics.chart_top_sales')}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <BarChart
                 data={barData}
@@ -276,7 +278,7 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
             onPress={() => setSortBy('sales')}
           >
             <Text style={[styles.sortButtonText, sortBy === 'sales' && styles.sortButtonTextActive]}>
-              📈 Ventas
+              📈 {t('analytics.sort_sales')}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -284,7 +286,7 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
             onPress={() => setSortBy('revenue')}
           >
             <Text style={[styles.sortButtonText, sortBy === 'revenue' && styles.sortButtonTextActive]}>
-              💰 Ingresos
+              💰 {t('analytics.sort_revenue')}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -292,7 +294,7 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
             onPress={() => setSortBy('rotation')}
           >
             <Text style={[styles.sortButtonText, sortBy === 'rotation' && styles.sortButtonTextActive]}>
-              🔄 Rotación
+              🔄 {t('analytics.sort_rotation')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -325,15 +327,15 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
                 {/* Métricas */}
                 <View style={styles.wineMetrics}>
                   <View style={styles.wineMetricItem}>
-                    <Text style={styles.wineMetricLabel}>Vendidas:</Text>
+                    <Text style={styles.wineMetricLabel}>{t('analytics.sold_label')}</Text>
                     <Text style={styles.wineMetricValue}>{wine.total_sales}</Text>
                   </View>
                   <View style={styles.wineMetricItem}>
-                    <Text style={styles.wineMetricLabel}>Ingresos:</Text>
+                    <Text style={styles.wineMetricLabel}>{t('analytics.revenue_label')}</Text>
                     <Text style={styles.wineMetricValue}>${wine.total_revenue.toFixed(0)}</Text>
                   </View>
                   <View style={styles.wineMetricItem}>
-                    <Text style={styles.wineMetricLabel}>Stock:</Text>
+                    <Text style={styles.wineMetricLabel}>{t('analytics.stock_label')}</Text>
                     <Text style={[
                       styles.wineMetricValue,
                       wine.current_stock <= 5 && styles.wineMetricValueLow
@@ -346,14 +348,18 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
                 {/* Métricas adicionales */}
                 <View style={styles.wineExtraMetrics}>
                   <Text style={styles.wineExtraMetric}>
-                    🍾 {wine.bottles_sold} botellas • 🍷 {wine.glasses_sold} copas
+                    {t('analytics.bottles_glasses')
+                      .replace('{bottles}', String(wine.bottles_sold))
+                      .replace('{glasses}', String(wine.glasses_sold))}
                   </Text>
                   <Text style={styles.wineExtraMetric}>
-                    📊 {wine.sales_per_day.toFixed(2)} ventas/día • 💰 ${wine.revenue_per_day.toFixed(2)}/día
+                    {t('analytics.sales_per_day')
+                      .replace('{sales}', wine.sales_per_day.toFixed(2))
+                      .replace('{revenue}', wine.revenue_per_day.toFixed(2))}
                   </Text>
                   {wine.stock_days_remaining < 30 && wine.stock_days_remaining > 0 && (
                     <Text style={[styles.wineExtraMetric, styles.wineExtraMetricWarning]}>
-                      ⚠️ Stock para ~{Math.floor(wine.stock_days_remaining)} días
+                      {t('analytics.stock_days').replace('{days}', String(Math.floor(wine.stock_days_remaining)))}
                     </Text>
                   )}
                 </View>
@@ -364,8 +370,8 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           {sortedWines.length === 0 && (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>📊</Text>
-              <Text style={styles.emptyTitle}>No hay datos de ventas</Text>
-              <Text style={styles.emptySubtitle}>Las métricas aparecerán cuando haya ventas registradas</Text>
+              <Text style={styles.emptyTitle}>{t('analytics.empty_sales_title')}</Text>
+              <Text style={styles.emptySubtitle}>{t('analytics.empty_sales_subtitle')}</Text>
             </View>
           )}
         </ScrollView>
@@ -377,7 +383,7 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!comparisonMetrics) {
       return (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No hay datos de comparación</Text>
+          <Text style={styles.emptyText}>{t('analytics.no_comparison_data')}</Text>
         </View>
       );
     }
@@ -386,31 +392,31 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       <ScrollView style={styles.tabContent} showsVerticalScrollIndicator={false}>
         {/* Resumen Global */}
         <View style={styles.comparisonHeader}>
-          <Text style={styles.comparisonTitle}>📊 Resumen Global</Text>
+          <Text style={styles.comparisonTitle}>📊 {t('analytics.global_summary')}</Text>
           <View style={styles.comparisonStats}>
             <View style={styles.comparisonStatCard}>
               <Text style={styles.comparisonStatValue}>
                 ${comparisonMetrics.total_system_revenue.toFixed(0)}
               </Text>
-              <Text style={styles.comparisonStatLabel}>Ingresos Totales</Text>
+              <Text style={styles.comparisonStatLabel}>{t('analytics.total_revenue')}</Text>
             </View>
             <View style={styles.comparisonStatCard}>
               <Text style={styles.comparisonStatValue}>{comparisonMetrics.total_system_sales}</Text>
-              <Text style={styles.comparisonStatLabel}>Ventas Totales</Text>
+              <Text style={styles.comparisonStatLabel}>{t('analytics.total_sales')}</Text>
             </View>
           </View>
           <View style={styles.comparisonInfo}>
             <Text style={styles.comparisonInfoText}>
-              🏆 Mejor: {comparisonMetrics.best_performing_branch}
+              🏆 {t('analytics.best_branch').replace('{name}', comparisonMetrics.best_performing_branch)}
             </Text>
             <Text style={styles.comparisonInfoText}>
-              📉 A mejorar: {comparisonMetrics.worst_performing_branch}
+              📉 {t('analytics.worst_branch').replace('{name}', comparisonMetrics.worst_performing_branch)}
             </Text>
           </View>
         </View>
 
         {/* Comparación por Sucursal */}
-        <Text style={styles.sectionTitle}>🏢 Comparación por Sucursal</Text>
+        <Text style={styles.sectionTitle}>🏢 {t('analytics.branch_comparison')}</Text>
         {comparisonMetrics.branches
           .sort((a, b) => b.total_revenue - a.total_revenue)
           .map((branch, index) => (
@@ -424,32 +430,32 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
 
               <View style={styles.branchComparisonMetrics}>
                 <View style={styles.branchComparisonMetricRow}>
-                  <Text style={styles.branchComparisonLabel}>Vinos:</Text>
+                  <Text style={styles.branchComparisonLabel}>{t('analytics.stat_wines')}:</Text>
                   <Text style={styles.branchComparisonValue}>{branch.total_wines}</Text>
                 </View>
                 <View style={styles.branchComparisonMetricRow}>
-                  <Text style={styles.branchComparisonLabel}>Stock Total:</Text>
+                  <Text style={styles.branchComparisonLabel}>{t('analytics.stat_total_stock')}:</Text>
                   <Text style={styles.branchComparisonValue}>{branch.total_stock}</Text>
                 </View>
                 <View style={styles.branchComparisonMetricRow}>
-                  <Text style={styles.branchComparisonLabel}>Ventas:</Text>
+                  <Text style={styles.branchComparisonLabel}>{t('analytics.stat_sales')}:</Text>
                   <Text style={styles.branchComparisonValue}>{branch.total_sales}</Text>
                 </View>
                 <View style={styles.branchComparisonMetricRow}>
-                  <Text style={styles.branchComparisonLabel}>Ingresos:</Text>
+                  <Text style={styles.branchComparisonLabel}>{t('analytics.stat_revenue')}:</Text>
                   <Text style={[styles.branchComparisonValue, styles.branchComparisonValueHighlight]}>
                     ${branch.total_revenue.toFixed(2)}
                   </Text>
                 </View>
                 <View style={styles.branchComparisonMetricRow}>
-                  <Text style={styles.branchComparisonLabel}>Ticket Promedio:</Text>
+                  <Text style={styles.branchComparisonLabel}>{t('analytics.avg_ticket')}</Text>
                   <Text style={styles.branchComparisonValue}>${branch.avg_ticket.toFixed(2)}</Text>
                 </View>
               </View>
 
               {/* Progress bar de contribución */}
               <View style={styles.contributionBar}>
-                <Text style={styles.contributionLabel}>Contribución al total:</Text>
+                <Text style={styles.contributionLabel}>{t('analytics.contribution_label')}</Text>
                 <View style={styles.contributionBarContainer}>
                   <View
                     style={[
@@ -474,7 +480,7 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#8B0000" />
-        <Text style={styles.loadingText}>Cargando análisis...</Text>
+        <Text style={styles.loadingText}>{t('analytics.loading')}</Text>
       </View>
     );
   }
@@ -487,7 +493,7 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={styles.backButtonText}>←</Text>
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <Text style={styles.title}>📊 Análisis y Reportes</Text>
+          <Text style={styles.title}>📊 {t('analytics.screen_title')}</Text>
           <Text style={styles.subtitle}>{currentBranch?.name}</Text>
         </View>
       </View>
@@ -499,7 +505,7 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           onPress={() => setViewMode('overview')}
         >
           <Text style={[styles.tabText, viewMode === 'overview' && styles.tabTextActive]}>
-            📈 General
+            📈 {t('analytics.tab_overview')}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -507,7 +513,7 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           onPress={() => setViewMode('wines')}
         >
           <Text style={[styles.tabText, viewMode === 'wines' && styles.tabTextActive]}>
-            🍷 Por Vino
+            🍷 {t('analytics.tab_wines')}
           </Text>
         </TouchableOpacity>
         {isOwner && availableBranches.length > 1 && (
@@ -516,7 +522,7 @@ const AnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
             onPress={() => setViewMode('comparison')}
           >
             <Text style={[styles.tabText, viewMode === 'comparison' && styles.tabTextActive]}>
-              🏢 Sucursales
+              🏢 {t('analytics.tab_branches')}
             </Text>
           </TouchableOpacity>
         )}

@@ -18,6 +18,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../../types';
 import ProWineCamera from '../modules/camera/ProWineCamera';
 import { Quad, CameraConfig, DEFAULT_CONFIG } from '../modules/camera/types';
+import { useLanguage } from '../contexts/LanguageContext';
 
 type CaptureWineLabelScreenNavigationProp = StackNavigationProp<RootStackParamList, 'CaptureWineLabel'>;
 
@@ -33,6 +34,7 @@ interface CaptureResult {
 }
 
 export default function CaptureWineLabelScreen({ navigation }: Props) {
+  const { t } = useLanguage();
   const [captureResults, setCaptureResults] = useState<CaptureResult[]>([]);
   const [showCamera, setShowCamera] = useState(true);
   const [currentConfig, setCurrentConfig] = useState<CameraConfig>(DEFAULT_CONFIG);
@@ -75,11 +77,11 @@ export default function CaptureWineLabelScreen({ navigation }: Props) {
     
     // Mostrar confirmación
     Alert.alert(
-      '¡Captura Exitosa!',
-      'La etiqueta ha sido capturada y procesada correctamente.',
+      t('capture.success_title'),
+      t('capture.success_body'),
       [
-        { text: 'Continuar', style: 'default' },
-        { text: 'Ver Resultado', style: 'default', onPress: () => setShowCamera(false) },
+        { text: t('common.continue'), style: 'default' },
+        { text: t('capture.view_result'), style: 'default', onPress: () => setShowCamera(false) },
       ]
     );
   };
@@ -98,7 +100,7 @@ export default function CaptureWineLabelScreen({ navigation }: Props) {
    */
   const handleCameraError = (error: string) => {
     console.error('❌ Error de cámara:', error);
-    Alert.alert('Error de Cámara', error);
+    Alert.alert(t('capture.camera_error_title'), error);
   };
 
   /**
@@ -144,14 +146,14 @@ export default function CaptureWineLabelScreen({ navigation }: Props) {
       await new Promise(resolve => setTimeout(resolve, 2000));
       
       Alert.alert(
-        'Procesamiento Completado',
-        'La imagen ha sido procesada con éxito. Los datos del vino han sido extraídos.',
-        [{ text: 'OK' }]
+        t('capture.process_complete_title'),
+        t('capture.process_complete_body'),
+        [{ text: t('common.ok') }]
       );
       
     } catch (error) {
       console.error('Error procesando imagen:', error);
-      Alert.alert('Error', 'No se pudo procesar la imagen');
+      Alert.alert(t('common.error'), t('capture.process_error'));
     }
   };
 
@@ -171,7 +173,7 @@ export default function CaptureWineLabelScreen({ navigation }: Props) {
           {/* Controles superiores */}
           <View style={styles.topControls}>
             <TouchableOpacity style={styles.backButton} onPress={goBack}>
-              <Text style={styles.backButtonText}>← Volver</Text>
+              <Text style={styles.backButtonText}>← {t('common.back')}</Text>
             </TouchableOpacity>
             
             <View style={styles.rightControls}>
@@ -194,13 +196,16 @@ export default function CaptureWineLabelScreen({ navigation }: Props) {
           {/* Información de estado */}
           <View style={styles.statusInfo}>
             <Text style={styles.statusText}>
-              Modo: {currentConfig.autoShoot ? 'Auto-disparo' : 'Manual'}
+              {t('capture.mode_label').replace(
+                '{mode}',
+                currentConfig.autoShoot ? t('capture.mode_auto') : t('capture.mode_manual')
+              )}
             </Text>
             <Text style={styles.statusText}>
               Debug: {debugMode ? 'ON' : 'OFF'}
             </Text>
             <Text style={styles.statusText}>
-              Capturas: {captureResults.length}
+              {t('capture.captures_count').replace('{count}', String(captureResults.length))}
             </Text>
           </View>
           
@@ -211,7 +216,7 @@ export default function CaptureWineLabelScreen({ navigation }: Props) {
               onPress={() => setShowCamera(false)}
             >
               <Text style={styles.resultsButtonText}>
-                Ver Resultados ({captureResults.length})
+                {t('capture.view_results').replace('{count}', String(captureResults.length))}
               </Text>
             </TouchableOpacity>
           )}
@@ -220,28 +225,30 @@ export default function CaptureWineLabelScreen({ navigation }: Props) {
         <ScrollView style={styles.resultsContainer}>
           <View style={styles.resultsHeader}>
             <TouchableOpacity style={styles.backButton} onPress={() => setShowCamera(true)}>
-              <Text style={styles.backButtonText}>← Volver a Cámara</Text>
+              <Text style={styles.backButtonText}>{t('capture.back_to_camera')}</Text>
             </TouchableOpacity>
             
             <TouchableOpacity style={styles.resetButton} onPress={resetResults}>
-              <Text style={styles.resetButtonText}>Limpiar</Text>
+              <Text style={styles.resetButtonText}>{t('capture.clear')}</Text>
             </TouchableOpacity>
           </View>
           
-          <Text style={styles.resultsTitle}>Resultados de Captura</Text>
+          <Text style={styles.resultsTitle}>{t('capture.results_title')}</Text>
           
           {captureResults.map((result, index) => (
             <View key={result.timestamp} style={styles.resultItem}>
-              <Text style={styles.resultItemTitle}>Captura #{index + 1}</Text>
+              <Text style={styles.resultItemTitle}>
+                {t('capture.item_title').replace('{index}', String(index + 1))}
+              </Text>
               
               <View style={styles.imageContainer}>
-                <Text style={styles.imageLabel}>Original:</Text>
+                <Text style={styles.imageLabel}>{t('capture.original_label')}</Text>
                 <Image source={{ uri: result.originalUri }} style={styles.resultImage} />
               </View>
               
               {result.warpedUri && (
                 <View style={styles.imageContainer}>
-                  <Text style={styles.imageLabel}>Procesada:</Text>
+                  <Text style={styles.imageLabel}>{t('capture.processed_label')}</Text>
                   <Image source={{ uri: result.warpedUri }} style={styles.resultImage} />
                 </View>
               )}
@@ -250,7 +257,7 @@ export default function CaptureWineLabelScreen({ navigation }: Props) {
                 style={styles.processButton}
                 onPress={() => processCapturedImage(result.warpedUri || result.originalUri)}
               >
-                <Text style={styles.processButtonText}>Procesar con OCR</Text>
+                <Text style={styles.processButtonText}>{t('capture.process_ocr')}</Text>
               </TouchableOpacity>
             </View>
           ))}

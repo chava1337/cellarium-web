@@ -5,25 +5,33 @@ import {
   StyleSheet,
   ScrollView,
 } from 'react-native';
+import { useLanguage } from '../contexts/LanguageContext';
 
 const TastingNotesScreen: React.FC = () => {
+  const { t } = useLanguage();
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Catas y Degustaciones</Text>
-        <Text style={styles.subtitle}>Próximamente disponible</Text>
+        <Text style={styles.title}>{t('tasting.title')}</Text>
+        <Text style={styles.subtitle}>{t('tasting.coming_soon')}</Text>
       </View>
 
       <ScrollView style={styles.content}>
         <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>🍇 Funcionalidad en Desarrollo</Text>
+          <Text style={styles.infoTitle}>{t('tasting.notes_dev_title')}</Text>
           <Text style={styles.infoText}>
-            Esta sección permitirá:{'\n\n'}
-            • Registrar notas de cata profesionales{'\n'}
-            • Calificaciones internas de staff/sommelier{'\n'}
-            • Evaluación privada de vinos (1-5 estrellas){'\n'}
-            • Notas de cata detalladas{'\n'}
-            • Historial de degustaciones
+            {t('tasting.notes_dev_intro')}
+            {'\n\n'}
+            {t('tasting.notes_dev_bullet_notes')}
+            {'\n'}
+            {t('tasting.notes_dev_bullet_ratings')}
+            {'\n'}
+            {t('tasting.notes_dev_bullet_private')}
+            {'\n'}
+            {t('tasting.notes_dev_bullet_detailed')}
+            {'\n'}
+            {t('tasting.notes_dev_bullet_history')}
           </Text>
         </View>
       </ScrollView>

@@ -14,6 +14,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { useAdminGuard } from '../hooks/useAdminGuard';
 
 type AdminLoginScreenNavigationProp = StackNavigationProp<RootStackParamList, 'AdminLogin'>;
@@ -27,6 +28,7 @@ interface Props {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const AdminLoginScreen: React.FC<Props> = ({ navigation, route }) => {
+  const { t } = useLanguage();
   useAdminGuard({ navigation, route, requireAuth: false });
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -35,12 +37,12 @@ const AdminLoginScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const handleAdminLogin = async () => {
     if (!email.trim() || !password) {
-      Alert.alert('Error', 'Por favor ingresa correo electrónico y contraseña');
+      Alert.alert(t('common.error'), t('auth.admin_fill_credentials'));
       return;
     }
     const normalizedEmail = email.trim().toLowerCase();
     if (!EMAIL_REGEX.test(normalizedEmail)) {
-      Alert.alert('Error', 'Ingresa un correo electrónico válido.');
+      Alert.alert(t('common.error'), t('auth.invalid_email'));
       return;
     }
 
@@ -49,7 +51,7 @@ const AdminLoginScreen: React.FC<Props> = ({ navigation, route }) => {
       await signIn(normalizedEmail, password);
       navigation.navigate('AdminDashboard');
     } catch (error: any) {
-      Alert.alert('Credenciales inválidas', 'Correo o contraseña incorrectos.');
+      Alert.alert(t('auth.invalid_credentials_title'), t('auth.invalid_credentials_body'));
     } finally {
       setLoading(false);
     }
@@ -68,19 +70,19 @@ const AdminLoginScreen: React.FC<Props> = ({ navigation, route }) => {
     >
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         <View style={styles.header}>
-          <Text style={styles.title}>Acceso Administrativo</Text>
+          <Text style={styles.title}>{t('auth.admin_login_title')}</Text>
         </View>
 
         <View style={styles.formContainer}>
-          <Text style={styles.formTitle}>Autenticación de Administrador</Text>
+          <Text style={styles.formTitle}>{t('auth.admin_login_form_title')}</Text>
           
           <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Correo electrónico</Text>
+            <Text style={styles.inputLabel}>{t('auth.email')}</Text>
             <TextInput
               style={styles.input}
               value={email}
               onChangeText={setEmail}
-              placeholder="correo@ejemplo.com"
+              placeholder={t('auth.email_placeholder')}
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="email-address"
@@ -92,7 +94,7 @@ const AdminLoginScreen: React.FC<Props> = ({ navigation, route }) => {
               style={styles.input}
               value={password}
               onChangeText={setPassword}
-              placeholder="Contraseña de administrador"
+              placeholder={t('auth.admin_password_placeholder')}
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
@@ -105,13 +107,13 @@ const AdminLoginScreen: React.FC<Props> = ({ navigation, route }) => {
             disabled={loading}
           >
             <Text style={styles.loginButtonText}>
-              {loading ? 'Verificando...' : 'Acceder'}
+              {loading ? t('auth.logging_in_button') : t('auth.admin_login_button')}
             </Text>
           </TouchableOpacity>
 
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>Desarrollo</Text>
+            <Text style={styles.dividerText}>{t('auth.dev_section')}</Text>
             <View style={styles.dividerLine} />
           </View>
 
@@ -119,7 +121,7 @@ const AdminLoginScreen: React.FC<Props> = ({ navigation, route }) => {
             style={styles.devButton}
             onPress={handleDevelopmentMode}
           >
-            <Text style={styles.devButtonText}>🚀 Modo Desarrollo</Text>
+            <Text style={styles.devButtonText}>{t('auth.admin_dev_mode')}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

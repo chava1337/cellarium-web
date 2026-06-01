@@ -18,6 +18,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { supabase } from '../lib/supabase';
 import { withTimeout, TimeoutError } from '../utils/withTimeout';
 import { useAuth } from '../contexts/AuthContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { CELLARIUM, CELLARIUM_LAYOUT, CELLARIUM_TEXT } from '../theme/cellariumTheme';
 import AppleSignInButton from '../components/auth/AppleSignInButton';
 
@@ -27,6 +28,7 @@ interface AuthScreenProps {
 }
 
 export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: AuthScreenProps) {
+  const { t } = useLanguage();
   const { user } = useAuth();
   const [isLogin, setIsLogin] = useState(initialMode === 'login');
   const [email, setEmail] = useState('');
@@ -65,7 +67,7 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
     }
 
     if (!email || !password) {
-      Alert.alert('Error', 'Por favor completa todos los campos');
+      Alert.alert(t('common.error'), t('auth.fill_all_fields'));
       setSubmitting(false);
       return;
     }
@@ -76,34 +78,34 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
     if (isLogin) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(normalizedEmail)) {
-        Alert.alert('Error', 'Ingresa un correo electrónico válido.');
+        Alert.alert(t('common.error'), t('auth.invalid_email'));
         setSubmitting(false);
         return;
       }
       if (!normalizedPassword) {
-        Alert.alert('Error', 'La contraseña no puede estar vacía.');
+        Alert.alert(t('common.error'), t('auth.password_empty'));
         setSubmitting(false);
         return;
       }
     } else {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(normalizedEmail)) {
-        Alert.alert('Error', 'Ingresa un correo electrónico válido.');
+        Alert.alert(t('common.error'), t('auth.invalid_email'));
         setSubmitting(false);
         return;
       }
       if (confirmEmail.trim().toLowerCase() !== normalizedEmail) {
-        Alert.alert('Error', 'El correo y la confirmación no coinciden.');
+        Alert.alert(t('common.error'), t('auth.email_mismatch'));
         setSubmitting(false);
         return;
       }
       if (!normalizedPassword || normalizedPassword.length < 6) {
-        Alert.alert('Error', 'La contraseña debe tener al menos 6 caracteres.');
+        Alert.alert(t('common.error'), t('auth.password_min_length'));
         setSubmitting(false);
         return;
       }
       if (password !== confirmPassword) {
-        Alert.alert('Error', 'La contraseña y la confirmación no coinciden.');
+        Alert.alert(t('common.error'), t('auth.password_mismatch'));
         setSubmitting(false);
         return;
       }
@@ -155,8 +157,8 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
               String(signUpErr?.message ?? '').includes('Network request failed'))
           ) {
             Alert.alert(
-              'Error de red',
-              'Error de red en la app (fetch). Revisa DNS privado, fecha/hora automática y vuelve a intentar.'
+              t('auth.network_error_title'),
+              t('auth.network_error_body')
             );
             setLoading(false);
             return;
@@ -165,11 +167,11 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
         }
         if (error) {
           console.log('[SIGNUP] error', { message: error?.message, status: error?.status, name: error?.name });
-          Alert.alert('Error', error.message);
+          Alert.alert(t('common.error'), error.message);
         } else {
           Alert.alert(
-            'Bienvenido a Cellarium',
-            'Verifica tu correo para activar tu cuenta y desbloquear todas tus funciones.'
+            t('auth.welcome_title'),
+            t('auth.welcome_verify_body')
           );
         }
       } else {
@@ -184,16 +186,16 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
           );
           if (rateLimitError?.status === 429 || rateLimitError?.message?.includes('429')) {
             Alert.alert(
-              'Demasiados intentos',
-              'Has excedido el límite de intentos. Por seguridad, espera unos minutos antes de intentar de nuevo.'
+              t('auth.too_many_attempts_title'),
+              t('auth.too_many_attempts_body')
             );
             setLoading(false);
             return;
           }
           if (rateLimitData && !rateLimitData.allowed) {
             Alert.alert(
-              'Demasiados intentos',
-              'Has excedido el límite de intentos. Por seguridad, espera unos minutos antes de intentar de nuevo.'
+              t('auth.too_many_attempts_title'),
+              t('auth.too_many_attempts_body')
             );
             setLoading(false);
             return;
@@ -214,20 +216,20 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
 
         if (error) {
           Alert.alert(
-            'Credenciales inválidas',
-            'Correo o contraseña incorrectos. Si no tienes cuenta, regístrate.',
-            [{ text: 'OK', onPress: () => setIsLogin(false) }]
+            t('auth.invalid_credentials_title'),
+            t('auth.invalid_credentials_body_register'),
+            [{ text: t('auth.ok'), onPress: () => setIsLogin(false) }]
           );
         }
       }
     } catch (error: any) {
       if (error instanceof TimeoutError) {
         Alert.alert(
-          'Conexión lenta',
-          'La operación tardó demasiado. Revisa tu conexión e intenta de nuevo.'
+          t('auth.slow_connection_title'),
+          t('auth.slow_connection_body')
         );
       } else {
-        Alert.alert('Credenciales inválidas', 'Correo o contraseña incorrectos.');
+        Alert.alert(t('auth.invalid_credentials_title'), t('auth.invalid_credentials_body'));
       }
     } finally {
       setLoading(false);
@@ -251,12 +253,12 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
       if (__DEV__) console.log('[OAUTH] data.url exists:', !!data?.url);
 
       if (error) {
-        Alert.alert('Error', `Error: ${error.message}`);
+        Alert.alert(t('common.error'), error.message || t('auth.google_login_error'));
         return;
       }
 
       if (!data?.url) {
-        Alert.alert('Error', 'No se pudo obtener la URL de autenticación');
+        Alert.alert(t('common.error'), t('auth.google_auth_url_error'));
         return;
       }
 
@@ -285,14 +287,14 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
         url = new URL(resultUrl);
       } catch {
         if (__DEV__) console.log('[OAuth] invalid callback url');
-        Alert.alert('Error', 'No se pudo procesar la respuesta de inicio de sesión.');
+        Alert.alert(t('common.error'), t('auth.google_process_error'));
         setLoading(false);
         return;
       }
 
       const errorParam = url.searchParams.get('error');
       if (errorParam) {
-        Alert.alert('Error', 'No se pudo completar el inicio de sesión con Google. Intenta de nuevo.');
+        Alert.alert(t('common.error'), t('auth.google_complete_error'));
         setLoading(false);
         return;
       }
@@ -303,7 +305,7 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
         const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
         if (__DEV__) console.log('[OAuth] exchangeCodeForSession done', { hasSession: !!exchangeData?.session, error: exchangeError?.message ?? null });
         if (exchangeError) {
-          Alert.alert('Error', 'No se pudo completar el inicio de sesión con Google. Intenta de nuevo.');
+          Alert.alert(t('common.error'), t('auth.google_complete_error'));
           setLoading(false);
           return;
         }
@@ -330,7 +332,7 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
         });
         if (__DEV__) console.log('[OAuth] setSession done', { uid: sessionData?.user?.id ?? null, error: sessionError?.message ?? null });
         if (sessionError) {
-          Alert.alert('Error', 'No se pudo completar el inicio de sesión con Google. Intenta de nuevo.');
+          Alert.alert(t('common.error'), t('auth.google_complete_error'));
           setLoading(false);
           return;
         }
@@ -346,12 +348,12 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
       }
 
       if (__DEV__) console.log('[OAuth] callback missing tokens and code', resultUrl);
-      Alert.alert('Error', 'No se pudo completar el inicio de sesión con Google. Intenta de nuevo.');
+      Alert.alert(t('common.error'), t('auth.google_complete_error'));
       setLoading(false);
       return;
     } catch (error: any) {
       if (__DEV__) console.log('[OAUTH ERROR]', error?.message);
-      Alert.alert('Error', error?.message || 'Error iniciando sesión con Google');
+      Alert.alert(t('common.error'), error?.message || t('auth.google_login_error'));
     } finally {
       setLoading(false);
     }
@@ -440,7 +442,7 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
           <View style={styles.formContainer}>
             <View style={styles.header}>
               <Text style={styles.subtitle}>
-                {isLogin ? 'Inicia sesión para continuar' : 'Crea tu cuenta como Owner'}
+                {isLogin ? t('auth.login_subtitle') : t('auth.register_subtitle')}
               </Text>
             </View>
 
@@ -470,17 +472,17 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
 
               <View style={styles.divider}>
                 <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>o usa tu correo</Text>
+                <Text style={styles.dividerText}>{t('auth.divider_email')}</Text>
                 <View style={styles.dividerLine} />
               </View>
 
               {/* Orden registro: Nombre → Correo → Confirmar correo → Contraseña → Confirmar contraseña */}
               {!isLogin && (
                 <View style={styles.inputContainer}>
-                  <Text style={styles.inputLabel}>Nombre completo</Text>
+                  <Text style={styles.inputLabel}>{t('auth.full_name')}</Text>
                   <TextInput
                     style={styles.input}
-                    placeholder="Ej: Juan Pérez"
+                    placeholder={t('auth.full_name_placeholder')}
                     value={name}
                     onChangeText={setName}
                     autoCapitalize="words"
@@ -490,10 +492,10 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
               )}
 
               <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>Correo electrónico</Text>
+                <Text style={styles.inputLabel}>{t('auth.email')}</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="correo@ejemplo.com"
+                  placeholder={t('auth.email_placeholder')}
                   value={email}
                   onChangeText={setEmail}
                   autoCapitalize="none"
@@ -505,10 +507,10 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
 
               {!isLogin && (
                 <View style={styles.inputContainer}>
-                  <Text style={styles.inputLabel}>Confirmar correo</Text>
+                  <Text style={styles.inputLabel}>{t('auth.confirm_email')}</Text>
                   <TextInput
                     style={styles.input}
-                    placeholder="correo@ejemplo.com"
+                    placeholder={t('auth.email_placeholder')}
                     value={confirmEmail}
                     onChangeText={setConfirmEmail}
                     autoCapitalize="none"
@@ -520,11 +522,11 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
               )}
 
               <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>Contraseña</Text>
+                <Text style={styles.inputLabel}>{t('auth.password')}</Text>
                 <View style={styles.inputWithIcon}>
                   <TextInput
                     style={styles.inputPassword}
-                    placeholder="Mínimo 6 caracteres"
+                    placeholder={t('auth.password_placeholder')}
                     value={password}
                     onChangeText={setPassword}
                     autoCapitalize="none"
@@ -548,11 +550,11 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
 
               {!isLogin && (
                 <View style={styles.inputContainer}>
-                  <Text style={styles.inputLabel}>Confirmar contraseña</Text>
+                  <Text style={styles.inputLabel}>{t('auth.confirm_password')}</Text>
                   <View style={styles.inputWithIcon}>
                     <TextInput
                       style={styles.inputPassword}
-                      placeholder="Repite la contraseña"
+                      placeholder={t('auth.confirm_password_placeholder')}
                       value={confirmPassword}
                       onChangeText={setConfirmPassword}
                       autoCapitalize="none"
@@ -587,18 +589,18 @@ export default function AuthScreen({ onAuthSuccess, initialMode = 'login' }: Aut
                   <Text style={styles.emailButtonText}>
                     {loading
                       ? isLogin
-                        ? 'Iniciando sesión...'
-                        : 'Creando cuenta...'
+                        ? t('auth.logging_in')
+                        : t('auth.creating_account')
                       : isLogin
-                        ? 'Iniciar sesión con correo'
-                        : 'Registrarse con correo'}
+                        ? t('auth.login_email_button')
+                        : t('auth.register_email_button')}
                   </Text>
                 </View>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.switchButton} onPress={() => setIsLogin(!isLogin)}>
                 <Text style={styles.switchButtonText}>
-                  {isLogin ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia sesión'}
+                  {isLogin ? t('auth.no_account') : t('auth.has_account')}
                 </Text>
               </TouchableOpacity>
             </View>

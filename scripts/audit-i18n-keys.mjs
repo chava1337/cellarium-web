@@ -17,6 +17,16 @@ const SRC = path.join(ROOT, 'src');
 const LC_FILE = path.join(SRC, 'contexts', 'LanguageContext.tsx');
 const PT_P1_FILE = path.join(SRC, 'i18n', 'ptBRP1Screens.ts');
 const INV_TASTING_FILE = path.join(SRC, 'i18n', 'inventoryTastingI18n.ts');
+const EXTENDED_FILE = path.join(SRC, 'i18n', 'cellariumExtendedI18n.ts');
+const TASTING_FLOW_FILE = path.join(SRC, 'i18n', 'tastingFlowI18n.ts');
+const AUTH_FLOW_FILE = path.join(SRC, 'i18n', 'authFlowI18n.ts');
+
+function extractFromExportFile(filePath, exportName) {
+  if (!fs.existsSync(filePath)) return new Set();
+  const raw = fs.readFileSync(filePath, 'utf8');
+  const section = raw.match(new RegExp(`export const ${exportName}[^=]*=\\s*\\{([\\s\\S]*?)\\n\\};`, 'm'))?.[1] ?? '';
+  return extractLocaleKeys(section);
+}
 const OUT_DIR = path.join(__dirname, 'reports');
 const OUT_JSON = path.join(OUT_DIR, 'i18n-audit.json');
 
@@ -55,13 +65,24 @@ function parseTranslations() {
     ptP1 = extractLocaleKeys(fs.readFileSync(PT_P1_FILE, 'utf8'));
   }
   if (fs.existsSync(INV_TASTING_FILE)) {
-    const invRaw = fs.readFileSync(INV_TASTING_FILE, 'utf8');
-    const esSection = invRaw.match(/export const inventoryTastingEs[^=]*=\s*\{([\s\S]*?)\n\};/m)?.[1] ?? '';
-    const enSection = invRaw.match(/export const inventoryTastingEn[^=]*=\s*\{([\s\S]*?)\n\};/m)?.[1] ?? '';
-    const ptSection = invRaw.match(/export const inventoryTastingPtBR[^=]*=\s*\{([\s\S]*?)\n\};/m)?.[1] ?? '';
-    invEs = extractLocaleKeys(esSection);
-    invEn = extractLocaleKeys(enSection);
-    ptP1 = new Set([...ptP1, ...extractLocaleKeys(ptSection)]);
+    invEs = extractFromExportFile(INV_TASTING_FILE, 'inventoryTastingEs');
+    invEn = extractFromExportFile(INV_TASTING_FILE, 'inventoryTastingEn');
+    ptP1 = new Set([...ptP1, ...extractFromExportFile(INV_TASTING_FILE, 'inventoryTastingPtBR')]);
+  }
+  if (fs.existsSync(EXTENDED_FILE)) {
+    invEs = new Set([...invEs, ...extractFromExportFile(EXTENDED_FILE, 'cellariumExtendedEs')]);
+    invEn = new Set([...invEn, ...extractFromExportFile(EXTENDED_FILE, 'cellariumExtendedEn')]);
+    ptP1 = new Set([...ptP1, ...extractFromExportFile(EXTENDED_FILE, 'cellariumExtendedPtBR')]);
+  }
+  if (fs.existsSync(TASTING_FLOW_FILE)) {
+    invEs = new Set([...invEs, ...extractFromExportFile(TASTING_FLOW_FILE, 'tastingFlowEs')]);
+    invEn = new Set([...invEn, ...extractFromExportFile(TASTING_FLOW_FILE, 'tastingFlowEn')]);
+    ptP1 = new Set([...ptP1, ...extractFromExportFile(TASTING_FLOW_FILE, 'tastingFlowPtBR')]);
+  }
+  if (fs.existsSync(AUTH_FLOW_FILE)) {
+    invEs = new Set([...invEs, ...extractFromExportFile(AUTH_FLOW_FILE, 'authFlowEs')]);
+    invEn = new Set([...invEn, ...extractFromExportFile(AUTH_FLOW_FILE, 'authFlowEn')]);
+    ptP1 = new Set([...ptP1, ...extractFromExportFile(AUTH_FLOW_FILE, 'authFlowPtBR')]);
   }
   const pt = new Set([...ptInline, ...ptP1]);
   return {

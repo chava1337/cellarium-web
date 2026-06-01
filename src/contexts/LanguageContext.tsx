@@ -12,6 +12,13 @@ import {
   inventoryTastingEn,
   inventoryTastingPtBR,
 } from '../i18n/inventoryTastingI18n';
+import {
+  cellariumExtendedEs,
+  cellariumExtendedEn,
+  cellariumExtendedPtBR,
+} from '../i18n/cellariumExtendedI18n';
+import { tastingFlowEs, tastingFlowEn, tastingFlowPtBR } from '../i18n/tastingFlowI18n';
+import { authFlowEs, authFlowEn, authFlowPtBR } from '../i18n/authFlowI18n';
 
 export type Language = UiLanguage;
 
@@ -552,6 +559,13 @@ const translations: Record<Language, Record<string, string>> = {
       'La suscripción en Android usa Google Play. Elige un plan abajo o revisa tus suscripciones en Google Play si ya pagaste.',
     'subscription.android_no_subscription_manage_message':
       'Para suscribirte elige un plan más abajo. Si ya pagaste en Google Play y no ves tu plan, revisa tus suscripciones en la tienda Google Play.',
+    'subscription.google_free_month_banner_title': 'Primer mes gratis',
+    'subscription.google_free_month_banner_body':
+      'Prueba Cellarium sin costo durante 1 mes. Después continúa con tu plan mensual.',
+    'subscription.google_free_month_badge': 'Primer mes gratis',
+    'subscription.google_then_price_per_month': 'Después {price}/mes',
+    'subscription.google_new_customer_offer': 'Oferta para nuevos clientes',
+    'subscription.google_free_trial_one_month': 'Prueba gratis por 1 mes',
     'subscription.google_success_title': 'Suscripción sincronizada',
     'subscription.google_success_message': 'Tu plan se activó con Google Play.',
     'subscription.google_pending_message':
@@ -1030,6 +1044,9 @@ const translations: Record<Language, Record<string, string>> = {
     'global_catalog.sweetness': 'Dulzor',
 
     ...inventoryTastingEs,
+    ...cellariumExtendedEs,
+    ...tastingFlowEs,
+    ...authFlowEs,
   },
   en: {
     // Navigation and menu
@@ -1546,6 +1563,13 @@ const translations: Record<Language, Record<string, string>> = {
       'Android subscriptions use Google Play. Pick a plan below, or check your subscriptions in Google Play if you already paid.',
     'subscription.android_no_subscription_manage_message':
       'To subscribe, choose a plan below. If you already paid on Google Play and do not see your plan, check your subscriptions in the Google Play Store.',
+    'subscription.google_free_month_banner_title': 'First month free',
+    'subscription.google_free_month_banner_body':
+      'Try Cellarium free for 1 month. Then continue with your monthly plan.',
+    'subscription.google_free_month_badge': 'First month free',
+    'subscription.google_then_price_per_month': 'Then {price}/month',
+    'subscription.google_new_customer_offer': 'Offer for new customers',
+    'subscription.google_free_trial_one_month': 'Free trial for 1 month',
     'subscription.google_success_title': 'Subscription synced',
     'subscription.google_success_message': 'Your plan is active with Google Play.',
     'subscription.google_pending_message':
@@ -2025,6 +2049,9 @@ const translations: Record<Language, Record<string, string>> = {
     'global_catalog.sweetness': 'Sweetness',
 
     ...inventoryTastingEn,
+    ...cellariumExtendedEn,
+    ...tastingFlowEn,
+    ...authFlowEn,
   },
   /** UI pt-BR: strings propias cuando existan; t() hace fallback en → es → key. */
   'pt-BR': {
@@ -2351,6 +2378,9 @@ const translations: Record<Language, Record<string, string>> = {
     // P1/P2 — assinaturas, usuários, QR, entrada manual, coquetéis (ver ptBRP1Screens.ts)
     ...ptBRP1Screens,
     ...inventoryTastingPtBR,
+    ...cellariumExtendedPtBR,
+    ...tastingFlowPtBR,
+    ...authFlowPtBR,
   },
 };
 

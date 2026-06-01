@@ -268,6 +268,13 @@ export const ptBRP1Screens: Record<string, string> = {
   'subscription.expires': 'Expira',
   'subscription.expires_on': 'Expira el',
   'subscription.feature_blocked': 'Esta función no está disponible en tu plan actual',
+  'subscription.google_free_month_banner_title': 'Primeiro mês grátis',
+  'subscription.google_free_month_banner_body':
+    'Teste o Cellarium grátis por 1 mês. Depois continue com seu plano mensal.',
+  'subscription.google_free_month_badge': 'Primeiro mês grátis',
+  'subscription.google_then_price_per_month': 'Depois {price}/mês',
+  'subscription.google_new_customer_offer': 'Oferta para novos clientes',
+  'subscription.google_free_trial_one_month': 'Teste grátis por 1 mês',
   'subscription.google_loading_addon_purchase': 'Procesando add-on en Google Play…',
   'subscription.google_pending_message': 'La compra sigue pendiente en Google Play. Reintenta cuando se confirme el pago.',
   'subscription.google_restore': 'Restaurar compras (Google Play)',

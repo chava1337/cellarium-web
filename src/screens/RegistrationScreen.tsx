@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
 
 type RegistrationScreenNavigationProp = StackNavigationProp<RootStackParamList, 'AdminRegistration'>;
 type RegistrationScreenRouteProp = RouteProp<RootStackParamList, 'AdminRegistration'>;
@@ -25,6 +26,7 @@ interface Props {
 }
 
 const RegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
+  const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -43,22 +45,22 @@ const RegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const handleEmailRegister = async () => {
     if (!email || !username || !password || !confirmPassword) {
-      Alert.alert('Error', 'Por favor completa todos los campos');
+      Alert.alert(t('common.error'), t('auth.fill_all_fields'));
       return;
     }
 
     if (!isValidEmail(email)) {
-      Alert.alert('Error', 'Por favor ingresa un email válido');
+      Alert.alert(t('common.error'), t('auth.invalid_email_short'));
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Error', 'Las contraseñas no coinciden');
+      Alert.alert(t('common.error'), t('auth.password_mismatch'));
       return;
     }
 
     if (password.length < 6) {
-      Alert.alert('Error', 'La contraseña debe tener al menos 6 caracteres');
+      Alert.alert(t('common.error'), t('auth.password_min_length'));
       return;
     }
 
@@ -69,32 +71,31 @@ const RegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
         await new Promise(resolve => setTimeout(resolve, 2000));
         
         Alert.alert(
-          '¡Registro Exitoso!',
-          'Tu cuenta de Owner ha sido creada y activada automáticamente. Ya puedes acceder al sistema.',
+          t('auth.registration_success_owner_title'),
+          t('auth.registration_success_owner_body'),
           [
             {
-              text: 'Continuar',
+              text: t('auth.continue'),
               onPress: () => navigation.navigate('Login'),
             },
           ]
         );
       } else {
-        // Registro de Admin invitado - requiere aprobación
         await new Promise(resolve => setTimeout(resolve, 2000));
         
         Alert.alert(
-          'Registro Exitoso',
-          'Tu cuenta ha sido creada. Un administrador revisará tu solicitud y te notificará cuando sea aprobada.',
+          t('auth.registration_success_admin_title'),
+          t('auth.registration_success_admin_body'),
           [
             {
-              text: 'OK',
+              text: t('auth.ok'),
               onPress: () => navigation.navigate('Login'),
             },
           ]
         );
       }
     } catch (error) {
-      Alert.alert('Error', 'No se pudo completar el registro. Inténtalo de nuevo.');
+      Alert.alert(t('common.error'), t('auth.registration_failed'));
     } finally {
       setLoading(false);
     }
@@ -107,17 +108,17 @@ const RegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
       await new Promise(resolve => setTimeout(resolve, 2000));
       
       Alert.alert(
-        'Registro con Google',
-        'Registro exitoso con Google. Un administrador revisará tu solicitud.',
+        t('auth.google_registration_title'),
+        t('auth.google_registration_body'),
         [
           {
-            text: 'OK',
+            text: t('auth.ok'),
             onPress: () => navigation.navigate('Login'),
           },
         ]
       );
     } catch (error) {
-      Alert.alert('Error', 'No se pudo completar el registro con Google.');
+      Alert.alert(t('common.error'), t('auth.google_registration_failed'));
     } finally {
       setGoogleLoading(false);
     }
@@ -136,18 +137,18 @@ const RegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
       >
         <ScrollView contentContainerStyle={styles.scrollContainer}>
         <View style={styles.header}>
-          <Text style={styles.title}>🍷 Cellarium</Text>
+          <Text style={styles.title}>{t('auth.registration_title')}</Text>
           <Text style={styles.subtitle}>
-            {isOwnerRegistration ? 'Registro de Owner' : 'Registro de Administrador'}
+            {isOwnerRegistration ? t('auth.registration_owner') : t('auth.registration_admin')}
           </Text>
         </View>
 
         {/* Información de invitación QR */}
         {isInvitedAdmin && branchName && (
           <View style={styles.invitationCard}>
-            <Text style={styles.invitationTitle}>📧 Invitación Recibida</Text>
+            <Text style={styles.invitationTitle}>{t('auth.invitation_received')}</Text>
             <Text style={styles.invitationText}>
-              Has sido invitado a unirte como administrador de:
+              {t('auth.invitation_admin_body')}
             </Text>
             <View style={styles.branchBadge}>
               <Text style={styles.branchName}>{branchName}</Text>
@@ -158,27 +159,24 @@ const RegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
         {/* Información para Owner */}
         {isOwnerRegistration && (
           <View style={styles.ownerCard}>
-            <Text style={styles.ownerTitle}>👑 Registro de Owner</Text>
+            <Text style={styles.ownerTitle}>{t('auth.owner_card_title')}</Text>
             <Text style={styles.ownerText}>
-              Como Owner, tendrás control total del sistema y podrás:
+              {t('auth.owner_card_body')}
             </Text>
             <Text style={styles.ownerFeatures}>
-              • Crear y gestionar sucursales{'\n'}
-              • Invitar y aprobar administradores{'\n'}
-              • Acceder a todas las funcionalidades{'\n'}
-              • Tu cuenta se activará automáticamente
+              {t('auth.owner_card_features')}
             </Text>
           </View>
         )}
 
         <View style={styles.formContainer}>
           <Text style={styles.formTitle}>
-            {isOwnerRegistration ? 'Crear Cuenta de Owner' : 'Completar Registro'}
+            {isOwnerRegistration ? t('auth.create_owner_account') : t('auth.complete_registration')}
           </Text>
           <Text style={styles.formSubtitle}>
             {isOwnerRegistration ? 
-              'Regístrate como Owner para comenzar a usar el sistema' : 
-              'Completa tu registro para acceder al sistema'
+              t('auth.register_owner_subtitle') : 
+              t('auth.register_admin_subtitle')
             }
           </Text>
 
@@ -196,26 +194,26 @@ const RegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
               ) : (
                 <>
                   <Text style={styles.googleIcon}>🔍</Text>
-                  <Text style={styles.googleButtonText}>Continuar con Google</Text>
+                  <Text style={styles.googleButtonText}>{t('auth.continue_google')}</Text>
                 </>
               )}
             </TouchableOpacity>
 
             <View style={styles.divider}>
               <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>O</Text>
+              <Text style={styles.dividerText}>{t('auth.divider_or')}</Text>
               <View style={styles.dividerLine} />
             </View>
 
             {/* Formulario de registro con email */}
             <View style={styles.emailForm}>
               <View style={styles.inputContainer}>
-                <Text style={styles.label}>Email</Text>
+                <Text style={styles.label}>{t('auth.email')}</Text>
                 <TextInput
                   style={styles.input}
                   value={email}
                   onChangeText={setEmail}
-                  placeholder="tu@email.com"
+                  placeholder={t('auth.email_placeholder')}
                   keyboardType="email-address"
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -223,36 +221,36 @@ const RegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
               </View>
 
               <View style={styles.inputContainer}>
-                <Text style={styles.label}>Nombre de Usuario</Text>
+                <Text style={styles.label}>{t('auth.username')}</Text>
                 <TextInput
                   style={styles.input}
                   value={username}
                   onChangeText={setUsername}
-                  placeholder="tu_usuario"
+                  placeholder={t('auth.username_placeholder')}
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
               </View>
 
               <View style={styles.inputContainer}>
-                <Text style={styles.label}>Contraseña</Text>
+                <Text style={styles.label}>{t('auth.password')}</Text>
                 <TextInput
                   style={styles.input}
                   value={password}
                   onChangeText={setPassword}
-                  placeholder="Mínimo 6 caracteres"
+                  placeholder={t('auth.password_placeholder')}
                   secureTextEntry
                   autoCapitalize="none"
                 />
               </View>
 
               <View style={styles.inputContainer}>
-                <Text style={styles.label}>Confirmar Contraseña</Text>
+                <Text style={styles.label}>{t('auth.confirm_password')}</Text>
                 <TextInput
                   style={styles.input}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
-                  placeholder="Repite tu contraseña"
+                  placeholder={t('auth.repeat_password_placeholder')}
                   secureTextEntry
                   autoCapitalize="none"
                 />
@@ -266,7 +264,7 @@ const RegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
                 {loading ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.registerButtonText}>Crear Cuenta</Text>
+                  <Text style={styles.registerButtonText}>{t('auth.create_account')}</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -275,19 +273,19 @@ const RegistrationScreen: React.FC<Props> = ({ navigation, route }) => {
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            ¿Ya tienes una cuenta?
+            {t('auth.footer_has_account')}
           </Text>
           <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-            <Text style={styles.loginLink}>Iniciar Sesión</Text>
+            <Text style={styles.loginLink}>{t('auth.login_link')}</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>ℹ️ Información Importante</Text>
+          <Text style={styles.infoTitle}>{t('auth.info_important')}</Text>
           <Text style={styles.infoText}>
             {isOwnerRegistration ? 
-              '• Como Owner, tu cuenta se activará automáticamente\n• Tendrás control total del sistema\n• Podrás crear sucursales e invitar administradores\n• Acceso completo a todas las funcionalidades' :
-              '• Tu cuenta requiere aprobación de un administrador\n• Los administradores pueden asignar roles y permisos\n• El acceso está limitado por sucursal según tu invitación\n• Se te notificará por email cuando tu cuenta sea aprobada'
+              t('auth.registration_info') :
+              t('auth.admin_reg.warning_footer')
             }
           </Text>
         </View>

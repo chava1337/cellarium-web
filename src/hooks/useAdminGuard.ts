@@ -5,6 +5,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import { useGuest } from '../contexts/GuestContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { canAccessAdminPanel, type Role } from '../utils/rolePermissions';
 
 type NavigationProp = StackNavigationProp<RootStackParamList>;
@@ -45,6 +46,8 @@ export function useAdminGuard<T extends keyof RootStackParamList>({
     return false;
   }, [route.params, guestSession, guestBranch]);
 
+  const { t } = useLanguage();
+
   const status: AdminGuardStatus = useMemo(() => {
     if (isGuest()) return 'denied';
     if (!requireAuth) return 'allowed';
@@ -69,11 +72,11 @@ export function useAdminGuard<T extends keyof RootStackParamList>({
     useCallback(() => {
       if (isGuest()) {
         Alert.alert(
-          'Acceso restringido',
-          'Esta sección es solo para administración. Los comensales no pueden acceder a funciones administrativas.',
+          t('auth.access_restricted'),
+          t('auth.guard_guest_body'),
           [
             {
-              text: 'OK',
+              text: t('common.ok'),
               onPress: () => {
                 navigation.reset({
                   index: 0,
@@ -89,11 +92,11 @@ export function useAdminGuard<T extends keyof RootStackParamList>({
 
       if (status === 'denied' && requireAuth) {
         Alert.alert(
-          'Acceso restringido',
-          'Debes iniciar sesión como administrador para acceder a esta sección.',
+          t('auth.access_restricted'),
+          t('auth.guard_login_required_body'),
           [
             {
-              text: 'OK',
+              text: t('common.ok'),
               onPress: () => {
                 navigation.navigate('AdminLogin');
               },
@@ -102,7 +105,7 @@ export function useAdminGuard<T extends keyof RootStackParamList>({
           { cancelable: false }
         );
       }
-    }, [isGuest, status, requireAuth, navigation])
+    }, [isGuest, status, requireAuth, navigation, t])
   );
 
   return { status };

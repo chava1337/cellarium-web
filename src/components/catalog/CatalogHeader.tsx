@@ -231,7 +231,7 @@ export default function CatalogHeader({
         <View style={styles.bgModalRoot}>
           <Pressable style={styles.bgModalDim} onPress={() => setBackgroundPickerVisible(false)} />
           <View style={[styles.bgModalCard, isTablet ? styles.bgModalCardTablet : undefined]}>
-            <Text style={styles.bgModalTitle}>Fondo del catálogo</Text>
+            <Text style={styles.bgModalTitle}>{t('catalog.bg_modal_title')}</Text>
             <ScrollView style={styles.bgModalList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               {CATALOG_BACKGROUND_PRESET_OPTIONS.map((opt) => {
                 const preset = getCatalogBackground(opt.id);
@@ -261,7 +261,7 @@ export default function CatalogHeader({
               })}
             </ScrollView>
             <TouchableOpacity style={styles.bgModalClose} onPress={() => setBackgroundPickerVisible(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.bgModalCloseText}>Cerrar</Text>
+              <Text style={styles.bgModalCloseText}>{t('catalog.close')}</Text>
             </TouchableOpacity>
           </View>
         </View>

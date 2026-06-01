@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
 type OwnerRegistrationScreenNavigationProp = StackNavigationProp<RootStackParamList, 'OwnerRegistration'>;
 
 interface Props {
@@ -18,6 +19,7 @@ interface Props {
 }
 
 const OwnerRegistrationScreen: React.FC<Props> = ({ navigation }) => {
+  const { t } = useLanguage();
   const [loading, setLoading] = useState(false);
 
   // TODO: Implementar Google OAuth real cuando esté configurado
@@ -36,13 +38,12 @@ const OwnerRegistrationScreen: React.FC<Props> = ({ navigation }) => {
       await new Promise(resolve => setTimeout(resolve, 2000));
       
       Alert.alert(
-        '¡Registro Exitoso!',
-        'Tu cuenta de Owner ha sido creada. Configura tu primera sucursal para comenzar.',
+        t('auth.registration_success_owner_title'),
+        t('auth.owner_success_setup'),
         [
           {
-            text: 'Continuar',
+            text: t('auth.continue'),
             onPress: () => {
-              // TODO: Navegar a configuración de sucursal
               navigation.navigate('AdminDashboard');
             },
           },
@@ -50,7 +51,7 @@ const OwnerRegistrationScreen: React.FC<Props> = ({ navigation }) => {
       );
     } catch (error) {
       console.error('Error en registro de Owner:', error);
-      Alert.alert('Error', 'No se pudo completar el registro. Inténtalo de nuevo.');
+      Alert.alert(t('common.error'), t('auth.registration_failed'));
     } finally {
       setLoading(false);
     }
@@ -61,14 +62,14 @@ const OwnerRegistrationScreen: React.FC<Props> = ({ navigation }) => {
     try {
       // TODO: Implementar Google OAuth real
       Alert.alert(
-        'Google OAuth',
-        'Google OAuth estará disponible pronto. Por ahora usa el botón de desarrollo.',
+        t('auth.google_oauth_soon_title'),
+        t('auth.google_oauth_soon_body'),
         [
-          { text: 'OK', onPress: () => setLoading(false) }
+          { text: t('auth.ok'), onPress: () => setLoading(false) }
         ]
       );
     } catch (error) {
-      Alert.alert('Error', 'No se pudo iniciar la autenticación con Google.');
+      Alert.alert(t('common.error'), t('auth.google_auth_start_error'));
       setLoading(false);
     }
   };
@@ -84,31 +85,29 @@ const OwnerRegistrationScreen: React.FC<Props> = ({ navigation }) => {
           >
             <Text style={styles.backButtonText}>←</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Registro de Owner</Text>
+          <Text style={styles.headerTitle}>{t('auth.owner_reg_header')}</Text>
         </View>
 
-        {/* Owner Info Card */}
         <View style={styles.ownerCard}>
-          <Text style={styles.ownerTitle}>👑 ¿Qué es un Owner?</Text>
+          <Text style={styles.ownerTitle}>{t('auth.owner_what_title')}</Text>
           <Text style={styles.ownerDescription}>
-            Un Owner es el dueño de uno o más restaurantes que utiliza Cellarium para gestionar sus catálogos de vinos.
+            {t('auth.owner_what_body')}
           </Text>
           
-          <Text style={styles.benefitsTitle}>Beneficios como Owner:</Text>
-          <Text style={styles.benefitItem}>• Control total de tu restaurante</Text>
-          <Text style={styles.benefitItem}>• Gestión de múltiples sucursales</Text>
-          <Text style={styles.benefitItem}>• Invitación de staff con permisos específicos</Text>
-          <Text style={styles.benefitItem}>• Generación de QR para comensales</Text>
-          <Text style={styles.benefitItem}>• Análisis y reportes de ventas</Text>
-          <Text style={styles.benefitItem}>• Control de inventario con IA</Text>
-          <Text style={styles.benefitItem}>• Privacidad total de tus datos</Text>
+          <Text style={styles.benefitsTitle}>{t('auth.owner_benefits_title')}</Text>
+          <Text style={styles.benefitItem}>{t('auth.owner_benefit_1')}</Text>
+          <Text style={styles.benefitItem}>{t('auth.owner_benefit_2')}</Text>
+          <Text style={styles.benefitItem}>{t('auth.owner_benefit_3')}</Text>
+          <Text style={styles.benefitItem}>{t('auth.owner_benefit_4')}</Text>
+          <Text style={styles.benefitItem}>{t('auth.owner_benefit_5')}</Text>
+          <Text style={styles.benefitItem}>{t('auth.owner_benefit_6')}</Text>
+          <Text style={styles.benefitItem}>{t('auth.owner_benefit_7')}</Text>
         </View>
 
-        {/* Registration Form */}
         <View style={styles.formContainer}>
-          <Text style={styles.formTitle}>Crear Cuenta de Owner</Text>
+          <Text style={styles.formTitle}>{t('auth.create_owner_account')}</Text>
           <Text style={styles.formSubtitle}>
-            Regístrate usando tu cuenta de Google para comenzar
+            {t('auth.owner_google_subtitle')}
           </Text>
 
           <TouchableOpacity
@@ -122,15 +121,14 @@ const OwnerRegistrationScreen: React.FC<Props> = ({ navigation }) => {
               <>
                 <Text style={styles.googleButtonText}>G</Text>
                 <Text style={styles.googleButtonMainText}>
-                  Registrar con Google
+                  {t('auth.register_with_google')}
                 </Text>
               </>
             )}
           </TouchableOpacity>
 
           <Text style={styles.privacyText}>
-            Al registrarte, aceptas nuestros términos de servicio y política de privacidad.
-            Tus datos están completamente aislados y seguros.
+            {t('auth.privacy_notice')}
           </Text>
         </View>
 
@@ -138,7 +136,7 @@ const OwnerRegistrationScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.devSection}>
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>Desarrollo</Text>
+            <Text style={styles.dividerText}>{t('auth.dev_section')}</Text>
             <View style={styles.dividerLine} />
           </View>
 
@@ -146,33 +144,29 @@ const OwnerRegistrationScreen: React.FC<Props> = ({ navigation }) => {
             style={styles.devButton}
             onPress={() => {
               Alert.alert(
-                'Modo Desarrollo',
-                'Simulando registro de Owner exitoso...',
+                t('auth.dev_mode_title'),
+                t('auth.dev_simulating_owner'),
                 [
                   {
-                    text: 'Continuar',
+                    text: t('auth.continue'),
                     onPress: () => navigation.navigate('AdminDashboard'),
                   },
                 ]
               );
             }}
           >
-            <Text style={styles.devButtonText}>🚀 Simular Registro Owner</Text>
+            <Text style={styles.devButtonText}>{t('auth.dev_simulate_owner')}</Text>
             <Text style={styles.devButtonSubtext}>
-              Saltar autenticación para desarrollo
+              {t('auth.dev_skip_auth')}
             </Text>
           </TouchableOpacity>
         </View>
 
         {/* Info */}
         <View style={styles.infoContainer}>
-          <Text style={styles.infoTitle}>ℹ️ Información Importante</Text>
+          <Text style={styles.infoTitle}>{t('auth.info_important')}</Text>
           <Text style={styles.infoText}>
-            • Tu cuenta se activará automáticamente{'\n'}
-            • Tendrás acceso completo a todas las funciones{'\n'}
-            • Podrás crear sucursales e invitar staff{'\n'}
-            • Tus datos estarán completamente aislados{'\n'}
-            • Podrás generar QR para comensales
+            {t('auth.registration_info')}
           </Text>
         </View>
       </ScrollView>

@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { RootStackParamList } from '../types';
 import { StackNavigationProp } from '@react-navigation/stack';
 import RoleSelector, { RoleOption } from '../components/RoleSelector';
@@ -23,6 +24,7 @@ interface Props {
 }
 
 const LoginScreen: React.FC<Props> = ({ navigation }) => {
+  const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -30,7 +32,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert('Error', 'Por favor completa todos los campos');
+      Alert.alert(t('common.error'), t('auth.fill_all_fields'));
       return;
     }
 
@@ -38,11 +40,9 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
       setLoading(true);
       await signIn(email, password);
       
-      // Navegar al catálogo de vinos después del login exitoso
-      // El admin ya autenticado no necesitará volver a hacer login para acceder al panel
       navigation.navigate('WineCatalog');
     } catch (error: any) {
-      Alert.alert('Error de inicio de sesión', error.message || 'Credenciales inválidas');
+      Alert.alert(t('auth.login_error_title'), error.message || t('auth.invalid_credentials_body'));
     } finally {
       setLoading(false);
     }
@@ -59,7 +59,10 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
       // Navegar al catálogo de vinos después del login exitoso
       navigation.navigate('WineCatalog');
     } catch (error: any) {
-      Alert.alert('Error', `No se pudo autenticar como ${role.displayName}`);
+      Alert.alert(
+        t('common.error'),
+        t('auth.role_auth_error').replace('{role}', role.displayName)
+      );
     } finally {
       setLoading(false);
     }
@@ -73,23 +76,23 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
       >
         <ScrollView contentContainerStyle={styles.scrollContainer}>
         <View style={styles.header}>
-          <Text style={styles.title}>🍷 Cellarium</Text>
-          <Text style={styles.subtitle}>Catálogo de Vinos</Text>
+          <Text style={styles.title}>{t('auth.registration_title')}</Text>
+          <Text style={styles.subtitle}>{t('auth.footer_catalog')}</Text>
         </View>
 
                  <View style={styles.formContainer}>
-                   <Text style={styles.formTitle}>Iniciar Sesión como Owner</Text>
+                   <Text style={styles.formTitle}>{t('auth.login_owner_title')}</Text>
                    <Text style={styles.formSubtitle}>
-                     Para Owners registrados - Acceso completo al sistema
+                     {t('auth.login_owner_subtitle')}
                    </Text>
           
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Email o Usuario</Text>
+            <Text style={styles.label}>{t('auth.email_or_username')}</Text>
             <TextInput
               style={styles.input}
               value={email}
               onChangeText={setEmail}
-              placeholder="tu@email.com o usuario"
+              placeholder={t('auth.email_or_username_placeholder')}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
@@ -97,12 +100,12 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Contraseña</Text>
+            <Text style={styles.label}>{t('auth.password')}</Text>
             <TextInput
               style={styles.input}
               value={password}
               onChangeText={setPassword}
-              placeholder="Tu contraseña"
+              placeholder={t('auth.password_placeholder_short')}
               secureTextEntry
               autoCapitalize="none"
             />
@@ -114,13 +117,13 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
             disabled={loading}
           >
             <Text style={styles.loginButtonText}>
-              {loading ? 'Verificando acceso...' : 'Acceder al Sistema'}
+              {loading ? t('auth.logging_in_button') : t('auth.login_button')}
             </Text>
           </TouchableOpacity>
 
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>Desarrollo</Text>
+            <Text style={styles.dividerText}>{t('auth.dev_section')}</Text>
             <View style={styles.dividerLine} />
           </View>
 
@@ -132,23 +135,23 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            Sistema de gestión de catálogo de vinos para restaurantes
+            {t('auth.login_owner_subtitle')}
           </Text>
           
                  <View style={styles.registrationSection}>
                    <Text style={styles.footerSubtext}>
-                     ¿Eres nuevo Owner?
+                     {t('auth.footer_no_account')}
                    </Text>
                    <TouchableOpacity
                      style={styles.registerButton}
                      onPress={() => navigation.navigate('OwnerRegistration')}
                    >
-                     <Text style={styles.registerButtonText}>Registrarse como Owner</Text>
+                     <Text style={styles.registerButtonText}>{t('auth.register_owner_link')}</Text>
                    </TouchableOpacity>
                  </View>
 
                  <Text style={styles.footerSubtext}>
-                   ¿Trabajas en un restaurante? Escanea el QR que te proporcionaron
+                   {t('auth.admin_reg.invited_info')}
                  </Text>
         </View>
         </ScrollView>

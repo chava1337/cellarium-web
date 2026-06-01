@@ -25,6 +25,7 @@ import { WineService } from '../services/WineService';
 import { useAuth } from '../contexts/AuthContext';
 import { useBranch } from '../contexts/BranchContext';
 import { useLanguage } from '../contexts/LanguageContext';
+import { buildReportPdfContext } from '../utils/reportPdfContext';
 import { useAdminGuard } from '../hooks/useAdminGuard';
 import { getEffectivePlan, getOwnerEffectivePlan } from '../utils/effectivePlan';
 import { checkSubscriptionFeatureByPlan } from '../utils/subscriptionPermissions';
@@ -72,7 +73,8 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
   });
   const { user } = useAuth();
   const { currentBranch, availableBranches } = useBranch();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const pdfCtx = buildReportPdfContext(language);
   const insets = useSafeAreaInsets();
   const branchId = route.params?.branchId || currentBranch?.id || '';
 
@@ -687,15 +689,16 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
       if (type === 'inventory') {
         // PDF de inventario: usar API real del servicio
         if (!inventoryStats) {
-          Alert.alert('Datos no disponibles', 'Carga el inventario antes de generar el reporte.');
+          Alert.alert(t('reports.data_unavailable_title'), t('reports.load_inventory_first'));
           return;
         }
         await PDFReportService.exportInventoryReport(
-          currentBranch?.name ?? 'Sucursal',
+          currentBranch?.name ?? t('inventory.default_branch_name'),
           inventory,
-          inventoryStats
+          inventoryStats,
+          pdfCtx
         );
-        Alert.alert('✅ Reporte Generado', 'El reporte de inventario ha sido generado exitosamente.');
+        Alert.alert(t('reports.inventory_success_title'), t('reports.inventory_success_body'));
       } else if (type === 'sales') {
         if (!user) return;
         const ownerId = user.owner_id ?? user.id;
@@ -714,8 +717,8 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           });
           if (summary.valid_wines_count === 0 || rows.length === 0) {
             Alert.alert(
-              'Datos insuficientes',
-              'Necesitas al menos un vino con 2 conteos físicos (corte inicial y final) para generar el reporte de ventas estimadas.'
+              t('reports.insufficient_data_title'),
+              t('reports.sales_pdf_need_counts')
             );
             return;
           }
@@ -725,38 +728,40 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           const fromStr = fromDate.toISOString().slice(0, 10);
           const toStr = toDate.toISOString().slice(0, 10);
           await PDFReportService.exportSalesFromCountsReport(
-            currentBranch?.name ?? 'Sucursal',
-            { from: fromStr, to: toStr, label: `Últimos ${estimatedReportPeriod} días` },
+            currentBranch?.name ?? t('inventory.default_branch_name'),
+            { from: fromStr, to: toStr, label: t('reports.period_last_days').replace('{count}', String(estimatedReportPeriod)) },
             rows,
-            summary
+            summary,
+            pdfCtx
           );
-          Alert.alert('✅ Reporte generado', 'El reporte de ventas estimadas (desde cortes) se ha generado.');
+          Alert.alert(t('reports.success_title'), t('reports.sales_success_body'));
         } catch (err: any) {
           if (__DEV__) console.error('Error generating sales from counts PDF:', err);
-          Alert.alert('Error', err?.message ?? 'No se pudo generar el reporte.');
+          Alert.alert(t('common.error'), err?.message ?? t('reports.generate_error'));
         } finally {
           setGeneratingEstimatedPDF(false);
         }
       } else if (type === 'comparison') {
         if (!comparisonFromCounts || comparisonFromCounts.summary.valid_branches_count === 0) {
-          Alert.alert('Datos insuficientes', 'No hay sucursales con datos suficientes para generar el reporte comparativo.');
+          Alert.alert(t('reports.insufficient_data_title'), t('reports.comparison_insufficient_body'));
           return;
         }
         try {
           await PDFReportService.exportBranchComparisonReport(
-            { from: '', to: '', label: `Últimos ${comparisonDays} días` },
+            { from: '', to: '', label: t('reports.period_last_days').replace('{count}', String(comparisonDays)) },
             comparisonFromCounts.branches,
-            comparisonFromCounts.summary
+            comparisonFromCounts.summary,
+            pdfCtx
           );
-          Alert.alert('✅ Reporte generado', 'El reporte comparativo se ha generado.');
+          Alert.alert(t('reports.success_title'), t('reports.comparison_success_body'));
         } catch (err: any) {
           if (__DEV__) console.error('Error generating comparison PDF:', err);
-          Alert.alert('Error', err?.message ?? 'No se pudo generar el reporte.');
+          Alert.alert(t('common.error'), err?.message ?? t('reports.generate_error'));
         }
       }
     } catch (error: any) {
       if (__DEV__) console.error('Error generando PDF:', error);
-      Alert.alert('Error', error.message || 'No se pudo generar el reporte');
+      Alert.alert(t('common.error'), error.message || t('reports.generate_error'));
     } finally {
       setGeneratingPDF(false);
     }
@@ -933,24 +938,32 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={styles.wineMetricName} numberOfLines={2}>{item.wine_name}</Text>
           <View style={styles.metricsRow}>
             <View style={styles.metricItem}>
-              <Text style={styles.metricLabel}>Consumo est.:</Text>
+              <Text style={styles.metricLabel}>{t('inventory.metric_consumption_est')}</Text>
               <Text style={styles.metricValue}>{item.sold_estimated}</Text>
               <Text style={styles.wineCalculationHint}>
-                Cálculo: {item.start_count} + {item.entries_total} - {item.special_out_total} - {item.end_count}
+                {t('inventory.calculation_formula')
+                  .replace('{start}', String(item.start_count))
+                  .replace('{entries}', String(item.entries_total))
+                  .replace('{special}', String(item.special_out_total))
+                  .replace('{end}', String(item.end_count))}
               </Text>
             </View>
             <View style={styles.metricItem}>
-              <Text style={styles.metricLabel}>Ingresos:</Text>
+              <Text style={styles.metricLabel}>{t('inventory.metric_revenue')}</Text>
               <Text style={styles.metricValue} numberOfLines={1}>
                 {item.revenue_estimated != null && item.revenue_estimated > 0 ? formatCurrencyMXN(item.revenue_estimated) : '—'}
               </Text>
               {item.sold_estimated > 0 && !isValidPrice(item.price_by_bottle) && (
-                <Text style={styles.wineUnpricedHint}>Sin precio configurado</Text>
+                <Text style={styles.wineUnpricedHint}>{t('inventory.no_price_configured')}</Text>
               )}
             </View>
           </View>
           <Text style={styles.wineExtraMetric}>
-            Stock inicio: {item.start_count} · Entradas: {item.entries_total} · Salidas esp.: {item.special_out_total} · Stock fin: {item.end_count}
+            {t('inventory.stock_breakdown')
+              .replace('{start}', String(item.start_count))
+              .replace('{entries}', String(item.entries_total))
+              .replace('{special}', String(item.special_out_total))
+              .replace('{end}', String(item.end_count))}
           </Text>
         </View>
       </View>
@@ -961,7 +974,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
         <ScrollView showsVerticalScrollIndicator={false}>
           {salesPeriodSelector}
             <View style={styles.chartSection}>
-            <Text style={styles.sectionTitle}>💰 Top 5 por ingresos estimados (desde cortes)</Text>
+            <Text style={styles.sectionTitle}>💰 {t('inventory.top5_revenue_title')}</Text>
             {topByRevenue.map((w, i) => (
               <View key={w.wine_id} style={styles.topRow}>
                 <Text style={styles.topRank}>#{i + 1}</Text>
@@ -973,12 +986,14 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
             ))}
           </View>
           <View style={styles.chartSection}>
-            <Text style={styles.sectionTitle}>📊 Top 5 por consumo estimado (botellas)</Text>
+            <Text style={styles.sectionTitle}>📊 {t('inventory.top5_consumption_title')}</Text>
             {topBySold.map((w, i) => (
               <View key={w.wine_id} style={styles.topRow}>
                 <Text style={styles.topRank}>#{i + 1}</Text>
                 <Text style={styles.topName} numberOfLines={1}>{w.wine_name}</Text>
-                <Text style={styles.topValue}>{w.sold_estimated} bot.</Text>
+                <Text style={styles.topValue}>
+                  {t('inventory.bottles_abbr').replace('{count}', String(w.sold_estimated))}
+                </Text>
               </View>
             ))}
           </View>
@@ -988,19 +1003,19 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
               style={[styles.sortButton, sortBy === 'sales' && styles.sortButtonActive]}
               onPress={() => setSortBy('sales')}
             >
-              <Text style={[styles.sortButtonText, sortBy === 'sales' && styles.sortButtonTextActive]}>📈 Ventas est.</Text>
+              <Text style={[styles.sortButtonText, sortBy === 'sales' && styles.sortButtonTextActive]}>📈 {t('inventory.sort_sales_est')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.sortButton, sortBy === 'revenue' && styles.sortButtonActive]}
               onPress={() => setSortBy('revenue')}
             >
-              <Text style={[styles.sortButtonText, sortBy === 'revenue' && styles.sortButtonTextActive]}>💰 Ingresos</Text>
+              <Text style={[styles.sortButtonText, sortBy === 'revenue' && styles.sortButtonTextActive]}>💰 {t('inventory.sort_revenue')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.sortButton, sortBy === 'rotation' && styles.sortButtonActive]}
               onPress={() => setSortBy('rotation')}
             >
-              <Text style={[styles.sortButtonText, sortBy === 'rotation' && styles.sortButtonTextActive]}>🔄 Rotación</Text>
+              <Text style={[styles.sortButtonText, sortBy === 'rotation' && styles.sortButtonTextActive]}>🔄 {t('inventory.sort_rotation')}</Text>
             </TouchableOpacity>
           </View>
 
@@ -1034,12 +1049,12 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
             <View style={styles.reportStatCard}>
               <Text style={styles.reportStatIcon}>🍷</Text>
               <Text style={styles.reportStatValue} numberOfLines={1}>{inventoryStats.totalWines}</Text>
-              <Text style={styles.reportStatLabel}>Vinos</Text>
+              <Text style={styles.reportStatLabel}>{t('inventory.stat_wines')}</Text>
             </View>
             <View style={styles.reportStatCard}>
               <Text style={styles.reportStatIcon}>📦</Text>
               <Text style={styles.reportStatValue} numberOfLines={1}>{inventoryStats.totalBottles}</Text>
-              <Text style={styles.reportStatLabel}>Botellas</Text>
+              <Text style={styles.reportStatLabel}>{t('inventory.stat_bottles')}</Text>
             </View>
             <View style={styles.reportStatCard}>
               <Text style={styles.reportStatIcon}>💰</Text>
@@ -1050,38 +1065,40 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
                     ? '—'
                     : formatCurrencyMXN(0)}
               </Text>
-              <Text style={styles.reportStatLabel}>Valor total</Text>
+              <Text style={styles.reportStatLabel}>{t('inventory.stat_total_value')}</Text>
             </View>
             <View style={styles.reportStatCard}>
               <Text style={styles.reportStatIcon}>💵</Text>
               <Text style={[styles.reportStatValue, styles.reportStatValueCurrency]} numberOfLines={1}>
                 {hasValidRevenue ? formatCurrencyMXN(totalRevenue) : '—'}
               </Text>
-              <Text style={styles.reportStatLabel}>Ingresos estimados</Text>
+              <Text style={styles.reportStatLabel}>{t('inventory.stat_estimated_revenue')}</Text>
             </View>
             <View style={styles.reportStatCard}>
               <Text style={styles.reportStatIcon}>📈</Text>
               <Text style={styles.reportStatValue} numberOfLines={1}>
                 {validWinesCount > 0 ? totalSales : '—'}
               </Text>
-              <Text style={styles.reportStatLabel}>Consumo est. total</Text>
+              <Text style={styles.reportStatLabel}>{t('inventory.stat_total_consumption_est')}</Text>
             </View>
           </View>
 
           {(summary && (summary.unpriced_consumption_total > 0 || summary.unpriced_wines_count > 0)) && (
             <View style={styles.reportsUnpricedRow}>
               <Text style={styles.reportsUnpricedText}>
-                Consumo sin precio configurado: {summary.unpriced_consumption_total} botellas
+                {t('inventory.unpriced_consumption').replace('{count}', String(summary.unpriced_consumption_total))}
               </Text>
               {summary.unpriced_wines_count > 0 && (
-                <Text style={styles.reportsUnpricedText}>Vinos sin precio: {summary.unpriced_wines_count}</Text>
+                <Text style={styles.reportsUnpricedText}>
+                  {t('inventory.unpriced_wines_count').replace('{count}', String(summary.unpriced_wines_count))}
+                </Text>
               )}
             </View>
           )}
 
           {/* Periodo para ventas estimadas (misma lógica que pestaña Ventas estimadas) */}
           <View style={{ marginBottom: 16 }}>
-            <Text style={[styles.inputLabel, { marginBottom: 8 }]}>Periodo para ventas estimadas</Text>
+            <Text style={[styles.inputLabel, { marginBottom: 8 }]}>{t('inventory.period_estimated_sales')}</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {([7, 30, 90] as const).map((days) => (
                 <TouchableOpacity
@@ -1118,7 +1135,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
               ) : (
                 <>
                   <Text style={styles.reportButtonIcon}>📄</Text>
-                  <Text style={styles.reportButtonText}>Reporte de Inventario</Text>
+                  <Text style={styles.reportButtonText}>{t('reports.inventory_button')}</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -1133,7 +1150,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
               ) : (
                 <>
                   <Text style={styles.reportButtonIcon}>📊</Text>
-                  <Text style={styles.reportButtonText}>Reporte de Ventas estimadas</Text>
+                  <Text style={styles.reportButtonText}>{t('reports.sales_button')}</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -1149,7 +1166,7 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
                 ) : (
                   <>
                     <Text style={styles.reportButtonIcon}>🏢</Text>
-                    <Text style={styles.reportButtonText}>Reporte Comparativo</Text>
+                    <Text style={styles.reportButtonText}>{t('reports.comparison_button')}</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -1210,25 +1227,25 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
 
           {/* Resumen Global */}
           <View style={styles.comparisonHeader}>
-            <Text style={styles.comparisonTitle}>📊 Resumen (desde cortes)</Text>
+            <Text style={styles.comparisonTitle}>📊 {t('inventory.comparison_summary_title')}</Text>
             <View style={styles.comparisonStats}>
               <View style={styles.comparisonStatCard}>
                 <Text style={[styles.comparisonStatValue, { fontSize: 16 }]} numberOfLines={1}>
                   {totalRevenue > 0 ? formatCurrencyMXN(totalRevenue) : '—'}
                 </Text>
-                <Text style={styles.comparisonStatLabel}>Ingresos estimados</Text>
+                <Text style={styles.comparisonStatLabel}>{t('inventory.stat_estimated_revenue')}</Text>
               </View>
               <View style={styles.comparisonStatCard}>
                 <Text style={styles.comparisonStatValue}>{totalConsumption}</Text>
-                <Text style={styles.comparisonStatLabel}>Consumo estimado</Text>
+                <Text style={styles.comparisonStatLabel}>{t('inventory.comparison_consumption_est')}</Text>
               </View>
             </View>
             <View style={styles.comparisonInfo}>
               <Text style={styles.comparisonInfoText}>
-                🏆 Mejor: {summary.best_branch}
+                🏆 {t('inventory.comparison_best_branch').replace('{branch}', summary.best_branch)}
               </Text>
               <Text style={styles.comparisonInfoText}>
-                📉 A mejorar: {summary.worst_branch}
+                📉 {t('inventory.comparison_worst_branch').replace('{branch}', summary.worst_branch)}
               </Text>
             </View>
 
@@ -1240,13 +1257,12 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
               {generatingPDF ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.pdfButtonText}>📄 PDF Multi-Sucursal</Text>
+                <Text style={styles.pdfButtonText}>📄 {t('reports.multi_branch_pdf_button')}</Text>
               )}
             </TouchableOpacity>
           </View>
 
-          {/* Comparación por Sucursal */}
-          <Text style={styles.sectionTitle}>🏢 Por sucursal</Text>
+          <Text style={styles.sectionTitle}>🏢 {t('inventory.comparison_by_branch')}</Text>
           {sortedBranches.map((branch, index) => {
             const contributionPct = totalRevenue > 0 && (branch.total_revenue_estimated ?? 0) >= 0
               ? ((branch.total_revenue_estimated ?? 0) / totalRevenue) * 100
@@ -1263,18 +1279,18 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
                 </View>
 
                 {!hasData ? (
-                  <Text style={[styles.comparisonInfoText, { marginVertical: 8 }]}>Datos insuficientes</Text>
+                  <Text style={[styles.comparisonInfoText, { marginVertical: 8 }]}>{t('reports.insufficient_data_title')}</Text>
                 ) : (
                   <>
                     <View style={styles.branchComparisonMetrics}>
                       <View style={styles.branchComparisonMetricRow}>
-                        <Text style={styles.branchComparisonLabel}>Ingresos est.:</Text>
+                        <Text style={styles.branchComparisonLabel}>{t('inventory.branch_revenue_est')}</Text>
                         <Text style={[styles.branchComparisonValue, styles.branchComparisonValueHighlight]} numberOfLines={1}>
                           {(branch.total_revenue_estimated ?? 0) > 0 ? formatCurrencyMXN(branch.total_revenue_estimated!) : '—'}
                         </Text>
                       </View>
                       <View style={styles.branchComparisonMetricRow}>
-                        <Text style={styles.branchComparisonLabel}>Consumo est.:</Text>
+                        <Text style={styles.branchComparisonLabel}>{t('inventory.metric_consumption_est')}</Text>
                         <Text style={styles.branchComparisonValue}>{branch.total_consumption_estimated}</Text>
                       </View>
                     </View>
@@ -1283,19 +1299,23 @@ const InventoryAnalyticsScreen: React.FC<Props> = ({ navigation, route }) => {
                       <View style={{ marginTop: 8, marginBottom: 4 }}>
                         {branch.top_wine && (
                           <Text style={styles.wineExtraMetric}>
-                            Más movido: {branch.top_wine.wine_name} ({branch.top_wine.sold_estimated} bot.)
+                            {t('inventory.most_moved_wine')
+                              .replace('{name}', branch.top_wine.wine_name)
+                              .replace('{count}', String(branch.top_wine.sold_estimated))}
                           </Text>
                         )}
                         {branch.bottom_wine && branch.bottom_wine.wine_name !== branch.top_wine?.wine_name && (
                           <Text style={styles.wineExtraMetric}>
-                            Menos movido: {branch.bottom_wine.wine_name} ({branch.bottom_wine.sold_estimated} bot.)
+                            {t('inventory.least_moved_wine')
+                              .replace('{name}', branch.bottom_wine.wine_name)
+                              .replace('{count}', String(branch.bottom_wine.sold_estimated))}
                           </Text>
                         )}
                       </View>
                     )}
 
                     <View style={styles.contributionBar}>
-                      <Text style={styles.contributionLabel}>Contribución:</Text>
+                      <Text style={styles.contributionLabel}>{t('inventory.contribution_label')}</Text>
                       <View style={styles.contributionBarContainer}>
                         <View
                           style={[

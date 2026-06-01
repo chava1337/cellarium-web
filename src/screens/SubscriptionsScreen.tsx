@@ -97,6 +97,7 @@ import {
 } from '../services/googlePlayBilling';
 import { useGooglePlayBilling } from '../hooks/useGooglePlayBilling';
 import { isAndroidBillingApp, shouldUseStripeSubscriptionUi, stripeEdgeClientMeta } from '../utils/billingPlatform';
+import { resolveFreeMonthOfferForSku } from '../utils/googlePlaySubscriptionOffers';
 import {
   getAppleIapDebugOverlaySnapshot,
   IAP_DEBUG_OVERLAY,
@@ -637,6 +638,23 @@ function SubscriptionLegalLinksRow({
   );
 }
 
+function GooglePlayFreeMonthBanner({
+  styles,
+  title,
+  body,
+}: {
+  styles: StylesRecord;
+  title: string;
+  body: string;
+}) {
+  return (
+    <View style={styles.googleFreeMonthBanner} accessibilityRole="text">
+      <Text style={styles.googleFreeMonthBannerTitle}>{title}</Text>
+      <Text style={styles.googleFreeMonthBannerBody}>{body}</Text>
+    </View>
+  );
+}
+
 function PlanCard({
   styles,
   plan,
@@ -644,6 +662,7 @@ function PlanCard({
   isCurrentPlan,
   onSelect,
   labels,
+  googleFreeMonth,
   inSelectionBundle = false,
 }: {
   styles: StylesRecord;
@@ -651,7 +670,15 @@ function PlanCard({
   isSelected: boolean;
   isCurrentPlan: boolean;
   onSelect: (id: string) => void;
-  labels: { includes: string; notIncludes: string; planCurrent: string; priceFree: string };
+  labels: {
+    includes: string;
+    notIncludes: string;
+    planCurrent: string;
+    priceFree: string;
+    googleFreeMonthBadge: string;
+    googleThenPricePerMonth: string;
+  };
+  googleFreeMonth?: { recurringPrice: string | null };
   /** Ficha superior del bloque unificado (borde + CTA debajo). */
   inSelectionBundle?: boolean;
 }) {
@@ -681,14 +708,25 @@ function PlanCard({
       )}
       <View style={styles.planHeader}>
         <Text style={styles.planName}>{plan.name}</Text>
-        <View style={styles.priceContainer}>
-          <Text style={styles.priceAmount}>
-            {isFree ? labels.priceFree : plan.priceCardText}
-          </Text>
-          {!isFree && (
-            <Text style={styles.pricePeriod}>/{plan.period}</Text>
-          )}
-        </View>
+        {googleFreeMonth && !isFree ? (
+          <View style={styles.googlePlanPromoBlock}>
+            <View style={styles.googlePlanPromoBadge}>
+              <Text style={styles.googlePlanPromoBadgeText}>{labels.googleFreeMonthBadge}</Text>
+            </View>
+            {googleFreeMonth.recurringPrice ? (
+              <Text style={styles.googlePlanPromoThenPrice}>
+                {labels.googleThenPricePerMonth.replace('{price}', googleFreeMonth.recurringPrice)}
+              </Text>
+            ) : null}
+          </View>
+        ) : (
+          <View style={styles.priceContainer}>
+            <Text style={styles.priceAmount}>
+              {isFree ? labels.priceFree : plan.priceCardText}
+            </Text>
+            {!isFree && <Text style={styles.pricePeriod}>/{plan.period}</Text>}
+          </View>
+        )}
       </View>
       <View style={styles.featuresContainer}>
         <Text style={styles.featuresTitle}>{labels.includes}</Text>
@@ -900,15 +938,15 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
   if (guardStatus === 'pending') {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: CELLARIUM.bg, padding: 24 }}>
-        <Text style={{ fontSize: 16, color: CELLARIUM.muted, textAlign: 'center' }}>Pendiente de aprobación</Text>
+        <Text style={{ fontSize: 16, color: CELLARIUM.muted, textAlign: 'center' }}>{t('common.pending_approval_title')}</Text>
       </View>
     );
   }
   if (guardStatus === 'denied') {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: CELLARIUM.bg, padding: 24 }}>
-        <Text style={{ fontSize: 18, fontWeight: '600', color: CELLARIUM.text, textAlign: 'center' }}>Sin permiso</Text>
-        <Text style={{ marginTop: 8, fontSize: 14, color: CELLARIUM.muted, textAlign: 'center' }}>Solo el propietario puede gestionar suscripciones.</Text>
+        <Text style={{ fontSize: 18, fontWeight: '600', color: CELLARIUM.text, textAlign: 'center' }}>{t('qr_gen.no_permission_title')}</Text>
+        <Text style={{ marginTop: 8, fontSize: 14, color: CELLARIUM.muted, textAlign: 'center' }}>{t('subscription.owner_only')}</Text>
       </View>
     );
   }
@@ -1555,6 +1593,29 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     return { b1, b3 };
   }, [isAndroid, playSubscriptions]);
 
+  const androidPlanFreeMonthPromo = useMemo(() => {
+    if (!isAndroid) {
+      return {} as Partial<
+        Record<'bistro' | 'trattoria' | 'grand_maison', { recurringPrice: string | null }>
+      >;
+    }
+    const planSkus: Array<['bistro' | 'trattoria' | 'grand_maison', string]> = [
+      ['bistro', GOOGLE_PLAY_PRODUCT_IDS.bistro],
+      ['trattoria', GOOGLE_PLAY_PRODUCT_IDS.trattoria],
+      ['grand_maison', GOOGLE_PLAY_PRODUCT_IDS.grandMaison],
+    ];
+    const out: Partial<
+      Record<'bistro' | 'trattoria' | 'grand_maison', { recurringPrice: string | null }>
+    > = {};
+    for (const [planId, sku] of planSkus) {
+      const resolved = resolveFreeMonthOfferForSku(sku, playSubscriptions);
+      if (resolved) {
+        out[planId] = { recurringPrice: resolved.recurringPriceFormatted };
+      }
+    }
+    return out;
+  }, [isAndroid, playSubscriptions]);
+
   const getBranchAddonPriceLabel = useCallback(
     (slots: 1 | 3): string => {
       if (isIos) {
@@ -1618,9 +1679,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     if (!isSensitiveAllowed(user)) {
       Alert.alert(
-        'Verificación requerida',
-        'Verifica tu correo en el bloque de arriba para poder suscribirte.',
-        [{ text: 'Entendido', style: 'cancel' }]
+        t('subscription.verification_required_title'),
+        t('subscription.verification_required_subscribe'),
+        [{ text: t('common.understood'), style: 'cancel' }]
       );
       return;
     }
@@ -1910,9 +1971,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                 }
                 if (error.code === 'EMAIL_VERIFICATION_REQUIRED') {
                   Alert.alert(
-                    'Verificación requerida',
-                    'Verifica tu correo en el bloque de arriba para continuar.',
-                    [{ text: 'Entendido', style: 'cancel' }]
+                    t('subscription.verification_required_title'),
+                    t('subscription.verification_required_continue'),
+                    [{ text: t('common.understood'), style: 'cancel' }]
                   );
                   return;
                 }
@@ -2037,9 +2098,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         lastIapEvent: 'restore_skipped:email_not_verified',
       });
       Alert.alert(
-        'Verificación requerida',
-        'Verifica tu correo en el bloque de arriba para continuar.',
-        [{ text: 'Entendido', style: 'cancel' }]
+        t('subscription.verification_required_title'),
+        t('subscription.verification_required_continue'),
+        [{ text: t('common.understood'), style: 'cancel' }]
       );
       return;
     }
@@ -2104,9 +2165,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     if (!isSensitiveAllowed(user)) {
       Alert.alert(
-        'Verificación requerida',
-        'Verifica tu correo en el bloque de arriba para continuar.',
-        [{ text: 'Entendido', style: 'cancel' }]
+        t('subscription.verification_required_title'),
+        t('subscription.verification_required_continue'),
+        [{ text: t('common.understood'), style: 'cancel' }]
       );
       return;
     }
@@ -2278,9 +2339,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       }
       if (!isSensitiveAllowed(user)) {
         Alert.alert(
-          'Verificación requerida',
-          'Verifica tu correo en el bloque de arriba para continuar.',
-          [{ text: 'Entendido', style: 'cancel' }]
+          t('subscription.verification_required_title'),
+          t('subscription.verification_required_continue'),
+          [{ text: t('common.understood'), style: 'cancel' }]
         );
         return;
       }
@@ -2376,9 +2437,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       }
       if (!isSensitiveAllowed(user)) {
         Alert.alert(
-          'Verificación requerida',
-          'Verifica tu correo en el bloque de arriba para continuar.',
-          [{ text: 'Entendido', style: 'cancel' }]
+          t('subscription.verification_required_title'),
+          t('subscription.verification_required_continue'),
+          [{ text: t('common.understood'), style: 'cancel' }]
         );
         return;
       }
@@ -2438,9 +2499,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     if (!isSensitiveAllowed(user)) {
       Alert.alert(
-        'Verificación requerida',
-        'Verifica tu correo en el bloque de arriba para administrar tu suscripción.',
-        [{ text: 'Entendido', style: 'cancel' }]
+        t('subscription.verification_required_title'),
+        t('subscription.verification_required_manage'),
+        [{ text: t('common.understood'), style: 'cancel' }]
       );
       return;
     }
@@ -2466,9 +2527,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
         }
         if (error.code === 'EMAIL_VERIFICATION_REQUIRED') {
           Alert.alert(
-            'Verificación requerida',
-            'Verifica tu correo en el bloque de arriba para continuar.',
-            [{ text: 'Entendido', style: 'cancel' }]
+            t('subscription.verification_required_title'),
+            t('subscription.verification_required_continue'),
+            [{ text: t('common.understood'), style: 'cancel' }]
           );
           return;
         }
@@ -2518,9 +2579,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       }
       if (!isSensitiveAllowed(user)) {
         Alert.alert(
-          'Verificación requerida',
-          'Verifica tu correo en el bloque de arriba para continuar.',
-          [{ text: 'Entendido', style: 'cancel' }]
+          t('subscription.verification_required_title'),
+          t('subscription.verification_required_continue'),
+          [{ text: t('common.understood'), style: 'cancel' }]
         );
         return;
       }
@@ -2558,9 +2619,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
           }
           if (error.code === 'EMAIL_VERIFICATION_REQUIRED') {
             Alert.alert(
-              'Verificación requerida',
-              'Verifica tu correo en el bloque de arriba para continuar.',
-              [{ text: 'Entendido', style: 'cancel' }]
+              t('subscription.verification_required_title'),
+              t('subscription.verification_required_continue'),
+              [{ text: t('common.understood'), style: 'cancel' }]
             );
             return;
           }
@@ -2731,9 +2792,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
           onPress: async () => {
             if (!isSensitiveAllowed(user)) {
               Alert.alert(
-                'Verificación requerida',
+                t('subscription.verification_required_title'),
                 t('subscription.verify_email_to_update_branches'),
-                [{ text: 'Entendido', style: 'cancel' }]
+                [{ text: t('common.understood'), style: 'cancel' }]
               );
               return;
             }
@@ -2748,9 +2809,9 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                 log.error('update-subscription failed', error.status, error.code);
                 if (error.code === 'EMAIL_VERIFICATION_REQUIRED') {
                   Alert.alert(
-                    'Verificación requerida',
+                    t('subscription.verification_required_title'),
                     t('subscription.verify_email_to_continue'),
-                    [{ text: 'Entendido', style: 'cancel' }]
+                    [{ text: t('common.understood'), style: 'cancel' }]
                   );
                   return;
                 }
@@ -2897,9 +2958,15 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
       notIncludes: t('subscription.not_includes'),
       planCurrent: t('subscription.plan_current'),
       priceFree: t('subscription.price_free'),
+      googleFreeMonthBadge: t('subscription.google_free_month_badge'),
+      googleThenPricePerMonth: t('subscription.google_then_price_per_month'),
     }),
     [t]
   );
+  const showAndroidFreeMonthBanner =
+    isAndroid &&
+    planMode === 'cafe' &&
+    Object.keys(androidPlanFreeMonthPromo).length > 0;
   const planLabelKey =
     currentPlanId === 'grand_maison'
       ? 'subscription.plan_name.grand_maison'
@@ -3220,10 +3287,21 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
 
         {planMode === 'cafe' && (
           <>
+            {showAndroidFreeMonthBanner && (
+              <GooglePlayFreeMonthBanner
+                styles={styles}
+                title={t('subscription.google_free_month_banner_title')}
+                body={t('subscription.google_free_month_banner_body')}
+              />
+            )}
             {(!selectedPlan || selectedPlan === 'cafe') && (
               <SubscriptionLegalLinksRow styles={styles} t={t} variant="standalone" />
             )}
             {plansForFreeUsers.map((plan) => {
+              const googleFreeMonth =
+                plan.id === 'bistro' || plan.id === 'trattoria' || plan.id === 'grand_maison'
+                  ? androidPlanFreeMonthPromo[plan.id]
+                  : undefined;
               const isSelected = selectedPlan === plan.id;
               const showInlineSubscribe = isSelected && selectedPlan !== 'cafe';
               return (
@@ -3237,6 +3315,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                         isCurrentPlan={plan.id === currentPlanId}
                         onSelect={handleSelectPlan}
                         labels={planCardLabels}
+                        googleFreeMonth={googleFreeMonth}
                         inSelectionBundle
                       />
                       <View style={styles.planBundleCtaZone}>
@@ -3266,6 +3345,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation, route }) => {
                       isCurrentPlan={plan.id === currentPlanId}
                       onSelect={handleSelectPlan}
                       labels={planCardLabels}
+                      googleFreeMonth={googleFreeMonth}
                     />
                   )}
                 </View>
@@ -3729,6 +3809,47 @@ const styles = StyleSheet.create({
     ...CELLARIUM_TEXT.caption,
     fontSize: 13,
     color: CELLARIUM.muted,
+  },
+  googleFreeMonthBanner: {
+    backgroundColor: CELLARIUM.primary,
+    borderRadius: CELLARIUM_LAYOUT.cardRadius,
+    padding: CELLARIUM_LAYOUT.screenPadding,
+    marginBottom: CELLARIUM_LAYOUT.sectionGap,
+    borderWidth: 1,
+    borderColor: CELLARIUM.primaryDark,
+  },
+  googleFreeMonthBannerTitle: {
+    ...CELLARIUM_TEXT.sectionTitle,
+    fontSize: 18,
+    color: CELLARIUM.textOnDark,
+  },
+  googleFreeMonthBannerBody: {
+    ...CELLARIUM_TEXT.body,
+    fontSize: 14,
+    lineHeight: 20,
+    color: CELLARIUM.textOnDarkMuted,
+    marginTop: 8,
+  },
+  googlePlanPromoBlock: {
+    marginTop: 4,
+  },
+  googlePlanPromoBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: CELLARIUM.primary,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: SUBS_PILL_RADIUS,
+  },
+  googlePlanPromoBadgeText: {
+    color: CELLARIUM.textOnDark,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  googlePlanPromoThenPrice: {
+    ...CELLARIUM_TEXT.caption,
+    fontSize: 14,
+    color: CELLARIUM.muted,
+    marginTop: 6,
   },
   planCardBase: {
     backgroundColor: CELLARIUM.card,

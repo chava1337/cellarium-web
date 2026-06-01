@@ -1,14 +1,15 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { CELLARIUM } from '../theme/cellariumTheme';
+import { useLanguage } from '../contexts/LanguageContext';
 
 export function PendingApprovalMessage() {
+  const { t } = useLanguage();
+
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Pendiente de aprobación</Text>
-      <Text style={styles.subtitle}>
-        Tu cuenta está en revisión. Un administrador debe aprobarte para acceder a esta sección.
-      </Text>
+      <Text style={styles.title}>{t('common.pending_approval_title')}</Text>
+      <Text style={styles.subtitle}>{t('common.pending_approval_body')}</Text>
     </View>
   );
 }

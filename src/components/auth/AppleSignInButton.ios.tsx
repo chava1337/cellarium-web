@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { isAppleAuthAvailable, signInWithAppleAndSupabase } from '../../services/appleAuth';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 type Props = {
   disabled?: boolean;
@@ -10,6 +11,7 @@ type Props = {
 };
 
 export default function AppleSignInButton({ disabled, onBusyChange }: Props) {
+  const { t } = useLanguage();
   const [available, setAvailable] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -38,7 +40,7 @@ export default function AppleSignInButton({ disabled, onBusyChange }: Props) {
           return;
         }
         if ('error' in result && result.error) {
-          Alert.alert('Error', result.error.message);
+          Alert.alert(t('common.error'), result.error.message);
         }
       } finally {
         setBusy(false);
