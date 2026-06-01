@@ -21,9 +21,9 @@ import {
 } from '../constants/googlePlayProducts';
 import { getCellariumAndroidPackageName, validateGooglePurchaseBackend } from './validateGooglePurchase';
 import {
-  resolveFreeMonthOfferForSku,
+  resolveBasePlanPurchaseOfferForSku,
   toSubscriptionOfferInput,
-  type FreeMonthOfferResolution,
+  type BasePlanPurchaseOfferResolution,
 } from '../utils/googlePlaySubscriptionOffers';
 
 let connected = false;
@@ -125,20 +125,22 @@ function waitForPurchaseFromListener(expectedSku: string, signal: AbortSignal): 
 
 function logGooglePlayOffers(
   sku: string,
-  freeMonth: FreeMonthOfferResolution | null,
-  purchaseUsesOffer: boolean
+  resolved: BasePlanPurchaseOfferResolution | null
 ): void {
   console.log('[GooglePlay][Offers]', {
     sku,
-    hasFreeMonthOffer: freeMonth != null,
-    offerTokenPresent: Boolean(freeMonth?.offerToken),
-    offerTags: freeMonth?.offerTags ?? [],
-    recurringPrice: freeMonth?.recurringPriceFormatted ?? null,
-    purchaseUsesOffer,
+    selectedOfferType: resolved?.selectedOfferType ?? null,
+    selectedOfferTokenPresent: Boolean(resolved?.offerToken),
+    purchaseUsesOffer: resolved != null,
+    offerTags: resolved?.offerTags ?? [],
+    recurringPrice: resolved?.recurringPriceFormatted ?? null,
   });
 }
 
-async function purchaseWithSku(sku: string, options?: { allowFreeMonthOffer?: boolean }): Promise<{ purchase: Purchase }> {
+async function purchaseWithSku(
+  sku: string,
+  options?: { attachBasePlanSubscriptionOffer?: boolean }
+): Promise<{ purchase: Purchase }> {
   await ensurePlayBillingConnection();
   const skuList = [...GOOGLE_PLAY_ALL_SUBSCRIPTION_SKUS];
   if (__DEV__) {
@@ -168,19 +170,27 @@ async function purchaseWithSku(sku: string, options?: { allowFreeMonthOffer?: bo
     );
   }
 
-  const allowFreeMonth =
-    options?.allowFreeMonthOffer !== false &&
-    (GOOGLE_PLAY_SUBSCRIPTION_SKUS as readonly string[]).includes(sku);
-  const freeMonth = allowFreeMonth ? resolveFreeMonthOfferForSku(sku, fetchedList) : null;
-  const purchaseUsesOffer = freeMonth != null;
-  logGooglePlayOffers(sku, freeMonth, purchaseUsesOffer);
+  const isBasePlanSku = (GOOGLE_PLAY_SUBSCRIPTION_SKUS as readonly string[]).includes(sku);
+  const attachBasePlanOffer =
+    options?.attachBasePlanSubscriptionOffer !== false && isBasePlanSku;
+  const purchaseOffer = attachBasePlanOffer
+    ? resolveBasePlanPurchaseOfferForSku(sku, fetchedList)
+    : null;
+  logGooglePlayOffers(sku, purchaseOffer);
 
   const googleRequest: {
     skus: string[];
     subscriptionOffers?: ReturnType<typeof toSubscriptionOfferInput>[];
   } = { skus: [sku] };
-  if (freeMonth) {
-    googleRequest.subscriptionOffers = [toSubscriptionOfferInput(sku, freeMonth.offer)];
+  if (purchaseOffer) {
+    googleRequest.subscriptionOffers = [toSubscriptionOfferInput(sku, purchaseOffer.offer)];
+  }
+
+  if (__DEV__) {
+    console.log('[GooglePlay] requestPurchase payload', {
+      type: 'subs',
+      request: { google: googleRequest },
+    });
   }
 
   const ac = new AbortController();
@@ -232,7 +242,7 @@ export async function purchaseGoogleSubscription(plan: GooglePlanUiId): Promise<
 
 export async function purchaseGoogleBranchAddon(slots: 1 | 3): Promise<{ purchase: Purchase }> {
   const sku = slots === 1 ? GOOGLE_PLAY_PRODUCT_IDS.branch1 : GOOGLE_PLAY_PRODUCT_IDS.branch3;
-  return purchaseWithSku(sku, { allowFreeMonthOffer: false });
+  return purchaseWithSku(sku, { attachBasePlanSubscriptionOffer: false });
 }
 
 export async function finishGoogleTransactionIfNeeded(purchase: Purchase): Promise<void> {
